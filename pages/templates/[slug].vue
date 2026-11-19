@@ -93,7 +93,7 @@
         <div>
           <p class="theme-eyebrow">Your starting point</p>
           <h2>Ready to make yours.</h2>
-          <p>Both templates are included on every plan. Start free with two locations. Add your own domain on Growth or Business. Payment features require Business and provider setup.</p>
+          <p>Both templates are included on every plan. Add your own domain on Growth or Business. Payment features require Business and provider setup.</p>
           <NuxtLink to="/pricing" class="theme-text-action">See plans and what’s included <span aria-hidden="true">↗</span></NuxtLink>
         </div>
         <ul><li v-for="item in template.included" :key="item">{{ item }}</li></ul>
@@ -103,8 +103,8 @@
         <div>
           <p class="theme-eyebrow">Keep it current</p>
           <h2>Your next update<br>starts with a conversation.</h2>
-          <p>Use the dashboard, or connect ChatGPT, Claude, or another compatible MCP client to manage your website with the AI assistant you already use.</p>
-          <NuxtLink to="/plugin" class="theme-text-action">Explore AI connections <span aria-hidden="true">↗</span></NuxtLink>
+          <p>Use the dashboard, or connect ChatGPT, Claude, or another compatible AI app to run your business with Blawby.</p>
+          <NuxtLink to="/plugin" class="theme-text-action">Explore AI agent <span aria-hidden="true">↗</span></NuxtLink>
         </div>
         <div class="theme-connect__start">
           <p>Start with {{ template.displayName }}.<br>Make it your own.</p>

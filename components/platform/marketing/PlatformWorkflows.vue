@@ -6,7 +6,7 @@
         <h2>{{ title }}</h2>
         <p class="kc-product-workflows__body">{{ description }}</p>
         <NuxtLink v-if="block.data.cta_label && block.data.cta_url" :to="route(String(block.data.cta_url))" class="kc-product-link">{{ block.data.cta_label }} <span aria-hidden="true">↗</span></NuxtLink>
-        <ul class="kc-product-workflows__clients" aria-label="Compatible assistants"><li>ChatGPT</li><li>Claude</li><li>MCP</li></ul>
+        <ul class="kc-product-workflows__clients" aria-label="Compatible apps"><li>ChatGPT</li><li>Claude</li></ul>
       </div>
       <div>
         <p class="kc-product-workflows__question">{{ block.data.prompt_heading }}</p>

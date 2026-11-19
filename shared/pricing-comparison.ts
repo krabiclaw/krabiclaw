@@ -23,11 +23,11 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'content.custom-pages', label: 'Custom pages', detail: 'Create and edit additional page documents.', entitlement: 'custom_pages' },
   ] },
   { title: 'Manage your business', rows: [
-    { id: 'content.standard', label: 'Dashboard and ChatGPT tools', detail: 'Edit supported resources with authorized tools. Access varies by operation.', included: 'Included' },
-    { id: 'catalog.products', label: 'Menus, offerings, homes and photos', detail: 'Manage products and media for your business type.', included: 'Included' },
+    { id: 'content.standard', label: 'Dashboard and AI agent tools', detail: 'Edit supported resources and run your business with authorized tools in ChatGPT, Claude, and compatible AI apps. Access varies by operation.', included: 'Included' },
+    { id: 'catalog.products', label: 'Menus, offerings, listings and photos', detail: 'Manage products and media for your business type.', included: 'Included' },
     { id: 'media.management', label: 'Image and video library', detail: 'Upload and place supported media on your site; videos need a poster image.', included: 'Included' },
     { id: 'analytics.reports', label: 'Website analytics', detail: 'Read available organization-scoped reports. Connected Google reports require provider setup.', included: 'Included' },
-    { id: 'homes.included', label: 'Homes', detail: `Basic includes ${BASIC_HOMES} live home. Growth and Business bill ${homePrice()}. A home counts while active at an active location and either published on your site or syncing through an enabled Airbnb mapping; drafts are free.`, planValue: planId => isKnownRecurringPlan(planId)
+    { id: 'homes.included', label: 'Homes', detail: `Basic includes ${BASIC_HOMES} live listing (home). Growth and Business bill ${homePrice()}. A listing counts while active at an active location and either published on your site or syncing through an enabled Airbnb mapping; drafts are free.`, planValue: planId => isKnownRecurringPlan(planId)
       ? homePrice()
       : `${BASIC_HOMES} home` },
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
@@ -37,9 +37,9 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'app.ios', label: 'iPhone companion app', detail: 'Use your existing Blawby account with no extra subscription. Team permissions and plan capabilities still apply.', included: 'Included' },
   ] },
   { title: 'Places to stay', rows: [
-    { id: 'stays.listings', label: 'Home listings and photo tours', detail: 'Publish home descriptions, amenities, rooms, photos and house rules on your lodging website.', included: 'Included' },
-    { id: 'stays.calendar', label: 'Nightly rates and stay calendar', detail: 'Set nightly prices, block dates and record stays and offline payments. Team members see the homes assigned to them.', included: 'Included' },
-    { id: 'stays.airbnb', label: 'Airbnb sync', detail: 'Choose listings from your connected Airbnb account to sync stays and availability. Blawby checks your home allowance first and completes setup in the background. Publishing a home on your website is separate.', entitlement: 'channel_sync' },
+    { id: 'stays.listings', label: 'Listings and photo tours', detail: 'Publish listing descriptions, amenities, rooms, photos and house rules on your lodging website.', included: 'Included' },
+    { id: 'stays.calendar', label: 'Nightly rates and stay calendar', detail: 'Set nightly prices, block dates and record stays and offline payments. Team members see the listings assigned to them.', included: 'Included' },
+    { id: 'stays.airbnb', label: 'Airbnb sync', detail: 'Choose listings from your connected Airbnb account to sync stays and availability. Blawby checks your listing allowance first and completes setup in the background. Publishing a listing on your website is separate.', entitlement: 'channel_sync' },
     { id: 'stays.guest-messaging', label: 'Arrival guides and guest messages', detail: 'Save private arrival instructions and guest replies, and schedule messages around booking, check-in and checkout. Delivery needs a guest conversation and a configured channel.', included: 'Included' },
     { id: 'stays.direct-booking', label: 'Direct stay booking with online payment', detail: `Guests book available nights and pay on your website. Requires Stripe setup; ${PAYMENTS_FEE}, billed at the end of each month.`, entitlement: 'payments' },
   ] },
