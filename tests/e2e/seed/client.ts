@@ -39,7 +39,7 @@ export class SeedClient {
 
   async tool<T = Record<string, unknown>>(organizationId: string, name: string, args: Record<string, unknown>): Promise<T> {
     const response = await this.api.post('/api/mcp', {
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-krabiclaw-organization-id': organizationId },
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-blawby-organization-id': organizationId },
       data: { jsonrpc: '2.0', id: randomUUID(), method: 'tools/call', params: { name, arguments: { organization_id: organizationId, ...args } } },
     })
     const text = await response.text()

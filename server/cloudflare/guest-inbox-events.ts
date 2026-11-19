@@ -6,7 +6,7 @@ export interface GuestInboxPublicationEnv {
   GUEST_INBOX_HUBS?: DurableObjectNamespace
 }
 
-export const SCHEDULED_AUTHOR_HEADER = 'x-krabiclaw-scheduled-author'
+export const SCHEDULED_AUTHOR_HEADER = 'x-blawby-scheduled-author'
 
 export function guestInboxTarget(organizationId: string | null, userId: string) {
   return organizationId ?? `account:${userId}`
@@ -21,7 +21,7 @@ export async function scheduleBusinessWake(env: GuestInboxPublicationEnv, organi
   if (!namespace) throw new Error('GUEST_INBOX_HUBS is not bound for the business deadline')
   const hub = namespace.get(namespace.idFromName(organizationId))
   const response = await hub.fetch('https://guest-inbox.internal/wake', {
-    method: 'POST', headers: { 'content-type': 'application/json', 'x-krabiclaw-organization-id': organizationId },
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-blawby-organization-id': organizationId },
     body: JSON.stringify({ kind, due_at: dueAt }),
   })
   if (!response.ok) throw new Error(`Could not schedule ${kind} for ${organizationId}: HTTP ${response.status} ${await response.text()}`)
@@ -69,7 +69,7 @@ export async function publishDashboardInvalidation(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-krabiclaw-organization-id': event.organization_id,
+      'x-blawby-organization-id': event.organization_id,
       // This header stays between the publisher and the private DO binding.
       ...(scheduledAuthorId !== undefined && { [SCHEDULED_AUTHOR_HEADER]: scheduledAuthorId ?? '' }),
     },
