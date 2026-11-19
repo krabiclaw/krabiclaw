@@ -70,7 +70,7 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
   const phone = enteredPhone ? toE164(enteredPhone) : null
   const message = cleanString(body.message, 2000)
   const subject = cleanString(body.subject, 30)
-  // Free-text context the Blawby help form and ChowBot escalations attach.
+  // Free-text context the Blawby contact form and support escalations attach.
   const topic = cleanString(body.topic, 200)
   const source = operator?.source ?? cleanString(body.source, 100)
   const routeContext = cleanString(body.route_context, 500)

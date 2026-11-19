@@ -1647,7 +1647,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
 /**
  * The single protected capacity operation.
  *
- * Every booking claim — guest checkout, dashboard, MCP, ChowBot, WhatsApp —
+ * Every booking claim — guest checkout, dashboard, MCP, WhatsApp —
  * goes through here or through `sessionClaimQuery`. Session identity alone is
  * not the concurrency control: the insert carries its own capacity predicate,
  * so two concurrent claims for the last seat cannot both succeed. D1 applies

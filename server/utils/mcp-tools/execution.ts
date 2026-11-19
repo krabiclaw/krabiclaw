@@ -718,11 +718,6 @@ export function assertDomainSuccess(result: {
 
 export const NOT_HANDLED = Symbol('mcp-executor-not-handled')
 
-// Only toolName/args/site are read by domain handlers —
-// event/tool/rawArguments/normalizedArguments/organizationId exist for the MCP protocol
-// caller (executeMcpToolCall) and are optional so non-MCP callers (ChowBot, see
-// mcp-executor/chowbot-adapter.ts) can build a context without an H3Event or a
-// resolved MCP tool-catalog entry.
 export interface McpExecutorContext {
   event?: H3Event
   toolName: string

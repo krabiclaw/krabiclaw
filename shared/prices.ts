@@ -176,7 +176,7 @@ export function assertNoConflictingPrices(prices: readonly Price[]): void {
 }
 
 // The one price-selection contract. Every surface — public pages, CMS, MCP,
-// ChowBot, WhatsApp, Stripe export — resolves an amount through this and
+// WhatsApp, Stripe export — resolves an amount through this and
 // nowhere else.
 //
 // The rule, in full:
