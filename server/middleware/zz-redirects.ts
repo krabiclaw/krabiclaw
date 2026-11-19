@@ -1,4 +1,4 @@
-import { getSourceLocale } from '~/server/utils/organization-locales'
+import { readPublicSourceLocale } from '~/server/utils/localization'
 import { defineHandler, HTTPError, type H3Event } from 'nitro';
 import {    redirect, setResponseHeader } from 'nitro/h3';
 import { queryFirst } from '~/server/db'
@@ -109,7 +109,7 @@ async function resolveTenantRedirectForRequest(event: H3Event) {
   const url = event.url
   const path = url.pathname === '/' ? '/' : url.pathname.replace(/\/$/, '')
   const firstSegment = path.split('/')[1] || ''
-  const sourceLocale = await getSourceLocale(db, organizationId)
+  const { locale: sourceLocale } = await readPublicSourceLocale(event, db, organizationId)
   const localized = firstSegment && firstSegment !== sourceLocale
     ? await queryFirst<{ locale: string } | null>(db, `
         SELECT locale FROM organization_locales
@@ -120,26 +120,16 @@ async function resolveTenantRedirectForRequest(event: H3Event) {
   const locale = localized?.locale ?? sourceLocale
   const tenantPagePath = localized ? (path.slice(locale.length + 1) || '/') : path
 
-  const exactPage = await queryFirst<{ id: string } | null>(db, `
-    SELECT id FROM content_documents
-     WHERE kind = 'page' AND row_role IN ('root','representation') AND organization_id = ? AND locale = ? AND path = ?
-     LIMIT 1
-  `, [organizationId, locale, tenantPagePath])
-  if (exactPage) return null
-
-  const localeRedirect = await queryFirst<{
-    toPath: string | null
-    statusCode: number | null
-    behavior: string
-  } | null>(db, `
+  return queryFirst<{ toPath: string | null; statusCode: number | null; behavior: string }>(db, `
     SELECT to_path AS toPath, status_code AS statusCode, behavior
       FROM organization_redirects
      WHERE organization_id = ? AND locale = ? AND from_path = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM content_documents
+          WHERE kind = 'page' AND row_role IN ('root','representation') AND organization_id = ? AND locale = ? AND path = ?
+       )
      LIMIT 1
-  `, [organizationId, locale, path])
-  if (localeRedirect) return localeRedirect
-
-  return null
+  `, [organizationId, locale, path, organizationId, locale, tenantPagePath])
 }
 
 export default defineHandler(async (event) => {

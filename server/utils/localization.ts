@@ -1,5 +1,6 @@
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
-import { HTTPError } from 'nitro'
+import { HTTPError, type H3Event } from 'nitro'
+import { oncePerRequest } from '~/server/utils/request-scope'
 import { platformLocale } from '~/shared/platform-locales'
 import { parseSiteProductPath } from '~/utils/product-presentation'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -116,6 +117,10 @@ export async function getPersistedSourceLocale(
   const source = rows.length === 1 ? rows[0]! : null
   requireSourceLocale(organizationId, source?.locale ?? null, source?.status ?? null)
   return { ...source!, is_source: true }
+}
+
+export function readPublicSourceLocale(event: H3Event, db: DbClient, organizationId: string): Promise<OrganizationLocaleRecord> {
+  return oncePerRequest(event, `public-source-locale:${organizationId}`, () => getPersistedSourceLocale(db, organizationId))
 }
 
 export function requireSourceLocale(organizationId: string, locale: string | null, status: string | null): string {
