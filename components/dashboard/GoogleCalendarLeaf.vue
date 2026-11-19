@@ -33,28 +33,25 @@ const entitled = computed(() => dashboard.entitlements.value.calendar_sync === t
 const api = `/api/organizations/${organizationId}/integrations/google-calendar`
 const connection = useIntegrationConnection('google', INTEGRATION_SCOPES['google-calendar'])
 const failure = ref(''), saving = ref(false)
-const isCalendarResponse = (value: unknown): value is {calendar:GoogleCalendarIntegration|null;cleanup_pending:boolean} => {
+const isCalendarResponse = (value: unknown): value is {calendar:GoogleCalendarIntegration|null;cleanup_pending:boolean;coverage:{checking:number;members:number}|null} => {
  if (!isRecord(value) || typeof value.cleanup_pending !== 'boolean') return false
+ if (value.coverage !== null && (!isRecord(value.coverage) || typeof value.coverage.checking !== 'number' || typeof value.coverage.members !== 'number')) return false
  const calendar = value.calendar
  return (calendar === null || (isRecord(calendar) && ['revision','account_id','calendar_id','calendar_name','created_at','updated_at'].every(field => typeof calendar[field] === 'string')
   && ['active','disabled','error'].includes(String(calendar.status)) && (calendar.last_error === null || typeof calendar.last_error === 'string')))
 }
-const { data, error, refresh } = await useAsyncData(`google-calendar:${organizationId}`, () => applicationFetch(api, {validate:isCalendarResponse}))
+const { data, error, refresh } = await useAsyncData(`google-calendar:${organizationId}`, () => applicationFetch(api, {query:{coverage:'1'},validate:isCalendarResponse}))
 const calendar = computed(() => data.value?.calendar ?? null)
 const connected = computed(() => calendar.value && calendar.value.status !== 'disabled')
 watch(error, value => { if(value) failure.value = getErrorMessage(value, 'Could not load Google Calendar.') }, {immediate:true})
-// Who checks their calendar for conflicts: each member turns it on for themselves under My account.
-type MemberRow = { id: string; name: string; self: boolean; scheduling: { calendar_ids: string[]; calendar_status: string } | null }
-const isMembers = (value: unknown): value is { members: MemberRow[] } => isRecord(value) && Array.isArray(value.members) && value.members.every(member => isRecord(member) && typeof member.name === 'string')
-const { data: members, error: membersError } = await useAsyncData(`google-calendar-members:${organizationId}`, () => applicationFetch(`/api/organizations/${organizationId}/members/scheduling`, { validate: isMembers }))
-const checking = computed(() => (members.value?.members ?? []).filter(member => member.scheduling?.calendar_ids.length))
-// A count only when the read answered; a failed read says so rather than counting nobody.
-const conflictRows = computed<EditorNavigationItem[]>(() => [{
+const conflictRows = computed<EditorNavigationItem[]>(() => {
+ const coverage = data.value?.coverage
+ return [{
   id: 'members', icon: 'i-lucide-users',
-  label: members.value ? `${checking.value.length} of ${members.value.members.length} team members checking their calendar` : 'Team members checking their calendar',
-  ...(membersError.value ? { status: 'error' as const, summary: getErrorMessage(membersError.value, 'The team could not be read.') } : {}),
-  ...(membersError.value ? {} : { summary: 'Times someone is busy in Google Calendar can’t be booked with them. Only busy times are read, never what an event is. Each member turns this on under My account → Google Calendar sync.' }),
-}])
+  label: coverage ? `${coverage.checking} of ${coverage.members} team members checking their calendar` : 'Team members checking their calendar',
+  summary: 'Times someone is busy in Google Calendar can’t be booked with them. Only busy times are read, never what an event is. Each member turns this on under My account → Google Calendar sync.',
+ }]
+})
 const bookingRows = computed<EditorNavigationItem[]>(() => [{
   id: 'calendar', label: calendar.value?.calendar_name ?? 'Blawby', icon: 'i-lucide-calendar-check',
   summary: 'Every booking appears here with the guest’s name. It updates when a booking moves and disappears when it’s cancelled.',

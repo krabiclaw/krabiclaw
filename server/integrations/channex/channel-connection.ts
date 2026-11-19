@@ -217,8 +217,8 @@ export class ChannexConnection {
   }
 
   /** The channel, verified to be this organization's Airbnb channel and to map only its properties and rate plans. */
-  private async channel(row: ConnectionRow, channelId: string): Promise<Resource & { properties: string[]; ratePlans: JsonRecord[]; active: boolean }> {
-    const [channel, mappings] = await Promise.all([channexGet(this.env, `/channels/${encodeURIComponent(channelId)}`, 'channel'), this.mappings()])
+  private async channel(row: ConnectionRow, channelId: string, inventory = this.mappings()): Promise<Resource & { properties: string[]; ratePlans: JsonRecord[]; active: boolean }> {
+    const [channel, mappings] = await Promise.all([channexGet(this.env, `/channels/${encodeURIComponent(channelId)}`, 'channel'), inventory])
     const allowedProperties = new Set(mappings.flatMap(mapping => mapping.property_id ? [mapping.property_id] : []))
     const allowedRatePlans = new Set(mappings.flatMap(mapping => mapping.rate_plan_id ? [mapping.rate_plan_id] : []))
     return provided(() => {
@@ -239,13 +239,37 @@ export class ChannexConnection {
    * nothing until a listing is imported and the channel activated, which
    * `channel_active` reports.
    */
-  async status(): Promise<{ status: ConnectionStatus; connected_at: string | null; listing_count: number; channel_active: boolean; disconnect_error: string | null }> {
+  private statusOf(row: ConnectionRow | null, channel: { ratePlans: readonly unknown[]; active: boolean } | null) {
+    return {
+      status: row?.status ?? 'not_connected' as const, connected_at: row?.connected_at ?? null,
+      listing_count: channel?.ratePlans.length ?? 0, channel_active: channel?.active ?? false,
+      disconnect_error: row?.disconnect_error ?? null,
+    }
+  }
+
+  async status() {
     await requireStays(this.db, this.organizationId)
     const row = await this.row()
-    if (!row) return { status: 'not_connected', connected_at: null, listing_count: 0, channel_active: false, disconnect_error: null }
-    if (row.status !== 'connected') return { status: row.status, connected_at: row.connected_at, listing_count: 0, channel_active: false, disconnect_error: row.disconnect_error }
-    const channel = await this.channel(row, row.channel_id!)
-    return { status: row.status, connected_at: row.connected_at, listing_count: channel.ratePlans.length, channel_active: channel.active, disconnect_error: row.disconnect_error }
+    const channel = row?.status === 'connected' ? await this.channel(row, row.channel_id!) : null
+    return this.statusOf(row, channel)
+  }
+
+  async workspace() {
+    await requireStays(this.db, this.organizationId)
+    const row = await this.row()
+    if (!row || row.status !== 'connected') {
+      return { connection: this.statusOf(row, null), inventory: null, inventory_error: null }
+    }
+    if (!row.channel_id) throw new Error('A connected Airbnb account has no channel')
+    const mappings = this.mappings()
+    const channel = await this.channel(row, row.channel_id, mappings)
+    try {
+      const inventory = await this.listingsFor(row.channel_id, mappings)
+      return { connection: this.statusOf(row, channel), inventory, inventory_error: null }
+    } catch (cause) {
+      return { connection: this.statusOf(row, channel), inventory: null,
+        inventory_error: cause instanceof Error ? cause.message : String(cause) }
+    }
   }
 
   private async ensureGroup(row: ConnectionRow): Promise<string> {
@@ -355,9 +379,8 @@ export class ChannexConnection {
     return row as ConnectionRow & { channel_id: string }
   }
 
-  private async accountListings(row: ConnectionRow & { channel_id: string }): Promise<Array<Omit<AirbnbListing, 'import'>>> {
-    await this.channel(row, row.channel_id)
-    const raw = await channexRequest(this.env, `/channels/${encodeURIComponent(row.channel_id)}/action/listings`)
+  private async accountListings(channelId: string): Promise<Array<Omit<AirbnbListing, 'import'>>> {
+    const raw = await channexRequest(this.env, `/channels/${encodeURIComponent(channelId)}/action/listings`)
     return provided(() => {
       const dictionary = object(object(raw.data, 'Airbnb listings').listing_id_dictionary, 'Listing dictionary')
       if (!Array.isArray(dictionary.values)) throw new ChannexDataError('Airbnb did not return a listing collection')
@@ -371,8 +394,14 @@ export class ChannexConnection {
   /** The account's listings and imported homes still enabled after their listing disappeared from Airbnb. */
   async listings(): Promise<{ listings: AirbnbListing[]; missing_listings: Array<{ listing_id: string; product_id: string; internal_name: string }> }> {
     const row = await this.connected()
-    const [account, mappings] = await Promise.all([this.accountListings(row), this.mappings()])
-    const imported = new Map(mappings.filter(mapping => mapping.channel_id === row.channel_id).map(mapping => [mapping.listing_id, mapping]))
+    const mappings = this.mappings()
+    await this.channel(row, row.channel_id, mappings)
+    return this.listingsFor(row.channel_id, mappings)
+  }
+
+  private async listingsFor(channelId: string, inventory: ReturnType<ChannexConnection['mappings']>): Promise<{ listings: AirbnbListing[]; missing_listings: Array<{ listing_id: string; product_id: string; internal_name: string }> }> {
+    const [account, mappings] = await Promise.all([this.accountListings(channelId), inventory])
+    const imported = new Map(mappings.filter(mapping => mapping.channel_id === channelId).map(mapping => [mapping.listing_id, mapping]))
     const listings: AirbnbListing[] = account.map((listing) => {
       const mapping = imported.get(listing.id)
       imported.delete(listing.id)
@@ -392,7 +421,8 @@ export class ChannexConnection {
   }
 
   private async requireListing(row: ConnectionRow & { channel_id: string }, listingId: string): Promise<void> {
-    if (!(await this.accountListings(row)).some(listing => listing.id === listingId)) fail(404, 'LISTING_NOT_FOUND', 'This listing is not on your connected Airbnb account')
+    await this.channel(row, row.channel_id)
+    if (!(await this.accountListings(row.channel_id)).some(listing => listing.id === listingId)) fail(404, 'LISTING_NOT_FOUND', 'This listing is not on your connected Airbnb account')
   }
 
   /** A listing's details, and which of the fields an import needs Airbnb left out. */

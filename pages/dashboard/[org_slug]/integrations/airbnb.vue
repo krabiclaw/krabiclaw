@@ -23,7 +23,7 @@
       items-title="Choose listings to sync"
       items-lead="Checked listings keep their calendar, prices and guest messages in sync with Airbnb and take bookings on your site. Uncheck one any time to stop; it stays here as a free draft."
       :items-loading="listingsPending"
-      :items-error="listingsError ? getErrorMessage(listingsError, 'Could not load your Airbnb listings.') : null"
+      :items-error="listingsError"
       items-empty="Airbnb returned no listings for this account. Check that you connected your hosting account."
       :items-status="itemsStatus"
       :applying="applying || pending"
@@ -141,26 +141,38 @@ const isDetails = (value: unknown): value is AirbnbListingDetails =>
 const isStart = (value: unknown): value is { authorization_url: string } => isRecord(value) && typeof value.authorization_url === 'string'
 const isDisconnect = (value: unknown): value is { disconnected: boolean } => isRecord(value) && typeof value.disconnected === 'boolean'
 
-const { data: status, error: statusError, refresh: refreshStatus } = await useAsyncData(
-  () => `integration-airbnb-status:${integrations.organizationId}`,
-  () => dashboardApi(`${api}/status`, { validate: isStatus }),
+type AirbnbWorkspace = {
+  connection: AirbnbStatus
+  inventory: { listings: AirbnbListing[]; missing_listings: MissingAirbnbListing[] } | null
+  inventory_error: string | null
+  jobs: SyncChange[]
+}
+const isAirbnbWorkspace = (value: unknown): value is AirbnbWorkspace =>
+  isRecord(value) && isStatus(value.connection) && (value.inventory === null || isListings(value.inventory))
+  && (value.inventory_error === null || typeof value.inventory_error === 'string')
+  && Array.isArray(value.jobs) && value.jobs.every(isChange)
+
+const { data: workspace, error: statusError, pending: listingsPending, refresh: refreshWorkspace } = await useAsyncData(
+  () => `integration-airbnb-workspace:${integrations.organizationId}`,
+  () => dashboardApi(`${api}/status`, { query: { view: 'workspace' }, validate: isAirbnbWorkspace }),
 )
+const status = computed(() => workspace.value?.connection)
 const connected = computed(() => status.value?.status === 'connected')
+const listings = computed(() => workspace.value?.inventory?.listings ?? [])
+const missingListings = computed(() => workspace.value?.inventory?.missing_listings ?? [])
+const listingsError = computed(() => workspace.value?.inventory_error ?? null)
 
-const { data: listingsData, error: listingsError, pending: listingsPending, refresh: refreshListings } = await useAsyncData(
-  () => `integration-airbnb-listings:${integrations.organizationId}`,
-  () => dashboardApi(`${api}/listings`, { validate: isListings }),
-  { immediate: connected.value, watch: [connected] },
-)
-const listings = computed(() => connected.value ? listingsData.value?.listings ?? [] : [])
-const missingListings = computed(() => connected.value ? listingsData.value?.missing_listings ?? [] : [])
-
-const { data: changes, error: changesError, refresh: refreshChanges } = await useAsyncData(
+const { data: changes, error: changesError, refresh: refreshChanges, clear: clearChanges } = useAsyncData(
   () => `integration-airbnb-sync:${integrations.organizationId}`,
   () => dashboardApi(`${api}/sync`, { validate: isChanges }),
-  { immediate: connected.value, watch: [connected] },
+  { immediate: false },
 )
-const jobs = computed(() => connected.value ? changes.value?.listings ?? [] : [])
+async function refreshStatus() {
+  await refreshWorkspace()
+  if (statusError.value) throw statusError.value
+  clearChanges()
+}
+const jobs = computed(() => connected.value ? changes.value?.listings ?? workspace.value?.jobs ?? [] : [])
 const jobOf = (listingId: string) => jobs.value.find(job => job.listing_id === listingId)
 const pending = computed(() => jobs.value.some(job => job.status === 'queued' || job.status === 'running'))
 /** Changes that failed and are not yet asked for again. */
@@ -235,7 +247,7 @@ const resolving = ref(new Set<string>())
 /** Where the listings stand, on the checklist's heading: a failed change first, then changes in progress, else how many sync. */
 const itemsStatus = computed<IntegrationLeafItemsStatus | null>(() => {
   // A sync read that failed is the panel's error; a count the page cannot know is not shown.
-  if (!connected.value || listingsPending.value || changesError.value) return null
+  if (!connected.value || listingsPending.value || listingsError.value || changesError.value) return null
   // The failure shown is one Retry can clear when there is one; otherwise the first, without Retry.
   const retryable = [...retryBatch.value.sync, ...retryBatch.value.stop]
   const firstFailed = retryable[0] ?? failed.value[0]
@@ -347,8 +359,8 @@ async function submitChanges(body: SyncRequest) {
   applying.value = true
   failure.value = ''
   try {
-    await dashboardApi(`${api}/sync`, { method: 'POST', body, validate: isChanges })
-    await refreshSync()
+    changes.value = await dashboardApi(`${api}/sync`, { method: 'POST', body, validate: isChanges })
+    follow()
   } catch (cause) {
     failure.value = getErrorMessage(cause, 'The change could not be started.')
   } finally {
@@ -390,7 +402,7 @@ async function retryFailed() {
     const asked = { sync: new Set(batch.sync.map(job => job.listing_id)), stop: new Set(batch.stop.map(job => job.product_id)) }
     const current = { sync: retryBatch.value.sync.filter(job => asked.sync.has(job.listing_id)), stop: retryBatch.value.stop.filter(job => asked.stop.has(job.product_id)) }
     if (!current.sync.length && !current.stop.length) return
-    await dashboardApi(`${api}/sync`, {
+    changes.value = await dashboardApi(`${api}/sync`, {
       method: 'POST',
       body: {
         sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
@@ -398,7 +410,7 @@ async function retryFailed() {
       },
       validate: isChanges,
     })
-    await refreshSync()
+    follow()
   } catch (cause) {
     failure.value = getErrorMessage(cause, 'The change could not be started again.')
   } finally {
@@ -413,12 +425,12 @@ async function refreshSync() {
   if (changesError.value) throw changesError.value
   if (pending.value) return follow()
   // The first listing to sync activates the channel, which the account line reads from status.
-  await Promise.all([refreshStatus(), refreshListings(), integrations.refresh()])
+  await Promise.all([refreshStatus(), integrations.refresh()])
   // What a listing now syncing was given is spent; a listing still waiting keeps what the host typed.
   entered.value = Object.fromEntries(Object.entries(entered.value).filter(([id]) => !listings.value.some(listing => listing.id === id && syncing(listing))))
 }
 
-function follow() {
+function follow(delay = 3000) {
   if (timer) clearTimeout(timer)
   if (!pending.value) return
   timer = setTimeout(async () => {
@@ -428,9 +440,13 @@ function follow() {
     } catch (cause) {
       failure.value = getErrorMessage(cause, 'Could not read the sync’s progress.')
     }
-  }, 3000)
+  }, delay)
 }
-onMounted(follow)
+const realtime = useDashboardInvalidations()
+watch(realtime.event, event => {
+  if (event?.type === 'business.changed' || event?.type === 'stay.changed' || event?.type === 'nights.changed') follow(0)
+})
+onMounted(() => follow())
 onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 
 async function startConnection() {
@@ -454,8 +470,8 @@ async function disconnect() {
     if (result.disconnected) await Promise.all([refreshStatus(), integrations.refresh()])
     else await watchDisconnect()
   } catch (cause) {
-    await refreshStatus()
     failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.')
+    await refreshWorkspace()
   }
 }
 
@@ -471,10 +487,9 @@ async function watchDisconnect() {
       if (!first) await new Promise(resolve => setTimeout(resolve, 2000))
       if (!watching) return
       await refreshStatus()
-      if (statusError.value) throw statusError.value
       if (status.value?.status !== 'disconnecting') break
     }
-    await Promise.all([refreshStatus(), integrations.refresh()])
+    await integrations.refresh()
     if (status.value?.disconnect_error) failure.value = `Disconnecting failed: ${status.value.disconnect_error}`
   } finally {
     watching = false
