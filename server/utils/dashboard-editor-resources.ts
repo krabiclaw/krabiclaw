@@ -1,3 +1,4 @@
+import { presentDashboardOffering } from '~/server/utils/dashboard-offering'
 import { hasPublishedHost } from '~/server/utils/public-provider'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { HTTPError } from 'nitro';
@@ -21,6 +22,7 @@ import { getMediaAsset, listMediaAssets } from '~/server/utils/media-asset-manag
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { parseLocationPayload } from '~/server/utils/location-payload'
+import type { Product } from '~/server/types/products'
 import { getProduct, hydrateProductMedia, listCollections, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
 import { readWebsiteMember, requireWebsiteAccess } from '~/server/utils/tenant-pages-api'
 import { prepareBlogList } from '~/server/utils/content/publishing'
@@ -235,6 +237,14 @@ export async function loadDashboardProduct(
 ) {
   const { env, db, organization } = await requireProductAccess(event, organizationId, productId)
   const product = await getProduct(db, organization.id, productId)
+  return presentDashboardProduct({ env, db, organization }, product, locationId, editor)
+}
+
+export async function presentDashboardProduct(
+  { env, db, organization }: Pick<Awaited<ReturnType<typeof requireProductAccess>>, 'env' | 'db' | 'organization'>,
+  product: Product, locationId: string | null, editor = false,
+) {
+  const organizationId = organization.id
   // The catalog is organization-owned, so being offered here is what makes
   // this location's editor the right place to open it.
   if (locationId !== null && !product.locations.some(entry => entry.location_id === locationId)) {
@@ -252,6 +262,7 @@ export async function loadDashboardProduct(
     editor && canPreview && isOrganizationWideRole(organization.member_role) && ['dish', 'experience', 'service'].includes(product.kind)
       ? editorPreviewToken(env.PREVIEW_SECRET, organizationId) : null,
   ])
+  const offering = editor && product.kind !== 'stay' ? await presentDashboardOffering({ env, db, organization }, hydrated!, locationId) : null
   let previewUrl: string | null = null
   if (product.kind === 'stay' && organization.subdomain && canPreview) {
     const origin = tenantOrganizationOrigin({
@@ -264,5 +275,5 @@ export async function loadDashboardProduct(
     url.searchParams.set(PREVIEW_TOKEN_QUERY, await editorPreviewToken(env.PREVIEW_SECRET, organizationId))
     previewUrl = url.toString()
   }
-  return { success: true as const, product: hydrated!, ...(editor ? { collections, preview_token: previewToken } : {}), public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished }
+  return { success: true as const, product: hydrated!, ...(editor ? { collections, preview_token: previewToken } : {}), public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished, offering }
 }

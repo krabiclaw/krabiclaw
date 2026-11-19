@@ -21,6 +21,7 @@
 </template>
 
 <script lang="ts">
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import type { LocationHoursForm } from '~/lib/components/workspace/location/hours'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 
@@ -158,6 +159,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const isNew = newLocation.isNew
   const dashboardApi = useDashboardApi()
   const nuxtApp = useNuxtApp()
+  const realtime = useDashboardInvalidations()
   const editorError = ref<string | null>(null)
 
 
@@ -326,24 +328,21 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsSaving.value = true
     editorError.value = null
     try {
-      await dashboardApi<{ success: true; location: BusinessLocation }>(
+      const saved = await dashboardApi<{ success: true; location: BusinessLocation }>(
         `/api/dashboard/locations/${requestedLocationId}`,
         { method: 'PATCH', body, validate: isLocationResponse },
       )
       if (locationId.value !== requestedLocationId) return false
-      // Every editor of this location reads one shared resource; refreshing it
-      // refills them all, so the index beside this leaf shows what was saved.
+      locationSettingsResource.value = { location: saved }
+      const cached = realtime.held.begin(`website:${locationSettingsKey.value}`, businessChanged)
+      realtime.held.hold(cached, locationSettingsResource.value, Date.now() + 30_000, 16)
       if (locationConcern) await refreshLocationReads(requestedLocationId)
-      else {
-        await refreshLocationWorkspace()
-        // The location's own index draws the same location from its own read.
-        await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
-      }
+      else await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
       return true
     } catch (error) {
       const failures = [getErrorMessage(error, 'Failed to save location')]
       if ((addressDraft || sharingDraft !== undefined) && locationId.value === requestedLocationId) {
-        try { await refreshLocationReads(requestedLocationId) } catch (readError) { failures.push(getErrorMessage(readError, 'Failed to reload location')) }
+        try { await locationSettings.refresh(); await refreshLocationReads(requestedLocationId) } catch (readError) { failures.push(getErrorMessage(readError, 'Failed to reload location')) }
         await nextTick()
         if (locationId.value === requestedLocationId) {
           if (addressDraft) addressDraftKeys.forEach((field, index) => { detailsForm[field] = addressDraft[index]! })
@@ -360,8 +359,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   async function refreshLocationReads(requestedLocationId: string | null) {
     const orgSlug = String(route.params.org_slug)
     const keys = [`dashboard-location-overview:${organizationId}:${requestedLocationId}`, `dashboard-org-locations:${orgSlug}`, `dashboard-org-locations:${orgSlug}:all`]
-    const reads = await Promise.allSettled([refreshLocationWorkspace(), refreshNuxtData(keys)])
-    const failures = reads.flatMap(result => result.status === 'rejected' ? [getErrorMessage(result.reason, 'Failed to reload location')] : [])
+    await refreshNuxtData(keys)
+    const failures: string[] = []
     if (locationSettingsError.value) failures.push(getErrorMessage(locationSettingsError.value, 'Failed to reload location'))
     for (const cacheKey of keys) {
       const cacheError = nuxtApp.payload._errors[cacheKey]
@@ -413,7 +412,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   }
 
   const locationSettingsKey = computed(() => `dashboard-location-settings-${organizationId}-${isNew.value ? NEW_LOCATION_SLUG : locationId.value}`)
-  const locationSettings = useAsyncData<LocationSettingsResource | null>(locationSettingsKey, async () => {
+  const locationSettings = useWebsiteIndexData<LocationSettingsResource | null>(locationSettingsKey, async () => {
     if (isNew.value) return null
     const requestedLocationId = locationId.value
     if (!requestedLocationId) throw createError({ statusCode: 400, statusMessage: 'Location is required' })
@@ -422,21 +421,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       { validate: isLocationResponse },
     )
     return { location: locationResponse }
-  }, {
-    watch: [locationId],
   })
-  const {
-    data: locationSettingsResource,
-    error: locationSettingsError,
-    refresh: refreshLocationWorkspace,
-  } = locationSettings
-  // A newly opened concern reads the current owner, even when its shared Nuxt
-  // resource succeeded in a previous leaf. Defer joins an initial read already
-  // in flight; both composables were created before awaiting so Nuxt disposes
-  // their subscriptions with this editor.
-  await (import.meta.client && !nuxtApp.isHydrating && key !== null && !isNew.value
-    ? locationSettings.refresh({ dedupe: 'defer' })
-    : locationSettings)
+  const { data: locationSettingsResource, error: locationSettingsError } = locationSettings
+  await locationSettings
 
   // The location is what the request answered; only the drafts are this
   // editor's own, seeded from each answer.

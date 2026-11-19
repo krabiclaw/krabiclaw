@@ -95,6 +95,24 @@ export function useProductCatalog(organizationId: string, locationId: Ref<string
     }))
   }
 
+  function applyProduct(product: CatalogProduct) {
+    updateReads(current => {
+      const previous = current.products.find(row => row.id === product.id)
+      if (!previous) return current
+      return {
+        collections: current.collections.map(collection => {
+          const delta = Number(product.collections.some(row => row.collection_id === collection.id))
+            - Number(previous.collections.some(row => row.collection_id === collection.id))
+          return { ...collection, product_count: collection.product_count + delta,
+            dish_count: collection.dish_count
+              + Number(product.kind === 'dish' && product.collections.some(row => row.collection_id === collection.id))
+              - Number(previous.kind === 'dish' && previous.collections.some(row => row.collection_id === collection.id)) }
+        }),
+        products: current.products.map(row => row.id === product.id ? product : row),
+      }
+    })
+  }
+
   function applyCollections(replacements: readonly Collection[], remove?: string) {
     updateReads(current => {
       const collections = new Map(current.collections.map(row => [row.id, row]))
@@ -109,5 +127,5 @@ export function useProductCatalog(organizationId: string, locationId: Ref<string
     })
   }
 
-  return { load, applyCollections, collections, products, pending, error, refresh, collectionProductIds, setCollectionProducts }
+  return { load, applyProduct, applyCollections, collections, products, pending, error, refresh, collectionProductIds, setCollectionProducts }
 }

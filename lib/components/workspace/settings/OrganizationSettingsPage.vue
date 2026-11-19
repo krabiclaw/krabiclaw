@@ -485,19 +485,22 @@ export interface OrganizationSettingsForm {
 export type OrganizationStatus = 'active' | 'inactive' | 'suspended'
 
 export interface OrganizationSettingsResponse {
+  id: string
+  subdomain: string | null
+  timezone: string
   theme?: string
-  public_url?: string | null
+  public_url: string | null
   status: OrganizationStatus
-  name?: string | null
+  name: string
   social_card_refresh: OrganizationSocialCardRefresh | null
   brand_description?: string | null
   announcement: { headline: string; description: string | null; cta_label: string | null; cta_url: string | null; dismissible: boolean; enabled: boolean; format?: 'modal' | 'banner' | null } | null
-  media?: Array<{ asset_id: string; slot: string; public_url?: string | null; presentation?: LogoPresentation | null }>
+  media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null; presentation?: LogoPresentation | null }>
   contact_email?: string | null
   palette: SitePalette | null
   palette_source: 'custom' | 'default' | null
   font_preset?: OrganizationFontPreset
-  default_currency?: string | null
+  default_currency: string
   seo_title: string | null
   seo_description: string | null
   canonical_url: string | null
@@ -561,7 +564,8 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette } from '~/shared/site-palette'
 import { getErrorMessage } from '~/utils/errors'
-import { ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
+import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
 import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
 import { isTenantPageListResponse, websiteSettingsKey, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import { getVerticalLabel } from '~/utils/vertical-copy'
@@ -573,6 +577,7 @@ const dashboardApi = useDashboardApi()
 const route = useRoute()
 const editorError = ref<string | null>(null)
 const dashboard = useDashboardOrganization()
+const realtime = useDashboardInvalidations()
 const organizationDashboardPath = computed(() => `/dashboard/${String(route.params.org_slug)}`)
 const brandPath = computed(() => `${organizationDashboardPath.value}/website/brand`)
 const preferencesPath = computed(() => `${organizationDashboardPath.value}/website/preferences`)
@@ -614,8 +619,16 @@ interface SettingsPageResource {
 
 const isSettingsResponse = (value: unknown): value is { success: boolean; settings: OrganizationSettingsResponse } =>
   isRecord(value) && typeof value.success === 'boolean' && isRecord(value.settings)
+  && typeof value.settings.id === 'string' && typeof value.settings.name === 'string'
+  && typeof value.settings.timezone === 'string' && typeof value.settings.default_currency === 'string'
+  && (value.settings.subdomain === null || typeof value.settings.subdomain === 'string')
+  && (value.settings.public_url === null || typeof value.settings.public_url === 'string')
+  && Array.isArray(value.settings.media) && value.settings.media.every(item => isRecord(item)
+    && typeof item.asset_id === 'string' && typeof item.slot === 'string'
+    && (item.public_url === null || typeof item.public_url === 'string')
+    && (item.thumbnail_url === null || typeof item.thumbnail_url === 'string')
+    && (item.kind === null || typeof item.kind === 'string'))
   && (value.settings.social_card_refresh === null || isOrganizationSocialCardRefresh(value.settings.social_card_refresh))
-  && (value.settings.name === undefined || value.settings.name === null || typeof value.settings.name === 'string')
   && (value.settings.announcement === null || (isRecord(value.settings.announcement) && typeof value.settings.announcement.headline === 'string'))
   && (value.settings.font_preset === undefined || isOrganizationFontPreset(value.settings.font_preset))
   && (value.settings.palette === null || isRecord(value.settings.palette))
@@ -968,9 +981,22 @@ async function patchSettings(body: Record<string, unknown>) {
   const response = await dashboardApi<{ success: boolean; settings: OrganizationSettingsResponse }>('/api/dashboard/settings', { method: 'PATCH', body, validate: isSettingsResponse })
   // Website and Brand read the same settings resource; writing the response
   // through it keeps the other list's rows on the saved values.
-  if (settingsResource.value) settingsResource.value = { ...settingsResource.value, settings: response.settings }
-  await dashboard.refresh()
-
+  if (settingsResource.value) {
+    settingsResource.value = { ...settingsResource.value, settings: response.settings }
+    const held = realtime.held.begin(`website:${settingsResourceKey.value}`, businessChanged)
+    realtime.held.hold(held, settingsResource.value, Date.now() + 30_000, 16)
+  }
+  const current = dashboard.state.value
+  const saved = response.settings
+  if (current?.organization.id === saved.id) {
+    useNuxtData<NonNullable<typeof current>>(dashboard.contextKey.value).data.value = { ...current, organization: {
+      ...current.organization, name: saved.name, status: saved.status,
+      default_currency: saved.default_currency, timezone: saved.timezone,
+      subdomain: saved.subdomain, public_url: saved.public_url,
+      media: saved.media.filter(item => LOGO_SLOTS.includes(item.slot as typeof LOGO_SLOTS[number]))
+        .map(item => ({ ...item, presentation: item.presentation ?? ORIGINAL_LOGO_PRESENTATION })),
+    }, workspaces: current.workspaces.map(workspace => workspace.id === saved.id ? { ...workspace, name: saved.name } : workspace) }
+  }
 }
 async function refreshSettings() {
   await refreshSettingsResource()

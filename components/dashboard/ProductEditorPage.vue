@@ -448,6 +448,7 @@ import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/ch
 import { ApiClientError } from '~/utils/api-clients'
 import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
 import { isStayArrivalGuide, stayCheckInWindow } from '~/shared/stay-arrival'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
@@ -478,6 +479,7 @@ const { locale } = useI18n()
 const { formatExactDateTime } = useHumanTime()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
+const realtime = useDashboardInvalidations()
 const productId = computed(() => String(route.params.product_id ?? ''))
 // Catalog's explicit scope. No location is the whole organization: its own
 // prices and settings, not whichever location was visited last.
@@ -502,8 +504,7 @@ function sectionPath(section: string) {
 }
 
 const organizationId = useDashboardOrganizationId()
-const { refresh: refreshCatalog, collectionProductIds, setCollectionProducts } = useProductCatalog(organizationId, ref(null), false)
-const catalogViews = ['all', 'stay'].map(kind => useNuxtData<{ screen: CatalogScreen }>(`dashboard-catalog:${organizationId}:${kind}`).data)
+const { refresh: refreshCatalog, applyProduct, collectionProductIds, setCollectionProducts } = useProductCatalog(organizationId, ref(null), false)
 const dashboard = useDashboardOrganization()
 // The context mints a site-wide preview token. Assigned Product access alone
 // does not authorize unpublished content elsewhere in the organization.
@@ -593,8 +594,9 @@ watch(editorKey, () => {
 
 const isOne = (value: unknown): value is { success: true, product: Product } =>
   isRecord(value) && value.success === true && isRecord(value.product) && typeof value.product.id === 'string' && Boolean(value.product.id.trim())
-const isProductRead = (value: unknown): value is { success: true; product: Product; collections: Collection[]; preview_token: string | null; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null } =>
-  isOne(value) && 'collections' in value && Array.isArray(value.collections)
+const isProductRead = (value: unknown): value is { success: true; product: Product; collections: Collection[]; preview_token: string | null; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null; offering: CatalogScreen | null } =>
+  isOne(value) && 'offering' in value && (value.offering === null || isRecord(value.offering) && Array.isArray(value.offering.rows))
+  && 'collections' in value && Array.isArray(value.collections)
   && 'preview_token' in value && (value.preview_token === null || typeof value.preview_token === 'string')
   && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string')
   && 'preview_url' in value && (value.preview_url === null || typeof value.preview_url === 'string')
@@ -606,25 +608,19 @@ const isMutation = (value: unknown): value is { success: true; product: ProductM
 
 // The product in this scope, read before the level renders. Keyed by location
 // and product, so a scope change reads that location's prices and settings.
-type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; previewUrl: string | null; publicUrl: string | null; publicUrls: Record<string, string>; hostProfilePublished: boolean | null } | null
+type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; previewUrl: string | null; publicUrl: string | null; publicUrls: Record<string, string>; hostProfilePublished: boolean | null; offering: CatalogScreen | null } | null
 const productReadKey = computed(() => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`)
-const { data: loaded, error: loadFailure, refresh } = await useAsyncData<ProductEditorRead>(
+const { data: loaded, error: loadFailure, refresh } = await useWebsiteIndexData<ProductEditorRead>(
   productReadKey,
-  async (_app, { signal }): Promise<ProductEditorRead> => {
+  async (signal): Promise<ProductEditorRead> => {
     if (isNew.value) return null
     const id = locationId.value
     const path = `/api/editor/organizations/${organizationId}${id ? `/locations/${encodeURIComponent(id)}` : ''}/products/${encodeURIComponent(productId.value)}`
     const response = await dashboardApi(path, { validate: isProductRead, signal, query: { editor: '1' } })
     if (locationScope.value === 'online' && !response.product.booking?.held_online) throw createError({ statusCode: 404, statusMessage: 'This product is not held online' })
-    return { collections: response.collections, product: response.product, previewToken: response.preview_token, previewUrl: response.preview_url, publicUrl: response.public_url, publicUrls: response.public_urls, hostProfilePublished: response.host_profile_published }
+    return { collections: response.collections, product: response.product, previewToken: response.preview_token, previewUrl: response.preview_url, publicUrl: response.public_url, publicUrls: response.public_urls, hostProfilePublished: response.host_profile_published, offering: response.offering }
   },
-  {
-    getCachedData(cacheKey, nuxtApp, ctx) {
-      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-      if (!nuxtApp.isHydrating) return undefined
-      return nuxtApp.payload.data[cacheKey] as ProductEditorRead | undefined
-    },
-  },
+
 )
 
 const product = computed(() => loaded.value?.product ?? null)
@@ -799,9 +795,29 @@ const stayConfigError = computed(() => {
 })
 const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFailure.value)
   ? getErrorMessage(loadFailure.value, `Failed to load this ${itemLabel.value.toLowerCase()}`)
-  : offeringScreenError.value ? getErrorMessage(offeringScreenError.value, 'The offering editor could not be loaded') : stayConfigError.value))
+  : stayConfigError.value))
 
 const editVersion = ref<string | null>(null)
+
+async function patchProduct(body: Record<string, unknown>, idempotencyKey?: string) {
+  const current = loaded.value
+  if (current?.product.kind === 'stay') {
+    const { product: saved } = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
+      method: 'PATCH', body, ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}), validate: isMutation,
+    })
+    const { image, gallery, media, social_image } = current.product
+    return { success: true as const, product: { ...saved, image, gallery, media, social_image },
+      collections: current.collections, preview_token: current.previewToken, preview_url: current.previewUrl,
+      public_url: current.publicUrl, public_urls: current.publicUrls, host_profile_published: current.hostProfilePublished, offering: current.offering }
+  }
+  return dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
+    method: 'PATCH', body, query: { editor: '1', location_id: locationId.value ?? undefined },
+    ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
+    validate: (value): value is { success: true; product: ProductMutation;
+      collections: Collection[]; preview_token: string | null; preview_url: string | null; public_url: string | null;
+      public_urls: Record<string, string>; host_profile_published: boolean | null; offering: CatalogScreen | null } => isProductRead(value) && isMutation(value),
+  })
+}
 
 /**
  * A writer's re-read. A save or a photo change has just made this row different
@@ -813,8 +829,7 @@ async function reload() {
   await refresh()
   if (loadFailure.value) throw loadFailure.value
   if (product.value) editVersion.value = product.value.updated_at
-  await Promise.all([refreshCatalog(), refreshOfferingScreen(), ...(wasStay !== (product.value?.kind === 'stay') ? [dashboard.refresh()] : [])])
-  if (offeringScreenError.value) throw offeringScreenError.value
+  await Promise.all([refreshCatalog(), ...(wasStay !== (product.value?.kind === 'stay') ? [dashboard.refresh()] : [])])
 }
 
 // ── The weekly schedule ─────────────────────────────────
@@ -1223,15 +1238,7 @@ const additionalDetails = computed(() => {
   ]
 })
 
-const { data: offeringScreen, error: offeringScreenError, refresh: refreshOfferingScreen } = await useAsyncData(
-  () => `offering-screen:${organizationId}:${locationId.value ?? ''}:${productId.value}`,
-  () => product.value && product.value.kind !== 'stay'
-    ? dashboardApi('/api/dashboard/offering', {
-        query: { product_id: productId.value, location_id: locationId.value ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) },
-        validate: (value): value is CatalogScreen => isRecord(value) && typeof value.title === 'string' && Array.isArray(value.rows),
-      })
-    : Promise.resolve(null),
-)
+const offeringScreen = computed(() => loaded.value?.offering ?? null)
 
 const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   if (isNew.value) return []
@@ -1668,7 +1675,7 @@ async function commit(concern?: ProductConcern) {
   saving.value = true
   saveError.value = null
   try {
-    let savedStay: ProductMutation | undefined
+    let savedEditor: Awaited<ReturnType<typeof patchProduct>> | undefined
     if (isNew.value) {
       // A service is created with the page that shows it, in one write: the
       // name is the page's first title, the server gives it a free
@@ -1738,10 +1745,9 @@ async function commit(concern?: ProductConcern) {
     if (concern === 'publication-visibility') {
       await savePublication()
     } else if (concern === 'publication-availability') {
-      await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: { active: form.active }, validate: isMutation })
+      savedEditor = await patchProduct({ active: form.active })
     } else if (concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time' || isSafetyConcern(concern)) {
-      const { product: saved } = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: payload(concern), validate: isMutation })
-      if (saved.kind === 'stay') savedStay = saved
+      savedEditor = await patchProduct(payload(concern))
     } else if (concern !== undefined) {
       await saveBooking(concern)
     } else if (editorKey.value === 'locations') {
@@ -1752,12 +1758,8 @@ async function commit(concern?: ProductConcern) {
         intent, body: cloneFnJSON({ ...payload(), updated_at: editVersion.value! }), key: crypto.randomUUID(),
       }
       if (attempt) stayDefaultAttempt.value = attempt
-      const { product: saved } = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
-        method: 'PATCH', body: attempt?.body ?? payload(), validate: isMutation,
-        ...(attempt ? { headers: { 'Idempotency-Key': attempt.key } } : {}),
-      })
+      savedEditor = await patchProduct(attempt?.body ?? payload(), attempt?.key)
       if (attempt) stayDefaultAttempt.value = null
-      if (saved.kind === 'stay' && ['internal-name', 'description', 'property-type', 'rooms', 'amenities', 'cancellation', 'availability', 'guests'].includes(editorKey.value ?? '')) savedStay = saved
     }
     if (removesOnlineScope) {
       const result = await navigateTo({ path: route.path, query: { ...route.query, location_id: undefined }, hash: route.hash }, { replace: true })
@@ -1767,22 +1769,23 @@ async function commit(concern?: ProductConcern) {
         closeTo.value = router.resolve({ path: destination.path, query: { ...destination.query, location_id: undefined }, hash: destination.hash }).fullPath
       }
     }
-    if (savedStay) {
-      const current = loaded.value
-      if (!current?.product.stay || !savedStay.stay || savedStay.id !== current.product.id) {
-        throw new Error('The saved listing does not match this editor.')
+    if (savedEditor) {
+      const saved = savedEditor.product
+      loaded.value = { product: saved, collections: savedEditor.collections, previewToken: savedEditor.preview_token,
+        previewUrl: savedEditor.preview_url, publicUrl: savedEditor.public_url,
+        publicUrls: savedEditor.public_urls, hostProfilePublished: savedEditor.host_profile_published, offering: savedEditor.offering }
+      applyProduct(saved)
+      editVersion.value = saved.updated_at
+      const held = realtime.held.begin(`website:${productReadKey.value}`, businessChanged)
+      realtime.held.hold(held, loaded.value, Date.now() + 30_000, 16)
+      if (saved.kind === 'stay') {
+        for (const kind of ['all', 'stay']) {
+          const view = useNuxtData<{ screen: CatalogScreen }>(`dashboard-catalog:${organizationId}:${kind}`).data
+          if (view.value) view.value = { ...view.value, screen: { ...view.value.screen,
+            rows: view.value.screen.rows.map(row => row.id === saved.id ? { ...row, label: saved.stay!.internal_name } : row) } }
+        }
       }
-      const { image, gallery, media, social_image } = current.product
-      loaded.value = { ...current, product: { ...savedStay, image, gallery, media, social_image } }
-      editVersion.value = savedStay.updated_at
-      const { id, stay: { internal_name: label } } = savedStay
-      for (const view of catalogViews) {
-        const catalog = view.value
-        if (catalog) view.value = { ...catalog, screen: { ...catalog.screen, rows: catalog.screen.rows.map(row => row.id === id ? { ...row, label } : row) } }
-      }
-    } else {
-      await reload()
-    }
+    } else await reload()
     if (product.value) loadForm(product.value)
     if (preserveMainRules && submitted) {
       restoreDetails(mainHouseRuleKeys)

@@ -11,7 +11,7 @@ import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, groupMediaPlacements, mediaPlacementsQuery, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
-import { isStayBedAllocationConflict, prepareArrangeProductPhotos, prepareStayHomeAccessibility, prepareStayPhotoRooms, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
+import { isStayBedAllocationConflict, prepareArrangeProductPhotos, prepareStayHomeAccessibility, prepareStayPhotoRooms, readProductPhotos, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
@@ -295,24 +295,35 @@ function productHydrationQueries(organizationId: string | { sql: string }, selec
   ]
 }
 
-async function hydrate(db: DbClient, organizationId: string, products: Product[]): Promise<Product[]> {
-  if (!products.length) return products
-  const stayIds = products.filter(product => product.kind === 'stay').map(product => product.id)
-  const [rows, photoRooms, accessibility] = await Promise.all([
-    executeBatch(db, productHydrationQueries(organizationId, {
-      query: 'SELECT value FROM json_each(?)', params: [d1JsonArray(products.map(product => product.id))],
-    }), { operation: 'Hydrate products' }),
-    readStayPhotoRooms(db, organizationId, stayIds),
-    readStayHomeAccessibility(db, organizationId, stayIds),
-  ])
-  return hydrateProductRows(products, rows, photoRooms, accessibility)
+function prepareProductRelations(organization: string | { sql: string }, selection: BatchQuery) {
+  const hydration = productHydrationQueries(organization, selection)
+  const stayIds = { query: `SELECT p.id FROM products p WHERE p.kind = 'stay' AND p.id IN (${selection.query})`, params: selection.params }
+  const rooms = prepareStayPhotoRooms(organization, stayIds)
+  const accessibility = prepareStayHomeAccessibility(organization, stayIds)
+  const roomEnd = hydration.length + rooms.queries.length
+  return {
+    queries: [...hydration, ...rooms.queries, ...accessibility.queries],
+    read(products: Product[], rows: D1Result[]) {
+      const stays = products.filter(product => product.kind === 'stay').map(product => product.id)
+      return hydrateProductRows(products, rows, rooms.read(rows.slice(hydration.length, roomEnd), stays),
+        accessibility.read(rows.slice(roomEnd), stays))
+    },
+  }
+}
+
+function prepareProductRead(organizationId: string, records: BatchQuery) {
+  const relations = prepareProductRelations(organizationId, { query: `SELECT id FROM (${records.query})`, params: records.params })
+  return {
+    queries: [records, ...relations.queries],
+    read: ([products, ...rows]: D1Result[]) => relations.read((products!.results as Row[]).map(mapProductRow), rows),
+  }
 }
 
 function hydrateProductRows(
   products: Product[],
   batched: Awaited<ReturnType<typeof executeBatch>>,
-  photoRooms: Awaited<ReturnType<typeof readStayPhotoRooms>>,
-  accessibility: Awaited<ReturnType<typeof readStayHomeAccessibility>>,
+  photoRooms: ReturnType<ReturnType<typeof prepareStayPhotoRooms>['read']>,
+  accessibility: ReturnType<ReturnType<typeof prepareStayHomeAccessibility>['read']>,
 ) {
   const byId = new Map(products.map(product => [product.id, product]))
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
@@ -425,10 +436,11 @@ export async function hydrateProductMedia(db: DbClient, organizationId: string, 
 // ---------------------------------------------------------------------------
 
 export async function getProduct(db: DbClient, organizationId: string, productId: string): Promise<Product> {
-  const row = await queryFirst<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.id = ?`, [organizationId, productId])
-  if (!row) notFound()
-  const [product] = await hydrate(db, organizationId, [mapProductRow(row)])
-  return product!
+  const plan = prepareProductRead(organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.id = ?`, params: [organizationId, productId],
+  })
+  const [product] = plan.read(await executeBatch(db, plan.queries, { operation: 'Read product' }))
+  return product ?? notFound()
 }
 
 /** The saved routes a guest may open, shared by MCP and both dashboard editor scopes. */
@@ -461,8 +473,7 @@ export async function productPublicPresentation(db: DbClient, env: CloudflareEnv
 }
 
 export async function listProducts(db: DbClient, organizationId: string): Promise<Product[]> {
-  const rows = await queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? ORDER BY p.name, p.id`, [organizationId])
-  return hydrate(db, organizationId, rows.map(mapProductRow))
+  return listOrganizationProducts(db, { organizationId })
 }
 
 /**
@@ -554,15 +565,12 @@ export function preparePublishedOfferingGrid(organization: { sql: string }, pred
   const { params } = selection
   const idQuery = (condition?: string) => ({ query: `SELECT p.id ${selected}${condition ? ` AND (${condition})` : ''}`, params })
   const ids = idQuery()
-  const stays = idQuery("p.kind = 'stay'")
-  const hydration = productHydrationQueries(organization, ids)
-  const rooms = prepareStayPhotoRooms(organization, stays)
-  const accessibility = prepareStayHomeAccessibility(organization, stays)
+  const relations = prepareProductRelations(organization, ids)
   return {
     ids,
     queries: [
       { query: `SELECT ${PRODUCT_COLUMNS} ${selected} ORDER BY p.name, p.id`, params },
-      ...hydration, ...rooms.queries, ...accessibility.queries,
+      ...relations.queries,
       bookingScheduleScopesQuery(organization, idQuery("p.order_url IS NULL OR p.order_url = ''")),
       checkoutSellerQuery({
         query: `CASE WHEN EXISTS (SELECT 1 ${selected}
@@ -573,11 +581,7 @@ export function preparePublishedOfferingGrid(organization: { sql: string }, pred
     ],
     async read([products, ...rows]: D1Result[], db: DbClient, env: CloudflareEnv, organizationId: string, currency: CurrencyCode | null) {
       const records = (products!.results as Row[]).map(mapProductRow)
-      const stayIds = records.filter(product => product.kind === 'stay').map(product => product.id)
-      const roomEnd = hydration.length + rooms.queries.length
-      const offers = hydrateProductRows(records, rows,
-        rooms.read(rows.slice(hydration.length, roomEnd), stayIds),
-        accessibility.read(rows.slice(roomEnd), stayIds))
+      const offers = relations.read(records, rows.slice(0, relations.queries.length))
       const scheduledScopes = scheduleScopesFromRows(rows.at(-2)!.results as BookingScheduleScopeRow[])
       let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
       return publicProductWindow(db, organizationId, offers, undefined, env,
@@ -638,14 +642,7 @@ export async function listOrganizationProducts(db: DbClient, input: Organization
   const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
   const window = requireReadiness ? undefined : input.window
   const { selection, params } = organizationProductSelection(input)
-  const [rows, counts] = await Promise.all([
-    queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
-    input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
-  ])
-  const products = await hydrate(db, input.organizationId, rows.map(mapProductRow))
-  if (!input.withCounts) return requireReadiness ? publicProductWindow(db, input.organizationId, products, input.window, input.env, input.paymentSetup, input.bookableOnly) : products
-  const matching = requireReadiness ? await publicProductWindow(db, input.organizationId, products, undefined, input.env, input.paymentSetup, input.bookableOnly) : products
-  return { products: requireReadiness && input.window ? matching.slice(input.window.offset, input.window.offset + input.window.limit + 1) : matching, counts: productListCounts(counts ?? matching) }
+  return readProductList(db, input, selection, params, requireReadiness, window)
 }
 
 /**
@@ -672,11 +669,20 @@ export async function listLocationProducts(db: DbClient, input: ProductListInput
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
     ...(input.assignedUserId ? [input.assignedUserId] : [])]
-  const [rows, counts] = await Promise.all([
-    queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
-    input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
-  ])
-  const products = await hydrate(db, input.organizationId, rows.map(mapProductRow))
+  return readProductList(db, input, selection, params, requireReadiness, window)
+}
+
+async function readProductList(db: DbClient, input: ProductListInput & { withCounts?: boolean }, selection: string, params: unknown[], requireReadiness: boolean, window: ProductListInput['window']): Promise<Product[] | ProductListResult> {
+  const plan = prepareProductRead(input.organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`,
+    params: [...params, ...(window ? [window.limit + 1, window.offset] : [])],
+  })
+  const count = input.withCounts && window
+    ? { query: `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params } : null
+  const rows = await executeBatch(db, [...plan.queries, ...(count ? [count] : [])], { operation: 'Read product list' })
+  const products = plan.read(rows.slice(0, plan.queries.length))
+  const counts = count ? rows.at(-1)!.results as { kind: ProductKind; count: number }[] : undefined
+
   if (!input.withCounts) return requireReadiness ? publicProductWindow(db, input.organizationId, products, input.window, input.env, input.paymentSetup, input.bookableOnly) : products
   const matching = requireReadiness ? await publicProductWindow(db, input.organizationId, products, undefined, input.env, input.paymentSetup, input.bookableOnly) : products
   return { products: requireReadiness && input.window ? matching.slice(input.window.offset, input.window.offset + input.window.limit + 1) : matching, counts: productListCounts(counts ?? matching) }
@@ -703,13 +709,13 @@ export async function summarizeLocationProducts(db: DbClient, input: {
 export async function listCollectionProducts(db: DbClient, input: {
   organizationId: string; collectionId: string
 }): Promise<Product[]> {
-  const rows = await queryAll<Row>(db, `
-    SELECT ${PRODUCT_COLUMNS} FROM products p
-    JOIN collection_products cp ON cp.product_id = p.id AND cp.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND cp.collection_id = ?
-    ORDER BY cp.sort_order, p.id
-  `, [input.organizationId, input.collectionId])
-  return hydrate(db, input.organizationId, rows.map(mapProductRow))
+  const plan = prepareProductRead(input.organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p
+      JOIN collection_products cp ON cp.product_id = p.id AND cp.organization_id = p.organization_id
+      WHERE p.organization_id = ? AND cp.collection_id = ? ORDER BY cp.sort_order, p.id`,
+    params: [input.organizationId, input.collectionId],
+  })
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read collection products' }))
 }
 
 /**
@@ -726,11 +732,15 @@ export async function requireOrganizationProduct(db: DbClient, input: {
 export function getProductBySlug(db: DbClient, organizationId: string, slug: string): Promise<Product | null>
 export function getProductBySlug(db: DbClient, organizationId: string, slug: string, stay: 'kind-only'): Promise<Product | { kind: 'stay' } | null>
 export async function getProductBySlug(db: DbClient, organizationId: string, slug: string, stay?: 'kind-only'): Promise<Product | { kind: 'stay' } | null> {
-  const row = await queryFirst<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.slug = ?`, [organizationId, slug])
-  if (!row) return null
-  if (stay === 'kind-only' && row.kind === 'stay') return { kind: 'stay' }
-  const [product] = await hydrate(db, organizationId, [mapProductRow(row)])
-  return product!
+  if (stay === 'kind-only') {
+    const kind = await queryFirst<{ kind: ProductKind }>(db, 'SELECT kind FROM products WHERE organization_id = ? AND slug = ?', [organizationId, slug])
+    if (!kind) return null
+    if (kind.kind === 'stay') return { kind: 'stay' }
+  }
+  const plan = prepareProductRead(organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.slug = ?`, params: [organizationId, slug],
+  })
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read product by slug' }))[0] ?? null
 }
 
 /**
@@ -1696,9 +1706,12 @@ export async function planProductCreateWrites(db: DbClient, input: {
 }
 
 async function readProductBatch(db: DbClient, organizationId: string, ids: string[]): Promise<Product[]> {
-  const rows = await queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id=? AND p.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonArray(ids)])
-  if (rows.length !== ids.length) throw new HTTPError({ statusCode: 410, statusMessage: 'A product from this completed catalog operation has been removed' })
-  const products = await hydrate(db, organizationId, rows.map(mapProductRow))
+  const plan = prepareProductRead(organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id=? AND p.id IN (SELECT value FROM json_each(?))`,
+    params: [organizationId, d1JsonArray(ids)],
+  })
+  const products = plan.read(await executeBatch(db, plan.queries, { operation: 'Read catalog products' }))
+  if (products.length !== ids.length) throw new HTTPError({ statusCode: 410, statusMessage: 'A product from this completed catalog operation has been removed' })
   const byId = new Map(products.map(product => [product.id, product]))
   return ids.map(id => byId.get(id)!)
 }
@@ -2874,11 +2887,7 @@ export async function reorderCollections(db: DbClient, input: {
 /** The products a reconcile names, loaded and hydrated in one pass. */
 async function listProductsByIds(db: DbClient, organizationId: string, ids: string[]): Promise<Product[]> {
   if (ids.length === 0) return []
-  const rows = await queryAll<Row>(db, `
-    SELECT ${PRODUCT_COLUMNS} FROM products p
-     WHERE p.organization_id = ? AND p.id IN (SELECT value FROM json_each(?))
-  `, [organizationId, d1JsonArray(ids)])
-  return hydrate(db, organizationId, rows.map(mapProductRow))
+  return listOrganizationProducts(db, { organizationId, productIds: ids })
 }
 
 async function planProductReconciliation(db: DbClient, input: {
