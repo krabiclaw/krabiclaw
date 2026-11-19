@@ -1,6 +1,6 @@
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import type { GoogleCalendarIntegration } from '~/shared/organization-settings'
-import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { composeBuyerActivityUrl } from './dashboard-notification-links'
 import { BOOKING_ENDS_SQL, bookingDay, isBookingDay } from '~/server/domain/requests'
@@ -188,7 +188,7 @@ export async function readCalendarConnection(db: DbClient, organizationId: strin
 
 // The canonical subject query serves both changed-subject batches and one
 // provider identity's lifecycle fences. The database bounds each result.
-export async function calendarSubjects(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration, identity?: Pick<EventLink, 'booking_id'>): Promise<CalendarSubject[]> {
+export async function calendarSubjects(db: DbClient, organizationId: string, integration: Pick<GoogleCalendarIntegration, 'revision'>, identity?: Pick<EventLink, 'booking_id'>): Promise<CalendarSubject[]> {
   const now = new Date().toISOString()
   return queryAll<CalendarSubject>(db, `WITH subjects AS (
     SELECT b.id booking_id, (SELECT p.kind FROM products p WHERE p.id=b.product_id AND p.organization_id=b.organization_id) product_kind, r.id request_id,
@@ -205,32 +205,34 @@ export async function calendarSubjects(db: DbClient, organizationId: string, int
       LEFT JOIN (SELECT m.id, m.organizationId, ${MEMBER_NAME_SQL} name, CASE WHEN u.emailVerified=1 THEN u.email END email FROM member m JOIN user u ON u.id=m.userId
         LEFT JOIN member_scheduling ms ON ms.member_id=m.id) member ON member.id=c.assigned_member_id AND member.organizationId=b.organization_id
     WHERE b.organization_id=? AND b.status IN ('pending','confirmed')
-      AND (b.product_session_id IS NULL OR s.status='scheduled') AND ${BOOKING_ENDS_SQL('b')}>? ${identity ? 'AND b.id=?' : ''}
+      AND (b.product_session_id IS NULL OR s.status='scheduled') AND ${BOOKING_ENDS_SQL('b')}>? ${identity ? `AND b.id=? AND EXISTS (
+        SELECT 1 FROM organization_integrations i WHERE i.organization_id=b.organization_id
+          AND i.provider='google_calendar' AND i.revision=? AND i.status NOT IN ('disabled','setting_up'))` : ''}
   ) SELECT subjects.* FROM subjects ${identity ? 'LIMIT 1' : `
     LEFT JOIN google_calendar_event_links l ON l.organization_id=? AND l.integration_revision=?
       AND l.booking_id=subjects.booking_id AND l.state<>'deleted'
     WHERE l.id IS NULL OR l.booking_revision<>subjects.revision
     ORDER BY COALESCE(l.updated_at,''), subjects.booking_id LIMIT 25`}`,
-  [organizationId, now, ...(identity ? [identity.booking_id] : [organizationId, integration.revision])])
+  [organizationId, now, ...(identity ? [identity.booking_id, integration.revision] : [organizationId, integration.revision])])
 }
 /** Persist intents before any provider I/O, including initial upcoming backfill. */
 async function reconcileIntents(db: DbClient, organizationId: string, integration: GoogleCalendarIntegration, bookingId: string | null, now: string) {
   const subjects = integration.status === 'disabled' ? [] : await calendarSubjects(db, organizationId, integration, bookingId === null ? undefined : { booking_id: bookingId })
-  for (const subject of subjects) {
+  const writes = subjects.map<BatchQuery>(subject => {
     const revision = subject.revision
     const id = crypto.randomUUID()
-    await execute(db, `INSERT INTO google_calendar_event_links
+    return { query: `INSERT INTO google_calendar_event_links
       (id, organization_id, integration_revision, account_id, calendar_id, event_id, booking_id, request_id, booking_revision, created_at, updated_at)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM organization_integrations WHERE organization_id = ? AND provider='google_calendar' AND revision = ? AND status <> 'disabled'
       ON CONFLICT(organization_id, integration_revision, booking_id) WHERE state <> 'deleted' DO UPDATE SET
       request_id = excluded.request_id, booking_revision = excluded.booking_revision,
       state = CASE WHEN google_calendar_event_links.booking_revision <> excluded.booking_revision THEN 'pending' ELSE google_calendar_event_links.state END,
       updated_at = excluded.updated_at WHERE google_calendar_event_links.booking_revision <> excluded.booking_revision`,
-    [id, organizationId, integration.revision, integration.account_id, integration.calendar_id, 'kc' + id.replaceAll('-', ''), subject.booking_id, subject.request_id, revision, now, now, organizationId, integration.revision])
-  }
+    params: [id, organizationId, integration.revision, integration.account_id, integration.calendar_id, 'kc' + id.replaceAll('-', ''), subject.booking_id, subject.request_id, revision, now, now, organizationId, integration.revision] }
+  })
   // Select only stale identities. Unchanged and historical successful events
   // receive no writes; cleanup also has a database batch limit.
-  const cleanup = await execute(db, `UPDATE google_calendar_event_links SET state='cleanup'
+  writes.push({ query: `UPDATE google_calendar_event_links SET state='cleanup'
     WHERE id IN (SELECT l.id FROM google_calendar_event_links l
       WHERE l.organization_id=? AND l.state NOT IN ('deleted','cleanup')
         ${bookingId === null ? '' : 'AND l.booking_id=?'}
@@ -241,8 +243,9 @@ async function reconcileIntents(db: DbClient, organizationId: string, integratio
               AND ((b.status IN ('pending','confirmed') AND ${BOOKING_ENDS_SQL('b')}>?)
                 OR (b.status='confirmed' AND ${BOOKING_ENDS_SQL('b')}<=? AND l.state='synced'))))
       ORDER BY l.updated_at,l.id LIMIT 25)`,
-  [organizationId, ...(bookingId === null ? [] : [bookingId]), integration.status, integration.revision, now, now])
-  return bookingId === null && (subjects.length === 25 || cleanup.meta.changes === 25)
+  params: [organizationId, ...(bookingId === null ? [] : [bookingId]), integration.status, integration.revision, now, now] })
+  const results = await executeBatch(db, writes, { operation: 'Reconcile Google Calendar event links' })
+  return bookingId === null && (subjects.length === 25 || results.at(-1)!.meta.changes === 25)
 }
 async function removeEvent(token: string, link: Pick<EventLink, 'calendar_id' | 'event_id'>) {
   const path = `/calendars/${encodeURIComponent(link.calendar_id)}/events/${link.event_id}`
@@ -255,9 +258,7 @@ async function removeEvent(token: string, link: Pick<EventLink, 'calendar_id' | 
   }
 }
 async function currentSubject(db: DbClient, organizationId: string, link: EventLink) {
-  const integration = await readCalendarIntegration(db, organizationId)
-  if (integration?.revision !== link.integration_revision || integration.status === 'disabled') return null
-  return (await calendarSubjects(db, organizationId, integration, link))[0] ?? null
+  return (await calendarSubjects(db, organizationId, { revision: link.integration_revision }, link))[0] ?? null
 }
 export interface CalendarProvider {
   token(accountId: string): Promise<string>
@@ -282,10 +283,9 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
   for (const link of links) {
     checked++
     try {
-      const token = await provider.token(link.account_id)
-      const subject = await currentSubject(db, organizationId, link)
-      if (!subject || link.state === 'cleanup') {
-        await removeEvent(token, link)
+      const subject = link.state === 'cleanup' ? null : await currentSubject(db, organizationId, link)
+      if (!subject) {
+        await removeEvent(await provider.token(link.account_id), link)
         await execute(db, "UPDATE google_calendar_event_links SET state='deleted', last_error=NULL, updated_at=? WHERE id=?", [new Date().toISOString(), link.id])
         continue
       }
@@ -294,6 +294,7 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
         await execute(db, "UPDATE google_calendar_event_links SET state='pending' WHERE id=?", [link.id])
         continue
       }
+      const token = await provider.token(link.account_id)
       await requireWriter(token, link.calendar_id)
       const url = subject.request_id && subject.buyer_user_id ? composeBuyerActivityUrl(env, subject.product_kind === 'stay' ? 'stay' : 'booking', subject.request_id) : null
       const path = `/calendars/${encodeURIComponent(link.calendar_id)}/events`
@@ -357,7 +358,7 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
     organizationId, ...(bookingId === null ? [] : [organizationId, bookingId]),
     ...(schedulePendingExpiry ? [organizationId, checkedAt, ...(bookingId === null ? [] : [bookingId]), integration.revision] : []),
   ])
-  if (!remaining?.has_pending) await execute(db, "UPDATE organization_integrations SET status=CASE WHEN status='disabled' THEN 'disabled' ELSE 'active' END, last_error=NULL WHERE organization_id=? AND provider='google_calendar' AND revision=?", [organizationId, integration.revision])
+  if (!remaining?.has_pending) await execute(db, "UPDATE organization_integrations SET status=CASE WHEN status='disabled' THEN 'disabled' ELSE 'active' END, last_error=NULL WHERE organization_id=? AND provider='google_calendar' AND revision=? AND (status NOT IN ('active','disabled') OR last_error IS NOT NULL)", [organizationId, integration.revision])
   return { checked, failed, remaining: remaining?.scoped_pending ?? remaining?.has_pending ?? 0, moreIntents, nextPendingEnd: remaining?.next_pending_end }
 }
 
