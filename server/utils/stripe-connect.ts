@@ -208,17 +208,22 @@ const CONNECTED_ACCOUNT_COLUMNS = `id, organization_id, stripe_account_id, count
   card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
   last_error, created_at, updated_at`
 
+export function stripeConnectedAccountQuery(organizationId: string | { sql: string }) {
+  const bound = typeof organizationId === 'string'
+  return { query: `SELECT ${CONNECTED_ACCOUNT_COLUMNS} FROM stripe_connected_accounts
+    WHERE organization_id = ${bound ? '?' : organizationId.sql} LIMIT 1`, params: bound ? [organizationId] : [] }
+}
+
+export function stripeConnectedAccountFromRow(row: unknown): StripeConnectedAccount | null {
+  return row ? mapConnectedAccount(row as StripeConnectedAccountRow) : null
+}
+
 export async function getStripeConnectedAccount(
   db: DbClient,
   organizationId: string,
 ): Promise<StripeConnectedAccount | null> {
-  const row = await queryFirst<StripeConnectedAccountRow>(db, `
-    SELECT ${CONNECTED_ACCOUNT_COLUMNS}
-    FROM stripe_connected_accounts
-    WHERE organization_id = ?
-    LIMIT 1
-  `, [organizationId])
-  return row ? mapConnectedAccount(row) : null
+  const { query, params } = stripeConnectedAccountQuery(organizationId)
+  return stripeConnectedAccountFromRow(await queryFirst(db, query, params))
 }
 
 /** The same account projection for the catalogue and checkout, maintained by Stripe Connect events. */

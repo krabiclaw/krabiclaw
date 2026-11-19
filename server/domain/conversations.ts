@@ -122,9 +122,9 @@ export function guestVisibleSql(message: string, bookingOwner: string): string {
       AND ${message}.event_name IN ('${OPENING_EVENT}', ${GUEST_VISIBLE_EVENTS.map(event => `'${event}'`).join(', ')})))))`
 }
 
-function viewerMessageVisibility(message: string, conversation: string): string {
+function viewerMessageVisibility(message: string, conversation: string, user = '?'): string {
   return `NOT EXISTS (SELECT 1 FROM conversation_participants audience
-    WHERE audience.conversation_id = ${conversation}.id AND audience.user_id = ? AND audience.role = 'guest'
+    WHERE audience.conversation_id = ${conversation}.id AND audience.user_id = ${user} AND audience.role = 'guest'
       AND NOT COALESCE(${guestVisibleSql(message, `${conversation}.user_id = audience.user_id`)}, 0))`
 }
 
@@ -135,19 +135,21 @@ function viewerMessageVisibility(message: string, conversation: string): string 
  * see them. A guest counts only what they can see. Every list row, the Unread filter, the
  * filter counts, the nav count, the app badge and MCP read this.
  */
-export function unreadSql(conversation: string, viewer: string, readThrough?: number | null): { sql: string; params: (string | number)[] } {
+export function unreadSql(conversation: string, viewer: string | { sql: string }, readThrough?: number | null): { sql: string; params: (string | number)[] } {
+  const user = typeof viewer === 'string' ? '?' : viewer.sql
+  const parameters = typeof viewer === 'string' ? [viewer] : []
   const sequence = readThrough === undefined
     ? { sql: `COALESCE((SELECT read_message.sequence FROM conversation_participants reader
           JOIN messages read_message ON read_message.id = reader.last_read_message_id
-          WHERE reader.conversation_id = ${conversation}.id AND reader.user_id = ?), 0)`, param: viewer }
-    : { sql: '?', param: readThrough ?? 0 }
+          WHERE reader.conversation_id = ${conversation}.id AND reader.user_id = ${user}), 0)`, params: parameters }
+    : { sql: '?', params: [readThrough ?? 0] }
   return {
     sql: `EXISTS (SELECT 1 FROM messages unread_message
       WHERE unread_message.conversation_id = ${conversation}.id
-        AND unread_message.author_user_id IS NOT ?
-        AND ${viewerMessageVisibility('unread_message', conversation)}
+        AND unread_message.author_user_id IS NOT ${user}
+        AND ${viewerMessageVisibility('unread_message', conversation, user)}
         AND unread_message.sequence > ${sequence.sql})`,
-    params: [viewer, viewer, sequence.param],
+    params: [...parameters, ...parameters, ...sequence.params],
   }
 }
 
@@ -517,14 +519,16 @@ export function conversationMemberSql(conversation: string, userExpression: stri
           AND seat.user_id = staff.userId AND seat.role = 'member'))))`
 }
 
-export function participantGuard(alias: string, userId: string, role?: ParticipantRole): { sql: string; params: string[] } {
+export function participantGuard(alias: string, userId: string | { sql: string }, role?: ParticipantRole): { sql: string; params: string[] } {
+  const user = typeof userId === 'string' ? '?' : userId.sql
+  const params = typeof userId === 'string' ? [userId] : []
   const guest = `(${alias}.kind <> 'team' AND EXISTS (SELECT 1 FROM conversation_participants seat
     WHERE seat.conversation_id = ${alias}.id AND seat.organization_id = ${alias}.organization_id
-      AND seat.user_id = ? AND seat.role = 'guest'))`
-  if (role === 'guest') return { sql: guest, params: [userId] }
-  const member = conversationMemberSql(alias, '?')
-  if (role === 'member') return { sql: member, params: [userId] }
-  return { sql: `(${guest} OR ${member})`, params: [userId, userId] }
+      AND seat.user_id = ${user} AND seat.role = 'guest'))`
+  if (role === 'guest') return { sql: guest, params }
+  const member = conversationMemberSql(alias, user)
+  if (role === 'member') return { sql: member, params }
+  return { sql: `(${guest} OR ${member})`, params: [...params, ...params] }
 }
 
 export function conversationAccessSql(alias: string, principal: Pick<MemberAccessPrincipal, 'userId'>): ConversationGuard {

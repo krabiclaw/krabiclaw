@@ -172,14 +172,16 @@ export function prepareAgenda(
   scope: AgendaPlanScope,
   query: AgendaQuery,
   staff: ResolvedMembership | null,
-  document?: { membership: BatchQuery; userId: string },
+  document?: { membership: BatchQuery },
 ) {
   assertCalendarDate(query.from)
   assertCalendarDate(query.to)
   if (query.from > query.to) throw new Error('from must not be after to')
   const org = typeof scope.organizationId === 'object' ? scope.organizationId.sql : '?'
   const orgParams = typeof scope.organizationId === 'string' ? [scope.organizationId] : []
-  const staffUser = document?.userId ?? staff?.userId
+  const staffUser = document ? { column: BATCH_VIEWER.user } : staff?.userId
+  const userSql = typeof staffUser === 'object' ? staffUser.column : '?'
+  const userParams = typeof staffUser === 'string' ? [staffUser, staffUser] : []
   const wide = document ? roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ operations: ['read'] })) : null
   const assignedRequests = staffUser ? assignedGuestThreadScope('rq', staffUser) : null
 
@@ -198,9 +200,9 @@ export function prepareAgenda(
       ${assignedRequests ? `AND (${wide ? `${wide} OR ` : ''}EXISTS (SELECT 1 FROM conversations rq
         WHERE rq.organization_id = l.organization_id AND rq.location_id = l.id AND ${assignedRequests!.sql})
         OR EXISTS (SELECT 1 FROM product_stay_configs c JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
-          WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedMemberSql('b')})
-        OR ${locationMemberSql('l.organization_id', 'l.id')})` : ''}
-      ORDER BY l.title, l.id`, params: [...orgParams, ...(assignedRequests ? [...assignedRequests.params, staffUser, staffUser] : [])],
+          WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedMemberSql('b', userSql)})
+        OR ${locationMemberSql('l.organization_id', 'l.id', userSql)})` : ''}
+      ORDER BY l.title, l.id`, params: [...orgParams, ...(assignedRequests ? [...assignedRequests.params, ...userParams] : [])],
   }) - 1 : -1
   const viewer: BatchQuery = scope.buyerUserId
     ? { query: 'SELECT NULL AS organization_id, ? AS user_id, NULL AS member_id, NULL AS role, 0 AS organization_wide', params: [scope.buyerUserId] }

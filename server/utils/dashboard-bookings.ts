@@ -11,7 +11,7 @@ import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/
 import { BOOKING_RECORDS_SQL, guestRequestMappingQuery, guestRequestQuery, requestActions, threadOperationalRecordFromRow, threadOperationalRecordQuery, validateGuestRequest, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyAccountQuery, guestReplyDestination, type GuestReplyAccount } from '~/server/domain/guest-threads/operations'
 import { pendingStayChangesFromRows, pendingStayChangesQuery } from '~/server/domain/guest-threads/stay-change-requests'
-import { calendarStays, canReleaseStayNights, dashboardStayEditQueries, prepareStayReservationHome, stayAccessFor, stayCalendarOf, stayCalendarQueries, stayDetailFrom, stayDetailQuery, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
+import { calendarStays, canReleaseStayNights, dashboardStayEditQueries, prepareStayReservationHome, stayAccessFor, stayCalendarOf, stayCalendarQueries, stayDetailFrom, stayDetailQuery, stayDetailSelection, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
 import { guestThreadChannelQuery, parseGuestThreadChannel, type GuestThreadChannelRow } from '~/server/domain/guest-threads/channel-messages'
 import { sourceLocaleFromRows, sourceLocaleQuery } from '~/server/utils/localization'
 import { placesCalendarOf, placesCalendarQueries, placesPresenceQuery, placesWindow } from '~/server/domain/places'
@@ -94,12 +94,35 @@ function bookingAccessQuery(bookingId: string): BatchQuery {
 }
 
 export function prepareDashboardBookingRead(membership: BatchQuery, bookingId: string) {
-  const access = withViewer(membership, bookingAccessQuery(bookingId))
+  const booking = bookingAccessQuery(bookingId)
+  const access = withViewer(membership, booking)
   const timed = prepareStaffBookingDetails(bookingId, {
     query: `SELECT * FROM (${access.query}) target WHERE unit = 'slot' AND (manages = 1 OR assigned = 1 OR granted = 1)`,
     params: access.params,
   })
-  return { queries: [access, ...timed.queries], timed }
+  // Only a readable, managed stay supplies an organization, conversation and home.
+  const managed = `SELECT * FROM (${booking.query}) target
+    WHERE unit = 'nights' AND (manages = 1 OR (operates = 1 AND (assigned = 1 OR granted = 1)))`
+  const organizationId = { sql: '(SELECT organization_id FROM reservation)' }
+  const conversationId = { sql: '(SELECT conversation_id FROM reservation)' }
+  const home = prepareStayReservationHome({
+    organizationId, productId: { sql: '(SELECT product_id FROM reservation)' }, showLocation: true, showArrival: true,
+  })
+  const stayQueries = [
+    stayDetailSelection({ query: organizationId.sql }, bookingId, true),
+    guestRequestQuery(conversationId, organizationId, 'booking'),
+    guestRequestMappingQuery(conversationId, organizationId),
+    guestThreadChannelQuery(conversationId, organizationId),
+    guestReplyAccountQuery({ query: `SELECT user_id FROM conversations WHERE id = ${conversationId.sql} AND organization_id = ${organizationId.sql}` }),
+    threadOperationalRecordQuery(conversationId),
+    pendingStayChangesQuery({ bookingId, conversationId, organizationId, userId: { sql: BATCH_VIEWER.user } }),
+    sourceLocaleQuery(organizationId),
+    ...home.queries,
+  ].map(query => withViewer(membership, {
+    query: `WITH reservation AS (${managed}) ${query.query}`,
+    params: [...booking.params ?? [], ...query.params ?? []],
+  }))
+  return { queries: [access, ...timed.queries, ...stayQueries], timed, home, stayOffset: 2 + timed.queries.length }
 }
 
 export function readDashboardBookingDocument(event: H3Event, record: { orgSlug: string; bookingId: string }, preloaded?: D1Result[]) {
@@ -108,14 +131,16 @@ export function readDashboardBookingDocument(event: H3Event, record: { orgSlug: 
 }
 
 export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug: string; bookingId: string }, preloaded?: D1Result[]) {
-  const context = await dashboardBookingContext(event, 'read', undefined, record, preloaded)
-  const { access, db, organization, userId, bookingId, booking } = context
+  const { env, db, membership } = await dashboardMemberQuery(event, record?.orgSlug)
+  const bookingId = record?.bookingId ?? getRouterParam(event, 'booking_id')
+  if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
+  const plan = prepareDashboardBookingRead(membership, bookingId)
+  const rows = preloaded ?? await executeBatch(db, [membership, ...plan.queries], { operation: 'Read the staff reservation' })
+  const { access, organization, booking } = await dashboardBookingContext(event, 'read', undefined, record, rows)
   if (booking.unit === 'slot') {
-    const { env, membership } = await dashboardMemberQuery(event, record?.orgSlug)
-    const timed = prepareDashboardBookingRead(membership, bookingId).timed
-    const facts = preloaded?.slice(2) ?? await executeBatch(db, timed.queries, { operation: 'Read the staff reservation' })
+    const facts = rows.slice(2, plan.stayOffset)
     const canReadPayments = await roleAllows({ ...organization, permissions: { payments: ['read'] } })
-    return { booking: await timed.read(db, env, facts, canReadPayments), manage: access.manage }
+    return { booking: await plan.timed.read(db, env, facts, canReadPayments), manage: access.manage }
   }
   if (!access.manage) {
     const [stayRows, houseRows, media] = await executeBatch(db, [
@@ -135,22 +160,9 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
     const home = { ...house, image_url: mediaStillUrl(photos.get(booking.product_id)?.[0]) }
     return { booking: nightBooking(stay), manage: false as const, home }
   }
-  const conversationId = booking.conversation_id
-  const organizationId = organization.id
-  const homeRead = prepareStayReservationHome({ organizationId, productId: booking.product_id, showLocation: true, showArrival: true })
-  const [stayRows, threadRows, mapping, channelRows, accountRows, operations, changes, locale, ...homeRows] = await executeBatch(db, [
-    stayDetailQuery(access, bookingId),
-    guestRequestQuery(conversationId, organizationId, 'booking'),
-    guestRequestMappingQuery(conversationId, organizationId),
-    guestThreadChannelQuery(conversationId, organizationId),
-    guestReplyAccountQuery({ query: 'SELECT user_id FROM conversations WHERE id = ? AND organization_id = ?', params: [conversationId, organizationId] }),
-    threadOperationalRecordQuery(conversationId, { kind: 'booking', booking_id: bookingId, organization_id: organizationId }),
-    pendingStayChangesQuery({ bookingId, conversationId, organizationId, userId }),
-    sourceLocaleQuery(organizationId),
-    ...homeRead.queries,
-  ], { operation: 'Read the managed stay reservation' })
+  const [stayRows, threadRows, mapping, channelRows, accountRows, operations, changes, locale, ...homeRows] = rows.slice(plan.stayOffset)
   const stay = stayDetailFrom(access, stayRows!.results[0])
-  const home = homeRead.read(homeRows)
+  const home = plan.home.read(homeRows)
   const threadRow = threadRows!.results[0] as Record<string, unknown> | undefined
   if (!threadRow) throw new Error('The booking has no guest conversation')
   const thread = await validateGuestRequest(db, threadRow, Boolean(mapping!.results.length))
@@ -166,7 +178,7 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
   const available_actions = releaseNights ? ['release_nights'] : operationalRecord ? requestActions(operationalRecord, new Date().toISOString())
     : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel']
   const pending_changes = stay.channel === 'airbnb' && channelOwned && changes!.results.length
-    ? pendingStayChangesFromRows(changes!.results, bookingId, sourceLocaleFromRows(organizationId, locale!.results).locale)
+    ? pendingStayChangesFromRows(changes!.results, bookingId, sourceLocaleFromRows(organization.id, locale!.results).locale)
     : []
   return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home: { ...home, image_url: home.photo_urls[0] ?? null }, can_message_guest: canMessageGuest }
 }

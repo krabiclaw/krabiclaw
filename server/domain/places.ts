@@ -99,8 +99,8 @@ export function placesCalendarQueries(organization: BatchQuery, userId: string, 
   return [...placesIdentityQueries(org, userId, only), ...slotReadQueries({ organization: org, products, ...instants(window), scope: 'editor', now: new Date().toISOString() })]
 }
 
-const assignedPlaceSql = (product: string, location = false) => `EXISTS (SELECT 1 FROM member m
-    WHERE m.organizationId = ${product}.organization_id AND m.userId = ? AND (
+const assignedPlaceSql = (product: string, location = false, user = '?') => `EXISTS (SELECT 1 FROM member m
+    WHERE m.organizationId = ${product}.organization_id AND m.userId = ${user} AND (
       ${roleMatchesSql('m.role', workspaceOperationsRoles)}
       OR ${location ? `EXISTS (SELECT 1 FROM product_locations pl JOIN product_booking_configs cfg ON cfg.organization_id = pl.organization_id AND cfg.product_id = pl.product_id
         JOIN products p ON p.organization_id = cfg.organization_id AND p.id = cfg.product_id
@@ -110,20 +110,22 @@ const assignedPlaceSql = (product: string, location = false) => `EXISTS (SELECT 
       : `(${roleMatchesSql('m.role', assignedOperationsRoles)} AND c.assigned_member_id = m.id)
         OR ${listingGrantSql(`${product}.organization_id`, `${product}.id`, 'm.id', 'calendar', 'm.role')}`}))`
 
-function placesIdentityQueries(org: BatchQuery, userId: string, only?: { kind: PlaceKind; id: string }): BatchQuery[] {
+function placesIdentityQueries(org: BatchQuery, userId: string | { sql: string }, only?: { kind: PlaceKind; id: string }): BatchQuery[] {
+  const user = typeof userId === 'string' ? '?' : userId.sql
+  const params = typeof userId === 'string' ? [userId] : []
   return [{
     query: only && only.kind !== 'location' ? 'SELECT NULL WHERE 0' : `
-    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.opening_hours, l.special_hours, l.updated_at, ${assignedPlaceSql('l', true)} AS assigned
+    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.opening_hours, l.special_hours, l.updated_at, ${assignedPlaceSql('l', true, user)} AS assigned
     FROM business_locations l
     WHERE l.organization_id = ${org.query} AND (? IS NULL OR l.id = ?)
       ${only ? '' : `AND EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
         JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
         WHERE pl.organization_id = l.organization_id AND pl.location_id = l.id AND p.kind = 'table')`}
     ORDER BY l.title, l.id`,
-    params: only && only.kind !== 'location' ? [] : [userId, ...org.params!, only?.id ?? null, only?.id ?? null],
+    params: only && only.kind !== 'location' ? [] : [...params, ...org.params!, only?.id ?? null, only?.id ?? null],
   }, {
     query: only && only.kind !== 'offering' ? 'SELECT NULL WHERE 0' : `
-    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id, ${assignedPlaceSql('p')} AS assigned,
+    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id, ${assignedPlaceSql('p', false, user)} AS assigned,
            COALESCE((SELECT l.timezone FROM product_locations pl JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = pl.organization_id WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id ORDER BY l.title LIMIT 1),
              (SELECT ms.timezone FROM member_scheduling ms WHERE ms.member_id = c.assigned_member_id AND ms.organization_id = c.organization_id), o.timezone) AS timezone,
            (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id) AS provider_name,
@@ -131,11 +133,11 @@ function placesIdentityQueries(org: BatchQuery, userId: string, only?: { kind: P
     FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id JOIN organization o ON o.id = p.organization_id
     WHERE p.organization_id = ${org.query} AND p.kind IN ('experience', 'service') AND (? IS NULL OR p.id = ?)
     ORDER BY p.name, p.id`,
-    params: only && only.kind !== 'offering' ? [] : [userId, ...org.params!, only?.id ?? null, only?.id ?? null],
+    params: only && only.kind !== 'offering' ? [] : [...params, ...org.params!, only?.id ?? null, only?.id ?? null],
   }]
 }
 
-export function placesPresenceQuery(organization: BatchQuery, userId: string): BatchQuery {
+export function placesPresenceQuery(organization: BatchQuery, userId: string | { sql: string }): BatchQuery {
   const places = placesIdentityQueries(organization, userId)
   const visible = places.map(place => `EXISTS (SELECT 1 FROM (${place.query}) WHERE assigned = 1)`).join(' OR ')
   return { query: `SELECT (${visible}) AS has_places`, params: places.flatMap(place => place.params ?? []) }

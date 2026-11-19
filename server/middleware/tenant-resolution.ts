@@ -6,11 +6,11 @@ import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/e
 import { HTTPError, defineHandler  } from 'nitro';
 import type { H3Event } from 'nitro';
 import { getCookie, getQuery, redirect, setResponseHeader } from 'nitro/h3';
-import { executeBatch, queryFirst, type DbClient } from "~/server/db";
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from "~/server/db";
 import { TENANT_TYPES } from "~/utils/tenant-routing";
 import { cloudflareEnv, isInternalSelfFetch } from "../utils/api-response";
 import {
-  environmentTenantAliasSlug,
+  BLAWBY_FREE_SITE_HOST, environmentTenantAliasSlug, isNonProductionHost, LEGACY_FREE_SITE_HOST, normalizeHost,
   hostnameOf,
   isPlatformHost,
   usesTenantHeader,
@@ -23,10 +23,12 @@ import { parseSitePalette, resolveSitePalette } from '~/shared/site-palette'
 import { parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation, type SiteLogo } from '~/shared/media-placement-contract'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
+import { buildLoginUrl } from '~/shared/auth/return-target'
 import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
-import { dashboardMemberQuery, getDashboardSession, readDashboardMembership } from '~/server/utils/dashboard-context'
+import type { DashboardAuthRead } from '~/server/utils/auth'
+import { dashboardOrganizationFrom, getDashboardSession, readDashboardMembership } from '~/server/utils/dashboard-context'
 import { prepareDashboardWorkspaceAccess, readDashboardWorkspaceAccess } from '~/server/utils/dashboard-context-service'
-import { BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
+import { membershipBySlugQuery, BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
 import { prepareToday } from '~/server/domain/today'
 import { staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import { readDashboardTodayDocument } from '~/server/utils/dashboard-today'
@@ -171,11 +173,31 @@ async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {
 }
 
 async function resolveDashboardTenant(event: H3Event, slug: string, panel: string) {
-  const { db, env, membership, organizationFrom, session, userId } = await dashboardMemberQuery(event, slug)
+  const env = cloudflareEnv(event)
+  const db = env.DB
+  if (!db) return null
+  let plan: ReturnType<typeof prepareDashboardTenant> | undefined
+  const read: DashboardAuthRead = {
+    queries(token) {
+      plan = prepareDashboardTenant(event, db, env, membershipBySlugQuery(slug, {
+        query: '(SELECT "userId" FROM session WHERE token = ? AND "expiresAt" >= unixepoch())', params: [token],
+      }), slug, panel)
+      return plan.queries
+    },
+  }
+  const session = await getDashboardSession(event, env, read)
+  if (!session?.user.id) return null
+  plan ??= prepareDashboardTenant(event, db, env, membershipBySlugQuery(slug, session.user.id), slug, panel)
+  const results = read.results ?? await executeBatch(db, plan.queries, { operation: 'Read the dashboard document' })
+  return plan.present(results, session)
+}
+
+function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<typeof cloudflareEnv>, membership: BatchQuery, slug: string, panel: string) {
+  const user = { sql: BATCH_VIEWER.user }
   const host = platformTenantQuery()
-  const workspace = prepareDashboardWorkspaceAccess({ sql: BATCH_VIEWER.organization }, userId, true)
+  const workspace = prepareDashboardWorkspaceAccess({ sql: BATCH_VIEWER.organization }, user, true)
   const today = panel === '' ? prepareToday(db, {
-    slug, userId, now: new Date(), range: event.url.searchParams.get('range') === 'upcoming' ? 'upcoming' : 'today',
+    slug, membership, now: new Date(), range: event.url.searchParams.get('range') === 'upcoming' ? 'upcoming' : 'today',
     staffAccessWrites: staffAccessWritesEnabled(env),
   }) : null
   const managedOrg = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 THEN ${BATCH_VIEWER.organization} END` }
@@ -196,7 +218,7 @@ async function resolveDashboardTenant(event: H3Event, slug: string, panel: strin
   const bookingId = /^\/bookings\/([^/]+)$/.exec(panel)?.[1]
   const booking = bookingId && bookingId !== 'new' ? prepareDashboardBookingRead(membership, bookingId) : null
   const calendar = /^\/calendar(?:\/|$)/.test(panel)
-    ? withViewer(membership, placesPresenceQuery({ query: BATCH_VIEWER.organization, params: [] }, userId)) : null
+    ? withViewer(membership, placesPresenceQuery({ query: BATCH_VIEWER.organization, params: [] }, user)) : null
   const day = /^\/calendar\/(\d{4}-\d{2}-\d{2})$/.exec(panel)?.[1]
   // Calendar uses the workspace's local month. Before reading its zone the two
   // UTC offsets bound the possible months, including across New Year's Day.
@@ -206,7 +228,7 @@ async function resolveDashboardTenant(event: H3Event, slug: string, panel: strin
   const chosenMonth = day?.slice(0, 7) ?? (typeof query.month === 'string' ? query.month : null)
   const month = day || panel === '/calendar' ? `${chosenMonth ?? earlyMonth}-01` : null
   const agenda = month && isValidCalendarDate(month) && (!day || isValidCalendarDate(day)) && !query.product_id && query.view !== 'year'
-    ? prepareDashboardAgendaDocument(db, membership, userId, slug, {
+    ? prepareDashboardAgendaDocument(db, membership, slug, {
       from: month, to: parseDate(chosenMonth ? month : `${lateMonth}-01`).add({ months: 1 }).subtract({ days: 1 }).toString(),
       location_id: query.location_id === '__all__' ? undefined : query.location_id,
       assigned_member_id: query.assigned_member_id === '__all__' ? undefined : query.assigned_member_id,
@@ -216,7 +238,7 @@ async function resolveDashboardTenant(event: H3Event, slug: string, panel: strin
   const earningsMonths = new Set([new Date().toISOString().slice(0, 7)])
   if (panel === '/earnings/performance' && typeof query.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(query.month)) earningsMonths.add(query.month)
   const earnings = /^\/earnings(?:\/|$)/.test(panel) ? prepareDashboardEarningsDocument(membership, earningsMonths) : null
-  const [tenantResult, viewerResult, ...rest] = await executeBatch(db, [
+  const queries = [
     host, membership,
     ...workspace.queries.map(query => withViewer(membership, query)),
     ...(today?.queries.slice(1) ?? []),
@@ -226,30 +248,36 @@ async function resolveDashboardTenant(event: H3Event, slug: string, panel: strin
     ...(booking?.queries ?? []),
     ...(calendar ? [calendar, ...agenda?.queries ?? []] : []),
     ...(earnings?.queries ?? []),
-  ], { operation: 'Read the dashboard document' })
-  const tenant = tenantResult!.results[0] as TenantRow | undefined
-  if (!tenant) return null
-  await readPublicSourceLocale(event, db, tenant.id, JSON.parse(tenant.source_locale_rows) as unknown[])
-  const viewer = viewerResult!.results[0]
-  const organization = organizationFrom(viewer)
-  await readDashboardMembership(event, slug, async () => viewer)
-  await readDashboardWorkspaceAccess(event, { db, env, organization }, true, workspace.read(rest.slice(0, workspace.queries.length), organization.id))
-  const panelRows = rest.slice(workspace.queries.length)
-  if (today) await readDashboardTodayDocument(event, slug, () => today.read([viewerResult!, ...panelRows]))
-  if (connections && (viewer as { organization_wide: number }).organization_wide === 1) {
-    await readDashboardConnectionsDocument(event, slug, connections.read(panelRows))
-    if (google) await readCalendarSettingsDocument(event, slug, calendarSettingsFromRows(panelRows.slice(connections.queries.length)))
+  ]
+  return { queries, present }
+
+  async function present([tenantResult, viewerResult, ...rest]: D1Result[], session: NonNullable<Awaited<ReturnType<typeof getDashboardSession>>>) {
+    const tenant = tenantResult!.results[0] as TenantRow | undefined
+    if (!tenant) return null
+    await readPublicSourceLocale(event, db, tenant.id, JSON.parse(tenant.source_locale_rows) as unknown[])
+    const viewer = viewerResult!.results[0]
+    const organization = dashboardOrganizationFrom(viewer)
+    const userId = session.user.id
+    if (organization.userId !== userId) throw new Error('Dashboard membership does not match the Better Auth session')
+    await readDashboardMembership(event, slug, async () => viewer)
+    await readDashboardWorkspaceAccess(event, { db, env, organization }, true, workspace.read(rest.slice(0, workspace.queries.length), organization.id))
+    const panelRows = rest.slice(workspace.queries.length)
+    if (today) await readDashboardTodayDocument(event, slug, () => today.read([viewerResult!, ...panelRows]))
+    if (connections && (viewer as { organization_wide: number }).organization_wide === 1) {
+      await readDashboardConnectionsDocument(event, slug, connections.read(panelRows))
+      if (google) await readCalendarSettingsDocument(event, slug, calendarSettingsFromRows(panelRows.slice(connections.queries.length)))
+    }
+    if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
+    if (booking && bookingId) await readDashboardBookingDocument(event, { orgSlug: slug, bookingId }, [viewerResult!, ...panelRows])
+    if (calendar) {
+      event.context.dashboardCalendarPresence = { slug, has_places: (panelRows[0]!.results[0] as { has_places: number }).has_places === 1 }
+      if (agenda) await agenda.apply(event, panelRows.slice(1), { env, organization })
+    }
+    if (earnings && panelRows[2]?.results.length) earnings.apply(event, panelRows, organization)
+    setResponseHeader(event, 'cache-control', 'private, no-store')
+    await setDashboardSocketScope(event, env, { slug, organizationId: organization.id, sessionId: session.session.id, userId })
+    return tenant
   }
-  if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
-  if (booking && bookingId) await readDashboardBookingDocument(event, { orgSlug: slug, bookingId }, [viewerResult!, ...panelRows])
-  if (calendar) {
-    event.context.dashboardCalendarPresence = { slug, has_places: (panelRows[0]!.results[0] as { has_places: number }).has_places === 1 }
-    if (agenda) await agenda.apply(event, panelRows.slice(1), { env, organization })
-  }
-  if (earnings && panelRows[2]?.results.length) earnings.apply(event, panelRows, organization)
-  setResponseHeader(event, 'cache-control', 'private, no-store')
-  await setDashboardSocketScope(event, env, { slug, organizationId: organization.id, sessionId: session.session.id, userId })
-  return tenant
 }
 
 function publicTenantMedia(tenant: Pick<TenantRow, 'media_json'>) {
@@ -438,6 +466,19 @@ export default defineHandler(async (event) => {
   // else and reads `event.context.organizationId`.
   const host = (event.req.headers.get("host")) || "";
   const env = cloudflareEnv(event);
+  // Dashboard deep links must first reach the host that owns the OAuth cookie.
+  const dashboard = tenantPath === '/dashboard' || tenantPath.startsWith('/dashboard/')
+  const browserEntry = event.method === 'HEAD' || (event.method === 'GET' && event.req.headers.get('accept')?.includes('text/html'))
+  if (browserEntry && (dashboard || tenantPath === '/login' || tenantPath === '/signup'
+    || tenantPath === '/forgot-password' || /^\/accept-invitation\/[^/]+$/.test(tenantPath))) {
+    const authOrigin = env.BETTER_AUTH_URL && new URL(env.BETTER_AUTH_URL)
+    const freeSiteHost = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
+    if (authOrigin && authOrigin.protocol === 'https:' && !isNonProductionHost(authOrigin.hostname)
+      && authOrigin.hostname !== url.hostname && (url.hostname === freeSiteHost
+        || (freeSiteHost === BLAWBY_FREE_SITE_HOST && url.hostname === LEGACY_FREE_SITE_HOST))) {
+      return redirect(`${authOrigin.origin}${url.pathname}${url.search}`, 302)
+    }
+  }
 
   // The local harness and the staging alias name the tenant explicitly.
   // An unresolvable selector must never become the platform's homepage.
@@ -448,15 +489,16 @@ export default defineHandler(async (event) => {
   const workspaceSlug = isPlatformRequest && event.method === 'GET'
     ? /^\/dashboard\/([a-z0-9-]+)(?:\/|$)/.exec(tenantPath)?.[1] : undefined
   const workspaceDocument = workspaceSlug && !['account', 'app', 'onboarding', 'select-organization'].includes(workspaceSlug)
-    && await getDashboardSession(event, env)
-  const tenant = requestedSlug !== null
-    ? env.db && /^[a-z0-9-]+$/.test(requestedSlug)
-      ? await resolveRegisteredSubdomainTenant(event, env.db, requestedSlug)
-      : null
-    : isPlatformRequest
-      ? workspaceDocument && workspaceSlug ? await resolveDashboardTenant(event, workspaceSlug, tenantPath.slice(`/dashboard/${workspaceSlug}`.length))
-        : env.db ? await resolvePlatformTenant(env.db) : null
-      : await resolveTenant(host, event)
+  const workspaceTenant = workspaceDocument
+    ? await resolveDashboardTenant(event, workspaceSlug, tenantPath.slice(`/dashboard/${workspaceSlug}`.length)) : undefined
+  if (event.method === 'GET' && dashboard && !(await getDashboardSession(event, env))?.user.id) {
+    return redirect(buildLoginUrl({ redirect: `${url.pathname}${url.search}` }), 302)
+  }
+
+  const tenant = workspaceDocument ? workspaceTenant
+    : requestedSlug !== null
+      ? env.db && /^[a-z0-9-]+$/.test(requestedSlug) ? await resolveRegisteredSubdomainTenant(event, env.db, requestedSlug) : null
+      : isPlatformRequest ? env.db ? await resolvePlatformTenant(env.db) : null : await resolveTenant(host, event)
 
   if (tenant && isSpentSubdomainResolution(tenant)) {
     if (tenant.successorDomain) {

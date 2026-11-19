@@ -26,8 +26,9 @@ export function readDashboardWorkspaceAccess(
   })
 }
 
-export function prepareDashboardWorkspaceAccess(organizationId: string | { sql: string }, userId: string, includeLocations: boolean) {
+export function prepareDashboardWorkspaceAccess(organizationId: string | { sql: string }, userId: string | { sql: string }, includeLocations: boolean) {
   const plan = prepareOrganizationPlan(organizationId)
+  const user = typeof userId === 'string' ? '?' : userId.sql
   const locations = includeLocations ? prepareDashboardLocations(organizationId, undefined, false, true) : null
   return {
     queries: [
@@ -36,7 +37,7 @@ export function prepareDashboardWorkspaceAccess(organizationId: string | { sql: 
       ...(locations ? [
         hasUnreadQuery(organizationId, { userId }, new Date()),
         { query: `SELECT o.id, o.name, o.slug FROM member m JOIN organization o ON o.id = m.organizationId
-          WHERE m.userId = ? ORDER BY o.name, o.id`, params: [userId] },
+          WHERE m.userId = ${user} ORDER BY o.name, o.id`, params: typeof userId === 'string' ? [userId] : [] },
         ...locations.queries,
       ] : []),
     ],

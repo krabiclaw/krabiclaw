@@ -15,7 +15,7 @@ import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { formatCalendarDate } from '~/utils/timezone'
-import { appendMessage, conversationAccessSql, findMessageByDedupeKey, getMessage, type MessageRow } from '~/server/domain/conversations'
+import { appendMessage, conversationMemberSql, findMessageByDedupeKey, getMessage, type MessageRow } from '~/server/domain/conversations'
 import { mirrorChannexThread } from './channel-messages'
 import { conversationTaskQueries } from './repository'
 import type { GuestThreadRow } from './types'
@@ -247,14 +247,25 @@ export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, i
 }
 
 /** A channel decides when its request closes. Until its recorded answer arrives, show it on the authorized stay. */
-export function pendingStayChangesQuery(input: { bookingId: string; conversationId: string; organizationId: string; userId: string }) {
-  const access = conversationAccessSql('c', input)
+export function pendingStayChangesQuery(input: {
+  bookingId: string
+  conversationId: string | { sql: string }
+  organizationId: string | { sql: string }
+  userId: string | { sql: string }
+}) {
+  const { bookingId, conversationId, organizationId, userId } = input
+  const conversation = typeof conversationId === 'string' ? '?' : conversationId.sql
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const user = typeof userId === 'string' ? '?' : userId.sql
   return { query: `SELECT proposal.id, proposal.payload_json
     FROM conversations c JOIN messages proposal ON proposal.conversation_id = c.id
-    WHERE c.id = ? AND c.organization_id = ? AND c.booking_id = ? AND ${access.sql}
+    WHERE c.id = ${conversation} AND c.organization_id = ${organization} AND c.booking_id = ? AND ${conversationMemberSql('c', user)}
       AND proposal.event_name = 'booking_change.requested' AND proposal.dedupe_key GLOB ?
       AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.conversation_id = c.id AND decision.dedupe_key = 'booking-change-decision:' || proposal.id)
-    ORDER BY proposal.sequence DESC`, params: [input.conversationId, input.organizationId, input.bookingId, ...access.params, `${PREFIX}*`] }
+    ORDER BY proposal.sequence DESC`, params: [
+    ...(typeof conversationId === 'string' ? [conversationId] : []), ...(typeof organizationId === 'string' ? [organizationId] : []),
+    bookingId, ...(typeof userId === 'string' ? [userId] : []), `${PREFIX}*`,
+  ] }
 }
 
 export async function pendingStayChanges(db: DbClient, input: { bookingId: string; conversationId: string; organizationId: string; userId: string }) {

@@ -30,7 +30,7 @@
             <p v-else class="mt-4 text-sm text-muted">No scheduled Stripe payouts.</p>
             <h3 class="mt-6 text-base font-semibold text-highlighted">Sent</h3>
             <div v-if="paidPayouts.length" class="mt-4 space-y-4">
-              <PayoutCard v-for="row in paidPayouts" :key="row.id" :payout="row" :items="payouts.items?.[row.id]" :to="`${level.path.value}/payouts/${encodeURIComponent(row.id)}`" />
+              <PayoutCard v-for="row in paidPayouts" :key="row.id" :payout="row" :to="`${level.path.value}/payouts/${encodeURIComponent(row.id)}`" />
             </div>
             <p v-else class="mt-4 text-sm text-muted">Nothing sent by Stripe yet.</p>
             <UButton class="mt-6" label="View Stripe payout history" color="neutral" variant="link" :to="`${level.path.value}/payouts`" />
@@ -71,17 +71,16 @@ const thisYear = Number(thisMonthKey.slice(0, 4))
 const monthName = formatCalendarDate(`${thisMonthKey}-01`, 'en', { month: 'long' })
 
 // The year by month, in UTC as the money is recorded; this month is the card's total.
-// Upcoming is what Stripe still holds or has on its way; Paid is what it has sent, with what each payout carried.
-// Start both reads together; Stripe payouts can arrive after the earnings summary.
-const performanceRequest = useAsyncData(
+// The overview shows transfers. Their underlying payments are loaded in payout detail.
+const { data: performance, error } = await useAsyncData(
     () => `earnings-performance:${route.params.org_slug}:${thisMonthKey}`,
     () => api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: thisYear, month: thisMonthKey }, validate: isEarningsPerformance }),
 )
-const { data: payouts, error: payoutsError } = await useLazyAsyncData(() => `earnings-payouts:${route.params.org_slug}`, async () => {
-  if ((await performanceRequest).data.value?.payouts_connected === false) return null
-  return api<PayoutsView>('/api/dashboard/payments', { query: { view: 'payouts', with_items: '1' }, validate: isPayoutsView })
-}, { server: false })
-const { data: performance, error } = await performanceRequest
+const { data: payoutResult, error: payoutsError } = await useLazyAsyncData(() => `earnings-payouts:${route.params.org_slug}`, async () => {
+  if (performance.value?.payouts_connected !== true) return false
+  return api<PayoutsView>('/api/dashboard/payments', { query: { view: 'payouts' }, validate: isPayoutsView })
+})
+const payouts = computed(() => payoutResult.value || null)
 const money = (amount: number) => paymentMoney(amount, performance.value!.currency)
 const monthRow = (month: string) => performance.value?.months.find(row => row.month === month)
 const paidAmount = computed(() => { const row = monthRow(thisMonthKey); if (!row) throw new Error('The selected payment month is missing'); return row.paid - row.refunded })

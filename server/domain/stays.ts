@@ -1296,7 +1296,7 @@ export function stayDetailQuery(access: StayAccess, stayId: string): BatchQuery 
   return stayDetailSelection({ query: '?', params: [access.organizationId] }, stayId, access.manage, visibleHomes(access))
 }
 
-function stayDetailSelection(organization: BatchQuery, stayId: string, manage: boolean, scope: ReturnType<typeof visibleHomes>): BatchQuery {
+export function stayDetailSelection(organization: BatchQuery, stayId: string, manage: boolean, scope: ReturnType<typeof visibleHomes> = { sql: '1 = 1', params: [] }): BatchQuery {
   const paymentColumns = manage ? `,
     (SELECT json_group_array(json_object('id', id, 'booking_id', booking_id, 'amount_minor', amount_minor, 'currency', currency,
       'method', method, 'paid_on', paid_on, 'reference', reference, 'note', note, 'created_at', created_at, 'created_by', created_by))
@@ -2026,7 +2026,7 @@ function versionChanged(results: unknown): boolean {
 /** Dashboard edits load these tenant-scoped rows with booking access in one read batch. */
 export function dashboardStayEditQueries(organization: BatchQuery, stayId: string, checkIn: unknown): BatchQuery[] {
   return [
-    stayDetailSelection(organization, stayId, true, { sql: '1 = 1', params: [] }),
+    stayDetailSelection(organization, stayId, true),
     stayTurnoverHomeQuery(organization, stayId, typeof checkIn === 'string' ? checkIn : null),
   ]
 }
@@ -2383,16 +2383,19 @@ export interface StayReservationHome {
 
 /** The same home and host the reservation shows in both inboxes. */
 export function prepareStayReservationHome(input: {
-  organizationId: string
-  productId: string
+  organizationId: string | { sql: string }
+  productId: string | { sql: string }
   showLocation: boolean
   showArrival: boolean
 }) {
   const { organizationId, productId, showLocation, showArrival } = input
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const product = typeof productId === 'string' ? '?' : productId.sql
+  const productParams = typeof productId === 'string' ? [productId] : []
   type ReservationHomeRow = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions' | 'wifi_network' | 'wifi_password' | 'directions' | 'house_manual'>
-      & { organization_name: string; listing_slug: string | null; subdomain: string | null; canonical_domain: string | null; contact_phone: string | null; checkout_instructions: string; amenities: string; details_json: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; host_json: string | null; co_hosts_json: string }
+      & { product_id: string; organization_name: string; listing_slug: string | null; subdomain: string | null; canonical_domain: string | null; contact_phone: string | null; checkout_instructions: string; amenities: string; details_json: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; host_json: string | null; co_hosts_json: string }
   const queries = [
-    { query: `SELECT p.name, c.internal_name, o.name AS organization_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
+    { query: `SELECT p.id AS product_id, p.name, c.internal_name, o.name AS organization_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
       c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password, c.directions, c.house_manual, c.checkout_instructions, c.amenities, p.details_json,
       CASE WHEN ${PUBLIC_STAY_SQL} THEN p.slug END AS listing_slug, o.subdomain,
       (SELECT domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS canonical_domain,
@@ -2415,15 +2418,16 @@ export function prepareStayReservationHome(input: {
       LEFT JOIN member m ON m.organizationId = b.organization_id AND m.id = b.assigned_member_id
       LEFT JOIN user u ON u.id = m.userId
       LEFT JOIN member_scheduling ms ON ms.organization_id = b.organization_id AND ms.member_id = b.assigned_member_id
-      WHERE c.organization_id = ? AND c.product_id = ?`, params: [organizationId, productId] },
-    mediaPlacementsQuery({ organizationId, ownerType: 'product', owners: [productId] }),
+      WHERE c.organization_id = ${organization} AND c.product_id = ${product}`, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...productParams] },
+    mediaPlacementsQuery({ organizationId, ownerType: 'product', owners: { sql: `SELECT ${product}`, params: productParams } }),
   ]
   return { queries, read }
 
   function read([houseRows, media]: Awaited<ReturnType<typeof executeBatch>>): StayReservationHome {
     const house = houseRows!.results[0] as ReservationHomeRow | undefined
+    if (!house) throw new Error('The reservation has no home')
+    const productId = house.product_id
     const photos = productPhotosFromPlacements(groupMediaPlacements(media!.results, [productId]))
-    if (!house) throw new Error(`The reservation has no home (${productId})`)
     const details = JSON.parse(house.details_json) as ProductDetails
     const address = showLocation ? parsePostalAddress(house.address) : null
     const pinFailure = showLocation ? coordinatesFailure(house) : null

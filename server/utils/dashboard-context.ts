@@ -6,7 +6,7 @@ import { getQuery } from 'nitro/h3';
 import type { H3Event } from 'nitro'
 
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { getAuthSession } from '~/server/utils/auth'
+import { getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { assertOrganizationWideAccess, assignedOfferingCondition, DASHBOARD_ORGANIZATION_COLUMNS, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type OfferingReadScope, type ResolvedMembership } from '~/server/utils/member-access'
 
@@ -203,9 +203,9 @@ export function readDashboardMembership(event: H3Event, slug: string, read: () =
   return oncePerRequest(event, `dashboard-membership:${slug}`, read)
 }
 
-export function getDashboardSession(event: H3Event, env: ReturnType<typeof cloudflareEnv>) {
+export function getDashboardSession(event: H3Event, env: ReturnType<typeof cloudflareEnv>, document?: DashboardAuthRead) {
   return oncePerRequest(event, 'dashboard-session', () => timeRequestPhase(event, 'auth_session', () =>
-    getAuthSession(event, env, { forwardCookies: event.url.pathname.startsWith('/dashboard/') })))
+    getAuthSession(event, env, { forwardCookies: event.url.pathname.startsWith('/dashboard/'), document })))
 }
 
 async function dashboardSessionContext(event: H3Event) {
@@ -229,7 +229,7 @@ function dashboardOrganizationRequired() {
     data: { code: 'ORGANIZATION_REQUIRED', field: 'org' } })
 }
 
-function dashboardOrganizationFrom(row: unknown): DashboardOrganizationRow {
+export function dashboardOrganizationFrom(row: unknown): DashboardOrganizationRow {
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
   const { organization_id, member_id, user_id, role, organization_wide: _wide, ...organization } = row as DashboardOrganizationConfig & {
     organization_id: string; name: string; slug: string; member_id: string; user_id: string; role: string; organization_wide: number

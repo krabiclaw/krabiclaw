@@ -186,8 +186,10 @@ export function participantLabel(request: GuestRequest): string {
   return request.payload.guest.name
 }
 
-export function guestRequestQuery(id: string, organizationId?: string, kind?: GuestRequestKind): BatchQuery {
-  return { query: `SELECT r.* FROM conversations r WHERE r.id = ? AND r.kind IN ('contact', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}`, params: [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : [])] }
+export function guestRequestQuery(id: string | { sql: string }, organizationId?: string | { sql: string }, kind?: GuestRequestKind): BatchQuery {
+  const idSql = typeof id === 'string' ? '?' : id.sql
+  const orgSql = typeof organizationId === 'string' ? '?' : organizationId?.sql
+  return { query: `SELECT r.* FROM conversations r WHERE r.id = ${idSql} AND r.kind IN ('contact', 'booking')${orgSql ? ` AND r.organization_id = ${orgSql}` : ''}${kind ? ' AND r.kind = ?' : ''}`, params: [...(typeof id === 'string' ? [id] : []), ...(typeof organizationId === 'string' ? [organizationId] : []), ...(kind ? [kind] : [])] }
 }
 
 export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind): Promise<GuestRequest | null> {
@@ -196,16 +198,18 @@ export async function getGuestRequest(db: DbClient, id: string, organizationId?:
   return row ? validateGuestRequest(db, row) : null
 }
 
-export function guestRequestMappingQuery(id: string, organizationId: string): BatchQuery {
+export function guestRequestMappingQuery(id: string | { sql: string }, organizationId: string | { sql: string }): BatchQuery {
+  const idSql = typeof id === 'string' ? '?' : id.sql
+  const orgSql = typeof organizationId === 'string' ? '?' : organizationId.sql
   return { query: `SELECT 1 FROM conversations r
       LEFT JOIN bookings b ON b.id = r.booking_id AND b.organization_id = r.organization_id
       LEFT JOIN channel_threads ct ON ct.conversation_id = r.id AND ct.organization_id = r.organization_id
       LEFT JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
-      WHERE r.id = ? AND r.organization_id = ? AND (
+      WHERE r.id = ${idSql} AND r.organization_id = ${orgSql} AND (
         (ct.conversation_id IS NULL AND b.owner = 'channel')
         OR (c.product_id IS NOT NULL AND (CASE WHEN b.id IS NULL THEN c.location_id = r.location_id
           ELSE ct.product_id = b.product_id END))
-      )`, params: [id, organizationId] }
+      )`, params: [...(typeof id === 'string' ? [id] : []), ...(typeof organizationId === 'string' ? [organizationId] : [])] }
 }
 
 /** Parse the conversation row already returned by a scoped read and validate its channel association. */
@@ -276,8 +280,10 @@ export function bookedRecordGuard(record: Pick<BookedRecord, 'organization_id' |
 
 type ThreadOperationalRow = Omit<ThreadOperationalRecord, 'party_size_is_minimum' | 'payment_processing'> & { party_size_is_minimum: number; payment_processing: number }
 
-export function threadOperationalRecordQuery(requestId: string, authorized?: Pick<ConversationRow, 'kind' | 'booking_id' | 'organization_id'>): BatchQuery {
-  const conversationRef = authorized ? '?' : 'owner.id'
+export function threadOperationalRecordQuery(requestId: string | { sql: string }, authorized?: Pick<ConversationRow, 'kind' | 'booking_id' | 'organization_id'>): BatchQuery {
+  const requestSql = typeof requestId === 'string' ? '?' : requestId.sql
+  const conversationRef = authorized ? requestSql : 'owner.id'
+  const requestParams = typeof requestId === 'string' ? [requestId] : []
   const now = new Date().toISOString()
   return { query: `
     SELECT br.unit, br.id, br.status, br.party_size, br.party_size_is_minimum, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_kind, br.product_name, br.product_internal_name,
@@ -285,9 +291,9 @@ export function threadOperationalRecordQuery(requestId: string, authorized?: Pic
            CASE WHEN br.status='pending' AND br.respond_by IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql(conversationRef)}) ELSE 0 END AS payment_processing,
            (SELECT rv.id FROM reviews rv WHERE rv.organization_id = br.organization_id AND rv.booking_id = br.id ORDER BY rv.created_at LIMIT 1) AS review_id, br.advance_notice_minutes
       FROM ${authorized ? `${BOOKING_RECORDS_SQL} br` : `conversations owner JOIN ${BOOKING_RECORDS_SQL} br ON br.id = owner.booking_id AND br.organization_id = owner.organization_id`}
-     WHERE ${authorized ? 'br.id = ? AND br.organization_id = ?' : "owner.id = ? AND owner.kind = 'booking'"}
+     WHERE ${authorized ? 'br.id = ? AND br.organization_id = ?' : `owner.id = ${requestSql} AND owner.kind = 'booking'`}
      LIMIT 1
-  `, params: authorized ? [requestId, requestId, now, authorized.booking_id, authorized.organization_id] : [now, requestId] }
+  `, params: authorized ? [...requestParams, ...requestParams, now, authorized.booking_id, authorized.organization_id] : [now, ...requestParams] }
 }
 
 export function threadOperationalRecordFromRow(record: unknown): ThreadOperationalRecord | null {

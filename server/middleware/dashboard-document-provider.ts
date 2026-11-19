@@ -1,6 +1,6 @@
 import { readDashboardAgenda } from '~/server/utils/dashboard-agenda-reader'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
-import { readDashboardEarnings } from '~/server/utils/dashboard-earnings'
+import { readDashboardEarnings, readDashboardPayoutsDocument } from '~/server/utils/dashboard-earnings'
 import { readDashboardStayHomes } from '~/server/utils/dashboard-stay-homes'
 import { readCalendarSettingsDocument } from '~/server/utils/google-calendar'
 import { defineHandler, HTTPError } from 'nitro'
@@ -28,6 +28,7 @@ export default defineHandler(event => {
           case '/api/dashboard/stay-homes':
             return readDashboardStayHomes(event, orgSlug, true)
           case '/api/dashboard/payments':
+            if (query.view === 'payouts') return readDashboardPayoutsDocument(event, orgSlug, query.after)
             if (query.view !== 'performance') throw new HTTPError({ statusCode: 400, message: 'Earnings performance is required' })
             return readDashboardEarnings(event, query, orgSlug)
           case '/api/dashboard/settings':

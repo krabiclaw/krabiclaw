@@ -27,9 +27,9 @@ function agendaQuery(query: Record<string, unknown>, slug: string) {
     organizationId: stringQuery(query.organization_id), locationId: stringQuery(query.location_id), organizationSlug: slug }
 }
 
-export function prepareDashboardAgendaDocument(db: DbClient, membership: BatchQuery, userId: string, slug: string, request: Record<string, unknown>) {
+export function prepareDashboardAgendaDocument(db: DbClient, membership: BatchQuery, slug: string, request: Record<string, unknown>) {
   const query = agendaQuery(request, slug)
-  const plan = prepareAgenda(db, { organizationId: { sql: BATCH_VIEWER.organization } }, query, null, { membership, userId })
+  const plan = prepareAgenda(db, { organizationId: { sql: BATCH_VIEWER.organization } }, query, null, { membership })
   return {
     queries: plan.queries,
     async apply(event: H3Event, results: D1Result[], context: Pick<Awaited<ReturnType<typeof getDashboardMemberContext>>, 'env' | 'organization'>) {

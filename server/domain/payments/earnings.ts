@@ -4,7 +4,7 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { loadOwnerPictures, ownerPicturesFromRows } from '~/server/notifications/hero'
 import { mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
-import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
+import { getStripeConnectedAccount, paymentsStripe, type StripeConnectedAccount } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { roleAllows } from '~/server/utils/member-access'
 import { authorizePayments, type FinancialPrincipal, type Payment, type VisiblePayment } from './index'
@@ -143,16 +143,23 @@ export function preparePaymentPerformance(
 export async function paymentPayouts(db: DbClient, env: CloudflareEnv, principal: FinancialPrincipal, after?: string, withItems = false) {
   await authorizePayments(principal, 'payouts')
   const account = await getStripeConnectedAccount(db, principal.organizationId)
-  if (!account?.stripe_account_id) return { organization_id: principal.organizationId, configured: false, balance: null, payouts: [], next_cursor: null, source: 'Stripe account not connected', refreshed_at: null }
+  const page = await readStripePayouts(env, principal.organizationId, account, after)
+  if (!withItems || !account?.stripe_account_id) return page
+  const stripe = paymentsStripe(env, account.livemode)
+  const options = { stripeAccount: account.stripe_account_id }
+  const paid = page.payouts.filter(row => row.status === 'paid').slice(0, 3)
+  const items = await Promise.all(paid.map(row => payoutItems(db, stripe, options, principal.organizationId, row)))
+  return { ...page, items: Object.fromEntries(paid.map((row, index) => [row.id, items[index]!])) }
+}
+
+export async function readStripePayouts(env: CloudflareEnv, organizationId: string, account: StripeConnectedAccount | null, after?: string) {
+  if (!account?.stripe_account_id) return { organization_id: organizationId, configured: false, balance: null, payouts: [], next_cursor: null, source: 'Stripe account not connected', refreshed_at: null }
   const stripe = paymentsStripe(env, account.livemode), options = { stripeAccount: account.stripe_account_id }
   const [balance, payouts] = await Promise.all([stripe.balance.retrieve({}, options), stripe.payouts.list({ limit: 50, ...(after ? { starting_after: after } : {}) }, options)])
   if (balance.livemode !== account.livemode || payouts.data.some(row => row.livemode !== account.livemode)) throw new Error('Stripe payout mode does not match connected account')
   const nextCursor = payouts.has_more ? payouts.data.at(-1)?.id : null
   if (payouts.has_more && !nextCursor) throw new Error('Stripe payout list is missing its next cursor')
-  const paid = withItems ? payouts.data.filter(row => row.status === 'paid').slice(0, 3) : []
-  const items = await Promise.all(paid.map(row => payoutItems(db, stripe, options, principal.organizationId, row)))
-  return { ...(withItems ? { items: Object.fromEntries(paid.map((row, index) => [row.id, items[index]!])) } : {}),
-    organization_id: principal.organizationId, configured: true, balance, payouts: payouts.data, next_cursor: nextCursor, source: 'Stripe', refreshed_at: new Date().toISOString() }
+  return { organization_id: organizationId, configured: true, balance, payouts: payouts.data, next_cursor: nextCursor, source: 'Stripe', refreshed_at: new Date().toISOString() }
 }
 async function connectedStripe(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const account = await getStripeConnectedAccount(db, organizationId)

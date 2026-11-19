@@ -1,10 +1,12 @@
-import type { H3Event } from 'nitro'
-import { paymentPerformance, preparePaymentPerformance } from '~/server/domain/payments/earnings'
+import { HTTPError, type H3Event } from 'nitro'
+import { paymentPerformance, preparePaymentPerformance, readStripePayouts } from '~/server/domain/payments/earnings'
 import { authorizePayments } from '~/server/domain/payments'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
 import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import type { BatchQuery } from '~/server/db'
+import { stripeConnectedAccountFromRow, stripeConnectedAccountQuery, type StripeConnectedAccount } from '~/server/utils/stripe-connect'
+import { timeRequestPhase } from '~/server/utils/request-metrics'
 import type { EarningsPerformance } from '~/shared/earnings-display'
 
 export async function readDashboardEarnings(event: H3Event, query: { year?: unknown; month?: unknown }, orgSlug?: string) {
@@ -22,15 +24,29 @@ export async function readDashboardEarnings(event: H3Event, query: { year?: unkn
   return paymentPerformance(db, principal, year, month)
 }
 
+export async function readDashboardPayoutsDocument(event: H3Event, orgSlug: string, after?: unknown) {
+  if (after !== undefined && (typeof after !== 'string' || !after)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid page cursor is required' })
+  const { env, organization, userId } = await getDashboardContext(event, { organizationSlug: orgSlug })
+  const principal = { organizationId: organization.id, userId, role: organization.role }
+  await authorizePayments(principal, 'read')
+  await authorizePayments(principal, 'payouts')
+  const payout = event.context.dashboardPayoutAccount as { organizationId: string; account: StripeConnectedAccount | null } | undefined
+  if (!payout || payout.organizationId !== organization.id) throw new HTTPError({ statusCode: 500, message: 'Earnings document is missing the Stripe account lookup' })
+  return timeRequestPhase(event, 'stripe_payouts', () => readStripePayouts(env, organization.id, payout.account, after))
+}
+
 export function prepareDashboardEarningsDocument(membership: BatchQuery, months: ReadonlySet<string>) {
+  const readsPayments = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ payments: ['read'] }))
+  const readsPayouts = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ payments: ['payouts'] }))
+  const organization = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 AND ${readsPayments} THEN ${BATCH_VIEWER.organization} END` }
+  const payout = stripeConnectedAccountQuery({
+    sql: `CASE WHEN ${readsPayouts} THEN ${organization.sql} END`,
+  })
   const reads = [...months].map(month => {
-    const readsPayments = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ payments: ['read'] }))
-    const organization = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 AND ${readsPayments} THEN ${BATCH_VIEWER.organization} END` }
-    return { month, ...preparePaymentPerformance(organization, Number(month.slice(0, 4)), month,
-      { sql: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ payments: ['payouts'] })) }) }
+    return { month, ...preparePaymentPerformance(organization, Number(month.slice(0, 4)), month, { sql: readsPayouts }) }
   })
   return {
-    queries: reads.flatMap(plan => plan.queries.map(query => withViewer(membership, query))),
+    queries: [...reads.flatMap(plan => plan.queries), payout].map(query => withViewer(membership, query)),
     apply(event: H3Event, rows: D1Result[], organization: { slug: string; id: string }) {
       let offset = 0
       const periods = new Map(reads.map(plan => {
@@ -38,6 +54,7 @@ export function prepareDashboardEarningsDocument(membership: BatchQuery, months:
         offset += plan.queries.length
         return [plan.month, plan.read(values, organization.id)]
       }))
+      event.context.dashboardPayoutAccount = { organizationId: organization.id, account: stripeConnectedAccountFromRow(rows[offset]?.results[0]) }
       event.context.dashboardEarnings = { slug: organization.slug, periods }
     },
   }
