@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { HTTPError } from 'nitro'
 import { execute, queryAll, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -52,7 +53,7 @@ export async function sendReviewRequestForBooking(
   const reviewUrl = `${publicUrl}/review-submit?token=${encodeURIComponent(token)}`
   const threadId = context.request_id
   const entry = await appendMessage(db, {
-    conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null,
+    conversationId: threadId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null,
     eventName: 'review.requested', body: 'Review invitation sent',
     dedupeKey: `review-request:${request.id}`,
   })

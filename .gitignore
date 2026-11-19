@@ -51,7 +51,6 @@ pr_body.txt
 .codex/*
 !.codex/config.toml
 !.codex/hooks/
-!.codex/hooks/block_prod_krabiclaw.py
 
 # Playwright browser binaries (installed locally, not committed)
 .playwright/

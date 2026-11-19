@@ -10,7 +10,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 // already identified it.
 //
 // One route now. The tenant comes from `event.context.organizationId`, which
-// tenant-resolution sets from the host, so krabiclaw.com gets Blawby's
+// tenant-resolution sets from the host, so blawby.com gets Blawby's
 // articles and a tenant domain gets that tenant's, by the same code.
 import { cloudflareEnv, jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { getArticleCollectionIndex, listArticleCollectionRepresentations, listPublishedArticles } from '~/server/utils/content/publishing'

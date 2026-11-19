@@ -14,8 +14,8 @@ import { captureEvents } from './support/events.ts'
 import { applySchema } from './support/schema.ts'
 
 const cacheEnv: OrganizationChangeDrainEnv = {
-  NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com',
-  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com',
+  NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://blawby.com',
+  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.com',
 }
 
 async function migratedCacheD1(context: TestContext) {
@@ -143,10 +143,10 @@ test('cache invalidation drain enforces the durable work lifecycle', async (t) =
     `).first<{ status: string }>()
     assert.deepEqual(row, { status: 'pending' })
     await kv.put('public~org~v4~page', 'public resource')
-    await kv.put('html:org.krabiclaw.com:/', 'html')
+    await kv.put('html:org.blawby.com:/', 'html')
     assert.equal(await drainPublicResourceCacheInvalidations(db, kv, cacheEnv, change), 1)
     assert.equal(await kv.get('public~org~v4~page'), null)
-    assert.equal(await kv.get('html:org.krabiclaw.com:/'), null)
+    assert.equal(await kv.get('html:org.blawby.com:/'), null)
     const processed = await db.prepare(`
       SELECT status FROM public_resource_cache_invalidations WHERE id = 'pending'
     `).first<{ status: string }>()
@@ -154,7 +154,7 @@ test('cache invalidation drain enforces the durable work lifecycle', async (t) =
 
     await insertInvalidation(db, { id: 'local-write', status: 'pending', createdAt: '2026-01-02T00:00:00.000Z' })
     await kv.put('public~org~v4~page', 'stale public resource')
-    const local = { NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com', NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3107' }
+    const local = { NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://blawby.com', NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3107' }
     assert.equal(await drainPublicResourceCacheInvalidations(db, kv, local, { organizationId: 'org', invalidationId: 'local-write' }), 1)
     assert.equal(await kv.get('public~org~v4~page'), null)
   })
@@ -200,16 +200,16 @@ test('an organization write purges that organization despite an older invalidati
   })
   for (const organization of ['org', 'changed']) {
     await kv.put(`public~${organization}~v4~page`, 'cached public resource')
-    await kv.put(`html:${organization}.krabiclaw.com:/`, 'cached HTML')
+    await kv.put(`html:${organization}.blawby.com:/`, 'cached HTML')
   }
   const queue = captureEvents()
   const env = { ...cacheEnv, DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs, EVENTS: queue.binding, ZARAZ_ANALYTICS: 'absent' } as CloudflareEnv
   bindDatabaseEvents(db, env)
   await purgePublicResourceCacheNow(env, 'changed')
   assert.equal(await kv.get('public~changed~v4~page'), null)
-  assert.equal(await kv.get('html:changed.krabiclaw.com:/'), null)
+  assert.equal(await kv.get('html:changed.blawby.com:/'), null)
   assert.equal(await kv.get('public~org~v4~page'), 'cached public resource')
-  assert.equal(await kv.get('html:org.krabiclaw.com:/'), 'cached HTML')
+  assert.equal(await kv.get('html:org.blawby.com:/'), 'cached HTML')
   // The write clears its own organization's caches and queues the row that makes every
   // other worker converge; the queue's own bookkeeping belongs to the drainer,
   // not to a mutation's response time.
@@ -227,7 +227,7 @@ test('an organization write purges that organization despite an older invalidati
   await consumeEvent(env, { type: 'deployment.adopt_pending_work' })
   await queue.drain(env, 'site.cache_changed')
   assert.equal(await kv.get('public~org~v4~page'), null)
-  assert.equal(await kv.get('html:org.krabiclaw.com:/'), null)
+  assert.equal(await kv.get('html:org.blawby.com:/'), null)
 })
 
 

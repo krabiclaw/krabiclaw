@@ -13,13 +13,13 @@ import {
 } from '../../server/utils/tenant-hosts.ts'
 
 const prodEnv: TenantHostEnv = {
-  NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'krabiclaw.com',
-  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com',
+  NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'blawby.com',
+  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.com',
 }
 
 const localEnv: TenantHostEnv = {
   NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'http://localhost:3000',
-  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com',
+  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.com',
 }
 
 const stagingEnv: TenantHostEnv = {
@@ -28,16 +28,16 @@ const stagingEnv: TenantHostEnv = {
 }
 
 test('normalizeHost strips protocol, trailing slash and port', () => {
-  assert.equal(normalizeHost('https://krabiclaw.com'), 'krabiclaw.com')
+  assert.equal(normalizeHost('https://blawby.com'), 'blawby.com')
   assert.equal(normalizeHost('http://localhost:3000'), 'localhost')
   assert.equal(normalizeHost('http://localhost:3000/'), 'localhost')
-  assert.equal(normalizeHost('https://krabiclaw.com/api/mcp'), 'krabiclaw.com')
-  assert.equal(normalizeHost('krabiclaw.com'), 'krabiclaw.com')
+  assert.equal(normalizeHost('https://blawby.com/api/mcp'), 'blawby.com')
+  assert.equal(normalizeHost('blawby.com'), 'blawby.com')
   assert.equal(normalizeHost(''), '')
   assert.equal(normalizeHost(undefined), '')
   assert.equal(hostnameOf('localhost:3000'), 'localhost')
   assert.equal(hostnameOf('127.0.0.1:3000'), '127.0.0.1')
-  assert.equal(hostnameOf('krabiclaw.com'), 'krabiclaw.com')
+  assert.equal(hostnameOf('blawby.com'), 'blawby.com')
   assert.equal(hostnameOf(''), '')
 })
 
@@ -48,10 +48,10 @@ test('getPlatformHosts includes loopback and only explicitly configured domains'
     assert.ok(hosts.includes('127.0.0.1'))
     assert.ok(hosts.includes(normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)))
     assert.ok(hosts.includes(normalizeHost(env.NUXT_PUBLIC_PLATFORM_DOMAIN)))
-    assert.equal(hosts.includes('www.krabiclaw.com'), false)
+    assert.equal(hosts.includes('www.blawby.com'), false)
   }
   assert.deepEqual(getPlatformHosts({}), ['localhost', '127.0.0.1'])
-  assert.equal(getPlatformHosts(prodEnv).filter((h) => h === 'krabiclaw.com').length, 1)
+  assert.equal(getPlatformHosts(prodEnv).filter((h) => h === 'blawby.com').length, 1)
 })
 
 test('isPlatformHost', async (t) => {
@@ -65,16 +65,22 @@ test('isPlatformHost', async (t) => {
   })
 
   await t.test('recognizes the configured platform domain with and without a port', () => {
+    assert.equal(isPlatformHost('blawby.com', prodEnv), true)
+    assert.equal(isPlatformHost('blawby.com:443', prodEnv), true)
+    assert.equal(isPlatformHost('www.blawby.com', prodEnv), false)
+    assert.equal(isPlatformHost('www.blawby.com:443', prodEnv), false)
+  })
+
+  await t.test('accepts the legacy apex when the current production free-site domain is configured', () => {
     assert.equal(isPlatformHost('krabiclaw.com', prodEnv), true)
     assert.equal(isPlatformHost('krabiclaw.com:443', prodEnv), true)
     assert.equal(isPlatformHost('www.krabiclaw.com', prodEnv), false)
-    assert.equal(isPlatformHost('www.krabiclaw.com:443', prodEnv), false)
   })
 
   await t.test('does not recognize an unconfigured production host', () => {
     const env = { ...localEnv, NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3000' }
-    assert.equal(isPlatformHost('krabiclaw.com', env), false)
-    assert.equal(isPlatformHost('www.krabiclaw.com', env), false)
+    assert.equal(isPlatformHost('blawby.com', env), false)
+    assert.equal(isPlatformHost('www.blawby.com', env), false)
   })
 
   await t.test('rejects unrelated external hosts and tenant custom domains', () => {
@@ -82,7 +88,7 @@ test('isPlatformHost', async (t) => {
       assert.equal(isPlatformHost('example.com', env), false)
       assert.equal(isPlatformHost('pottery-house-krabi.com', env), false)
       assert.equal(isPlatformHost('pottery-house-krabi.com:8080', env), false)
-      assert.equal(isPlatformHost('demo.krabiclaw.com', env), false)
+      assert.equal(isPlatformHost('demo.blawby.com', env), false)
     }
   })
 
@@ -92,7 +98,7 @@ test('isPlatformHost', async (t) => {
   })
 
   await t.test('treats workers.dev hosts as no platform host', () => {
-    assert.equal(isPlatformHost('krabiclaw-preview.paulchrisluke.workers.dev', prodEnv), false)
+    assert.equal(isPlatformHost('blawby-preview.paulchrisluke.workers.dev', prodEnv), false)
     assert.equal(isPlatformHost('some-other-worker.paulchrisluke.workers.dev', prodEnv), false)
   })
 })
@@ -113,7 +119,7 @@ test('non-production is local and staging, including staging tenant aliases', ()
 
 test('tenant headers are confined to local hosts', () => {
   assert.equal(usesTenantHeader('localhost:3000'), true)
-  assert.equal(usesTenantHeader('krabiclaw-preview.paulchrisluke.workers.dev'), false)
+  assert.equal(usesTenantHeader('blawby-preview.paulchrisluke.workers.dev'), false)
   assert.equal(usesTenantHeader('preview.krabiclaw.com'), false)
   assert.equal(usesTenantHeader('staging.krabiclaw.com'), false)
   assert.equal(usesTenantHeader('pottery-house-staging.krabiclaw.com'), false)

@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -247,7 +248,7 @@ test('consultations, classes and table bookings are sent their automatic message
       const sent = (await planned(id, templateId))!
       assert.equal(sent.status, 'sent')
       assert.deepEqual(await db.prepare('SELECT e.conversation_id, e.author_kind, d.channel, d.purpose, d.status FROM messages e JOIN guest_thread_deliveries d ON d.message_id = e.id WHERE e.id = ?').bind(sent.message_id).first(),
-        { conversation_id: requestId, author_kind: 'krabiclaw', channel: 'email', purpose: 'scheduled_message', status: 'sent' })
+        { conversation_id: requestId, author_kind: PLATFORM_MESSAGE_AUTHOR_KIND, channel: 'email', purpose: 'scheduled_message', status: 'sent' })
     }
   } finally {
     await runtime.dispose()

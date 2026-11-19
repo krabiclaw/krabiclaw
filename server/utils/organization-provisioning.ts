@@ -22,7 +22,7 @@ import { onboardingCompletedMessage, ownerWelcomeMessage } from '~/server/notifi
 import { HTTPError } from 'nitro'
 import { isAPIError } from 'better-auth/api'
 import { isRecord } from '~/utils/api-clients'
-import { ONBOARDING_ORGANIZATION_MARKER, onboardingDraftWriteGuard, type SavedOnboardingDraft } from '~/server/utils/onboarding-drafts'
+import { LEGACY_ONBOARDING_ORGANIZATION_MARKER, ONBOARDING_ORGANIZATION_MARKER, onboardingDraftWriteGuard, type SavedOnboardingDraft } from '~/server/utils/onboarding-drafts'
 
 type SetupEnv = CloudflareEnv & { PLATFORM_OWNER_EMAILS?: string }
 
@@ -307,7 +307,8 @@ export async function findOnboardingOrganization(env: CloudflareEnv, userId: str
   // The native adapter returns metadata as stored JSON; its parser is private.
   const metadata = typeof existing.metadata === 'string' ? JSON.parse(existing.metadata) : existing.metadata
   if (metadata != null && !isRecord(metadata)) throw new HTTPError({ statusCode: 500, statusMessage: `Stored metadata for organization ${existing.id} is invalid`, data: { code: 'INVALID_STORED_CONTENT', organization_id: existing.id } })
-  if (metadata?.[ONBOARDING_ORGANIZATION_MARKER] !== identity.draftId) return null
+  const draftId = metadata?.[ONBOARDING_ORGANIZATION_MARKER] ?? metadata?.[LEGACY_ONBOARDING_ORGANIZATION_MARKER]
+  if (draftId !== identity.draftId) return null
   const owner = await adapter.findMemberByOrgId({ userId, organizationId: existing.id })
   if (owner?.role !== 'owner') throw new HTTPError({ statusCode: 409, statusMessage: 'Website organization creation has no verified owner', data: { code: 'ONBOARDING_ORGANIZATION_OWNER_MISSING', draft_id: identity.draftId, organization_id: existing.id } })
   return { organizationId: existing.id }

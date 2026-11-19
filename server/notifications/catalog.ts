@@ -393,7 +393,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: onboardingCompletedMessage({
       organizationName: studio, ownerName: 'Priya Shah', ownerEmail: 'priya@example.com',
       siteUrl: 'https://www.potteryhousekrabi.com/',
-      viewCustomerUrl: 'https://blawby.com/dashboard/krabiclaw/platform-accounts?user=preview-user&organization=preview-organization',
+      viewCustomerUrl: 'https://blawby.com/dashboard/platform/platform-accounts?user=preview-user&organization=preview-organization',
     }),
   },
 
@@ -456,7 +456,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     message: contentReportedMessage({
       organizationName: 'Pinecone Stays', reporter: 'Priya Shah (priya@example.com)', subject: 'conversation', blocked: true,
       reason: 'Harassing messages', excerpt: 'You will regret this. I know where you live.',
-      reviewUrl: 'https://blawby.com/dashboard/krabiclaw/platform-reports',
+      reviewUrl: 'https://blawby.com/dashboard/platform/platform-reports',
     }),
   },
 

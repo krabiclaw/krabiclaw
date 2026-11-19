@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, reportReason, type ContentReport, type ContentReportEnv } from '~/server/domain/content-reports'
@@ -432,7 +433,7 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
   }
   const messageId = crypto.randomUUID()
   const row = await appendMessage(db, {
-    id: messageId, conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null, body,
+    id: messageId, conversationId: threadId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, body,
     payload: { key: input.idempotencyKey }, dedupeKey: teamMessageKey(threadId, input.idempotencyKey),
   })
   const created = row.id === messageId
@@ -485,7 +486,7 @@ export async function reportTeamMessage(env: ContentReportEnv, db: DbClient, acc
     'SELECT author_kind, author_user_id, body FROM messages WHERE organization_id = ? AND conversation_id = ? AND id = ?', [access.organizationId, threadId, messageId])
   if (!message) fail(404, 'TEAM_MESSAGE_NOT_FOUND', 'That message is not in this conversation', 'message_id')
   if (message.author_kind === 'member' && message.author_user_id === access.userId) fail(422, 'OWN_MESSAGE', 'You cannot report your own message', 'message_id')
-  const authorUserId = message.author_kind === 'krabiclaw' ? null : message.author_user_id
+  const authorUserId = message.author_kind === PLATFORM_MESSAGE_AUTHOR_KIND ? null : message.author_user_id
   const id = contentReportId(access.userId, input.idempotency_key)
   await executeBatch(db, [contentReportInsert({
     id, organizationId: access.organizationId, reporterUserId: access.userId, subject: 'message', conversationId: null,

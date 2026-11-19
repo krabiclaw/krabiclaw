@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { CHANNEX_PROPERTY_HOME } from '~/server/integrations/channex/listing-mappings'
 import { initialConversationParticipants, initialListingParticipants, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
@@ -162,7 +163,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
   const joining = mapped && stay && mapped.conversation_id !== stay.conversation_id ? stay : null
   // Nobody has written in it: no one's words, only what Blawby recorded about the booking.
   if (joining && !await queryFirst(db, `SELECT 1 FROM conversations opened WHERE opened.id = ? AND opened.booking_id = ?
-      AND NOT EXISTS (SELECT 1 FROM messages written WHERE written.conversation_id = opened.id AND (written.author_kind <> 'krabiclaw' OR written.event_name IN ('${MIRRORED_EVENT}', '${SCHEDULED_MESSAGE_EVENT}')))
+      AND NOT EXISTS (SELECT 1 FROM messages written WHERE written.conversation_id = opened.id AND (written.author_kind <> '${PLATFORM_MESSAGE_AUTHOR_KIND}' OR written.event_name IN ('${MIRRORED_EVENT}', '${SCHEDULED_MESSAGE_EVENT}')))
       AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE conversation_id = opened.id)`, [joining.conversation_id, joining.id])) {
     fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The inquiry and stay already have separate conversations; reconcile them without discarding either timeline', 'conversation_id')
   }
@@ -220,7 +221,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
     return true
   }
   if (await alreadySent()) return
-  const authorKind = message.sender === 'guest' ? 'guest' : message.sender === 'property' ? 'member' : 'krabiclaw'
+  const authorKind = message.sender === 'guest' ? 'guest' : message.sender === 'property' ? 'member' : PLATFORM_MESSAGE_AUTHOR_KIND
   // A moved conversation's new account delivers its Airbnb history again under
   // new ids: the same sender, Airbnb timestamp, text and attachment count is a
   // message the conversation already has.

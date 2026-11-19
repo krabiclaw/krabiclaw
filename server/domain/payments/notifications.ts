@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { publishEvent } from '~/server/events'
 import type Stripe from 'stripe'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -83,7 +84,7 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   let sourceEntryId: string | null = null
   if (threadId && ownerMessage) {
     const message = await appendMessage(db, {
-      conversationId: threadId, authorKind: 'krabiclaw', authorUserId: null,
+      conversationId: threadId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null,
       eventName: `payment.${input.kind}`,
       body: [ownerMessage.title, ...ownerMessage.facts.filter(fact => fact.key === 'amount' || fact.key === 'productTitle').map(fact => `${fact.label}: ${fact.value}`)].join('\n'),
       payload: { payment_id: payment.id, native_object_id: input.nativeId, status: input.status, amount: input.amount, currency: payment.currency },

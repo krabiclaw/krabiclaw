@@ -20,10 +20,10 @@ for (const entry of NOTIFICATION_CATALOG) {
   try {
     const unsubscribeUrl = entry.message.category === 'product_news'
       ? '{{{RESEND_UNSUBSCRIBE_URL}}}'
-      : 'https://krabiclaw.com/unsubscribe?x=preview'
+      : 'https://blawby.com/unsubscribe?x=preview'
     const { html, text } = await renderNotificationEmail(entry.message, {
-      platformDomain: 'krabiclaw.com',
-      preferencesUrl: 'https://krabiclaw.com/dashboard/account/profile/notifications',
+      platformDomain: 'blawby.com',
+      preferencesUrl: 'https://blawby.com/dashboard/account/profile/notifications',
       // Supplying this to every purpose proves the renderer itself keeps
       // transactional mail free of unsubscribe controls.
       unsubscribeUrl,

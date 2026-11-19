@@ -63,6 +63,9 @@ test('public reference expansion preserves raw CMS blocks and refuses a differen
   assert.match(publicBlocks[0]!.data.markdown, /read_example/)
   assert.equal(blocks[0]!.data.markdown, MCP_TOOL_REFERENCE_DIRECTIVE)
   assert.equal(publicBlocks[0]!.id, blocks[0]!.id)
+  const legacy = [{ ...blocks[0]!, data: { ...blocks[0]!.data, markdown: '<!-- krabiclaw:mcp-tool-reference -->' } }]
+  assert.deepEqual(expandMcpDocumentationBlocks(legacy, scope, markdown), publicBlocks)
+  assert.throws(() => expandMcpDocumentationBlocks([...legacy, ...blocks], scope, markdown), /exactly one source-mode/)
   for (const change of [{ organizationId: 'another-tenant' }, { kind: 'page' }, { collection: 'blog' }]) {
     assert.throws(() => expandMcpDocumentationBlocks(blocks, { ...scope, ...change }, markdown), /requires a documentation article in the platform organization/)
   }

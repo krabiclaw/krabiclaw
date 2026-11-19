@@ -418,6 +418,11 @@ export default defineNuxtConfig({
   },
 
   routeRules: {
+    // Preserve artwork URLs used by old bookmarks and installed manifests.
+    ...Object.fromEntries(['logo', 'logo-192', 'maskable-192', 'maskable-512'].map(file => [
+      `/krabi-claw-${file}.png`,
+      { redirect: { to: `/blawby-${file}.png`, status: 301 } },
+    ])),
     // Preserve published docs illustration and social-card URLs.
     ...Object.fromEntries([...new Set(Object.values(DOCS_CATEGORY_ART).map(({ file }) => file))]
       .flatMap(file => ['', '-og'].map(suffix => [

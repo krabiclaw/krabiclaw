@@ -79,7 +79,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       # CIMD client metadata must be public HTTPS, which localhost cannot serve.
-      MCP_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-client-metadata
+      MCP_CIMD_CLIENT_URL: https://staging.blawby.com/api/auth/oauth2/test-client-metadata
       PLAYWRIGHT_WORKERS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -331,6 +331,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           BLAWBY_ZARAZ_RUNTIME_API_TOKEN: ${{ secrets.BLAWBY_ZARAZ_RUNTIME_API_TOKEN }}
+          ZARAZ_PAGEVIEW_EVENT: ${{ vars.ZARAZ_PAGEVIEW_EVENT }}
           OPENAI_APPS_CHALLENGE_BLAWBY_B64: ${{ secrets.OPENAI_APPS_CHALLENGE_BLAWBY_B64 }}
         shell: bash
         run: |
@@ -349,7 +350,13 @@ jobs:
             const bytes = Buffer.from(b64, "base64");
             if (!bytes.length || bytes.toString("base64") !== b64) throw Error("Invalid Blawby OpenAI challenge encoding");
           '
-          corepack yarn wrangler deploy --strict --secrets-file "$binding_file"
+          pageview_binding=()
+          case "$ZARAZ_PAGEVIEW_EVENT" in
+            "") ;;
+            blawby_native_pageview) pageview_binding+=(--var "ZARAZ_PAGEVIEW_EVENT:$ZARAZ_PAGEVIEW_EVENT") ;;
+            *) echo "Invalid ZARAZ_PAGEVIEW_EVENT" >&2; exit 1 ;;
+          esac
+          corepack yarn wrangler deploy --strict --secrets-file "$binding_file" "${pageview_binding[@]}"
   verify-production:
     name: Verify production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

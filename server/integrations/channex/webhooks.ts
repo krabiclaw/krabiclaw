@@ -1,6 +1,7 @@
 import { channexList, channexRequest, type ChannexEnv } from './client'
 import { ChannexDataError, object, resource, string, type Resource } from './data'
 import { CHANNEX_WEBHOOK_CALLER } from '~/server/utils/internal-secret'
+import { BLAWBY_FREE_SITE_HOST, LEGACY_FREE_SITE_HOST, LEGACY_STAGING_PLATFORM_HOST, STAGING_PLATFORM_HOST } from '~/server/utils/tenant-hosts'
 
 /**
  * Blawby's webhook in a Channex account (docs.channex.io webhook-collection):
@@ -47,6 +48,7 @@ function propertyOf(webhook: Resource): string | null {
 function differences(webhook: Resource, want: ReturnType<typeof desired>): string[] {
   const has = webhook.attributes
   const found: string[] = []
+  if (has.callback_url !== want.callback_url) found.push('callback_url uses the legacy Blawby platform host')
   const events = typeof has.event_mask === 'string' ? has.event_mask.split(';').filter(Boolean).sort() : null
   if (JSON.stringify(events) !== JSON.stringify([...CHANNEX_WEBHOOK_EVENTS].sort())) found.push(`event_mask is ${JSON.stringify(has.event_mask)}, needs ${JSON.stringify(want.event_mask)}`)
   const headers = has.headers === null ? {} : object(has.headers, 'webhook.headers')
@@ -60,16 +62,29 @@ function differences(webhook: Resource, want: ReturnType<typeof desired>): strin
 }
 
 /**
- * Find Blawby's webhook for this callback and scope and report how it
- * differs; with `apply`, create it or bring it into line. Running it again
- * over a matching webhook changes nothing. Two webhooks for the same callback
- * and scope are refused: which one Channex delivers to cannot be told.
+ * Reconcile one property or global webhook, including a callback on the
+ * previous platform host. Applying a hostname change updates the existing
+ * webhook ID. Two candidates in the same scope are refused.
  */
 export async function ensureChannexWebhook(env: ChannexEnv, target: WebhookTarget, apply: boolean): Promise<WebhookResult> {
   const want = desired(target)
+  const callbacks = new Set([want.callback_url])
+  const oldCallback = new URL(want.callback_url)
+  if (oldCallback.protocol === 'https:' && !oldCallback.port) {
+    if (oldCallback.hostname === BLAWBY_FREE_SITE_HOST) {
+      oldCallback.hostname = LEGACY_FREE_SITE_HOST
+      callbacks.add(oldCallback.href)
+    } else if (oldCallback.hostname === STAGING_PLATFORM_HOST) {
+      oldCallback.hostname = LEGACY_STAGING_PLATFORM_HOST
+      callbacks.add(oldCallback.href)
+    }
+  }
   const find = async () => {
     const matches = (await channexList(env, '/webhooks', 'webhook'))
-      .filter(webhook => webhook.attributes.callback_url === want.callback_url && propertyOf(webhook) === target.propertyId && (webhook.attributes.is_global === true) === want.is_global)
+      .filter(webhook => typeof webhook.attributes.callback_url === 'string'
+        && callbacks.has(webhook.attributes.callback_url)
+        && propertyOf(webhook) === target.propertyId
+        && (webhook.attributes.is_global === true) === want.is_global)
     if (matches.length > 1) throw new ChannexDataError(`Channex has ${matches.length} webhooks for ${want.callback_url} (${target.propertyId ?? 'global'}): ${matches.map(webhook => webhook.id).join(', ')}. Delete all but one in Channex first.`)
     return matches[0]
   }

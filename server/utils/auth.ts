@@ -182,6 +182,7 @@ export interface CloudflareEnv {
   STRIPE_TEST_CONNECT_WEBHOOK_SECRET?: string
   STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET?: string
   GA4_API_SECRET?: string
+  ZARAZ_PAGEVIEW_EVENT?: string
   GOOGLE_ADS_DEVELOPER_TOKEN?: string
   APPLE_TEAM_ID?: string
   APPLE_KEY_ID?: string
@@ -814,13 +815,13 @@ function buildAuth(env: CloudflareEnv) {
           // Explicit issuer so oauthProvider's getOAuthServerConfig advertises the
           // same value as authorization_servers in /.well-known/oauth-protected-resource.
           // Without this, oauth-provider falls back to ctx.context.baseURL
-          // (https://krabiclaw.com/api/auth) but jwt() signs with options.baseURL
-          // (https://krabiclaw.com) — the mismatch causes ChatGPT to reject the connector.
+          // (https://blawby.com/api/auth) but jwt() signs with options.baseURL
+          // (https://blawby.com) — the mismatch causes ChatGPT to reject the connector.
           issuer: authBaseUrl,
         },
       }),
       anonymous({
-        generateRandomEmail: () => `anon-${crypto.randomUUID()}@customers.krabiclaw.local`,
+        generateRandomEmail: () => `anon-${crypto.randomUUID()}@customers.blawby.local`,
         // The anonymous user is deleted by the plugin right after this returns,
         // and every domain FK to it is ON DELETE SET NULL. Everything that
         // identifies the person moves to the real user first, in one batch.

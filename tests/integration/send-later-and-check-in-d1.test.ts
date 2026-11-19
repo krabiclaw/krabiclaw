@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -122,7 +123,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     const sent = (await checkIn(ana.id))!
     assert.equal(sent.status, 'sent')
     assert.deepEqual(await db.prepare('SELECT conversation_id, author_kind, author_user_id, body FROM messages WHERE id = ?').bind(sent.message_id).first(), {
-      conversation_id: ana.conversation_id, author_kind: 'krabiclaw', author_user_id: null, body: 'The lockbox code is 4821.',
+      conversation_id: ana.conversation_id, author_kind: PLATFORM_MESSAGE_AUTHOR_KIND, author_user_id: null, body: 'The lockbox code is 4821.',
     })
 
     // Send later: the owner schedules a reply in Ana's conversation; only the owner sees it.
@@ -260,7 +261,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
   try {
     const db = await runtime.getD1Database('DB')
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
-      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', EMAIL_FROM: 'Blawby <hello@krabiclaw.com>', RESEND_API_KEY: 're_controlled_http', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_DOMAIN: 'reply.proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', EMAIL_FROM: 'Blawby <hello@blawby.com>', RESEND_API_KEY: 're_controlled_http', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await applySchema(db)
     await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES (?, 'Org', 'org', 'org', 'USD', 'UTC')").bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
@@ -321,7 +322,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     assert.equal(posts[0]?.headers?.References, undefined)
     // Resend's webhook records the email's RFC Message-ID, which later replies answer.
     assert.equal(await applyResendEmailEvent(db, env, { type: 'email.sent', created_at: now,
-      data: { email_id: 'sent-1', created_at: now, from: 'hello@krabiclaw.com', to: ['delivered@resend.dev'], subject: posts[0]!.subject, message_id: '<sent-1@resend.dev>' } } as Parameters<typeof applyResendEmailEvent>[2]), 'unchanged')
+      data: { email_id: 'sent-1', created_at: now, from: 'hello@blawby.com', to: ['delivered@resend.dev'], subject: posts[0]!.subject, message_id: '<sent-1@resend.dev>' } } as Parameters<typeof applyResendEmailEvent>[2]), 'unchanged')
     assert.equal(await db.prepare('SELECT email_message_id FROM guest_thread_deliveries WHERE message_id = ?').bind(failed.message_id).first('email_message_id'), '<sent-1@resend.dev>')
     assert.deepEqual((await ownReplies(db, owner, reply.threadId)).map(message => [message.id, message.status]), [[reply.id, 'sent']], 'the outbox shows the completed reply as sent')
     assert.equal((await retry(reply.body, reply.id)).ok, true)

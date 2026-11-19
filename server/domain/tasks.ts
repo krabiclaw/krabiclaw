@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { listingGrantSql, staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import { assignedOperationsRoles, isOrganizationRole, organizationRoleCards, roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { publishChangedJobs } from '~/server/events'
@@ -958,7 +959,7 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
         ${conversationMemberSql('r', viewer.user)} AS viewer_seated,
         (SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.user_id = ${viewer.user} AND seat.role = 'member'
           WHERE c.organization_id = x.organization_id AND c.kind = 'team' AND c.booking_id = x.booking_id
-            AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.author_kind = 'krabiclaw' AND instr(json_extract(m.payload_json, '$.key'), 'job:' || x.id || ':') = 1)
+            AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}' AND instr(json_extract(m.payload_json, '$.key'), 'job:' || x.id || ':') = 1)
           ORDER BY c.created_at DESC, c.id LIMIT 1) AS team_conversation_id
       FROM (SELECT t.id, t.organization_id, t.kind, t.version, t.subject_type, t.subject_id, t.product_id, t.location_id, t.title, t.timezone, t.starts_at, t.due_at, t.claim_role, t.assigned_member_id,
           CASE WHEN t.kind = 'custom' AND t.assigned_member_id = ${viewer.member} THEN t.notes END AS notes,
@@ -1219,7 +1220,7 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   const privatePrep = current.subject_type === 'product_session'
   const hasThread = view.booking_id && (isJobTask(current) || privatePrep)
   const thread = hasThread ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
-      JOIN messages m ON m.conversation_id = c.id AND m.author_kind = 'krabiclaw'
+      JOIN messages m ON m.conversation_id = c.id AND m.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}'
       JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.role = 'member' AND seat.user_id = ?
      WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id = ?
        AND (? = 0 OR EXISTS (SELECT 1 FROM conversation_participants assignee
@@ -1228,7 +1229,7 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
        AND (json_extract(m.payload_json, '$.key') = ? OR instr(json_extract(m.payload_json, '$.key'), ?) = 1)
        AND (? = 0 OR NOT EXISTS (SELECT 1 FROM messages later JOIN json_each(?) stop
          ON json_extract(later.payload_json, '$.key') = stop.value OR instr(json_extract(later.payload_json, '$.key'), stop.value || ':') = 1
-         WHERE later.conversation_id = c.id AND later.author_kind = 'krabiclaw' AND later.sequence > m.sequence))
+         WHERE later.conversation_id = c.id AND later.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}' AND later.sequence > m.sequence))
      ORDER BY m.created_at DESC, m.id DESC LIMIT 1`, [viewer.principal.userId, organizationId, view.booking_id, privatePrep ? 1 : 0, current.assigned_member_id,
     jobKey(current), `${jobKey(current)}:after:`, privatePrep ? 1 : 0, d1JsonStringSet(jobEndKeys(current.id))]) : null
   if (authored && !thread) fail(422, 'TASK_OUTCOME_REQUIRES_CONVERSATION', 'Notes and photos need the job’s team conversation', photos.length ? 'photos' : 'note')

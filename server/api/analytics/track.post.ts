@@ -19,6 +19,7 @@ import {
 import { normalizeLocale } from '~/server/utils/organization-i18n'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { normalizeReferrerHost, sanitizeAttributionParams } from '~/utils/analytics-attribution'
+import { LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT, NATIVE_PAGEVIEW_ZARAZ_EVENT } from '~/utils/zaraz-consent'
 import { defineHandler } from 'nitro'
 import { getCookie, readBody } from 'nitro/h3'
 import { recordZarazPageviewReceipt, zarazPageviewDelivery } from '~/server/utils/ga4-delivery'
@@ -39,7 +40,7 @@ const RATE_LIMIT_MAX = 120
 const RATE_LIMIT_WINDOW_SECONDS = 60
 
 export default defineHandler(async (event) => {
-  const db = cloudflareEnv(event).db
+  const { db, ZARAZ_PAGEVIEW_EVENT } = cloudflareEnv(event)
   if (!db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
 
   try {
@@ -153,7 +154,14 @@ export default defineHandler(async (event) => {
       now,
     })
     const ga4Delivery = await zarazPageviewDelivery(db, { eventId: body.event_id, organizationId, sessionId, cookieHeader: event.req.headers.get('cookie') ?? '' })
-    return jsonResponse({ ok: true, ga4_delivery: ga4Delivery })
+    return jsonResponse({
+      ok: true,
+      ga4_delivery: ga4Delivery.dispatch
+        ? { ...ga4Delivery, event_name: ZARAZ_PAGEVIEW_EVENT === NATIVE_PAGEVIEW_ZARAZ_EVENT
+            ? NATIVE_PAGEVIEW_ZARAZ_EVENT
+            : LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT }
+        : ga4Delivery,
+    })
   } catch (error) {
     console.error('Analytics track error:', error instanceof Error ? error.message : String(error))
     return jsonResponse({ error: 'Failed to log analytics event' }, { status: 500 })

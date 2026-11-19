@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import { OPEN_TERMS, OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import assert from 'node:assert/strict'
@@ -58,7 +59,7 @@ async function boot(){
  await applySchema(db)
  // A business taking payments is billed for them on its plan's Stripe customer, and the platform site records what it billed.
  await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone, "stripeCustomerId") VALUES(?,'Payments','payments','payments','{}','theme','USD','active','complete','flat','experience',?, 'America/New_York','cus_operating')`).bind(ORG,NOW).run()
- await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','Blawby','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
+ await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','Blawby','platform','blawby','{}','blawby-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
  await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('payments-en',?,'en',1,'published')").bind(ORG).run()
  for(const id of ['guest','verified','other'])await db.prepare("INSERT INTO user(id,name,email,emailVerified,isAnonymous) VALUES(?,?,?,1,?)").bind(id,id,`${id}@example.com`,Number(id==='guest')).run()
  await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','product',?,'Consultation','consultation','guest','guest')").bind(ORG).run()
@@ -644,10 +645,10 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   await db.batch(opening.map(write=>db.prepare(write.query).bind(...write.params)))
   const question=(await db.prepare("SELECT id FROM messages WHERE conversation_id='buyer-conversation' AND event_name='thread.submission'").first<string>('id'))!
   const publicReply=await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'member',authorUserId:'other',channel:'web',eventName:'thread.member_reply',body:'Public host reply',payload:{provider_secret:'private-diagnostic'},dedupeKey:'public-host-reply'})
-  const capture=await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'krabiclaw',authorUserId:null,eventName:'payment.payment_captured',body:'Payment received',payload:{stripe_charge_id:'private-charge'},dedupeKey:'public-capture'})
+  const capture=await appendMessage(db,{conversationId:'buyer-conversation',authorKind:PLATFORM_MESSAGE_AUTHOR_KIND,authorUserId:null,eventName:'payment.payment_captured',body:'Payment received',payload:{stripe_charge_id:'private-charge'},dedupeKey:'public-capture'})
   // A member's words that are not a reply to the guest, and a dispute: the business's alone.
   await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'member',authorUserId:'other',body:'Internal staff note',dedupeKey:'internal-note'})
-  await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'krabiclaw',authorUserId:null,eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payload:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
+  await appendMessage(db,{conversationId:'buyer-conversation',authorKind:PLATFORM_MESSAGE_AUTHOR_KIND,authorUserId:null,eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payload:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
   // A member archived it for themselves; the guest's own view does not change.
   await archiveConversation(db,{organizationId:ORG,conversationId:'buyer-conversation',userId:'other',archived:true})
   const secrets=['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic']
@@ -952,7 +953,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
           amount: 10000,
           currency: 'usd',
           livemode: false,
-          metadata: { krabiclaw_payment_id: 'ach-payment' },
+          metadata: { blawby_payment_id: 'ach-payment' },
           amount_details: {
             surcharge: {
               status: 'unavailable',
@@ -983,7 +984,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
           amount: 10000,
           currency: 'usd',
           livemode: false,
-          metadata: { krabiclaw_payment_id: 'ach-payment' },
+          metadata: { blawby_payment_id: 'ach-payment' },
           payment_method: 'pm_achproof123',
         })
       }
@@ -991,7 +992,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
         assert.equal(new Headers(init?.headers).get('idempotency-key'), 'krabiclaw-failed:ach-payment')
         achIntentStatus = 'canceled'
         return Response.json({ id: 'pi_ach-payment', object: 'payment_intent', status: achIntentStatus, amount: 10000, currency: 'usd', livemode: false,
-          cancellation_reason: 'abandoned', metadata: { krabiclaw_payment_id: 'ach-payment' } })
+          cancellation_reason: 'abandoned', metadata: { blawby_payment_id: 'ach-payment' } })
       }
       if (url.pathname === '/v1/payment_intents/pi_ach-payment/confirm' && init?.method === 'POST') {
         // A method that leaves the site comes back to the business's own pay page, never the platform.
@@ -1006,7 +1007,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
           client_secret: 'pi_ach-payment_secret',
           payment_method: { id: 'pm_achproof123', type: 'us_bank_account' },
           livemode: false,
-          metadata: { krabiclaw_payment_id: 'ach-payment' },
+          metadata: { blawby_payment_id: 'ach-payment' },
         })
       }
       throw new Error(`Unexpected Stripe request: ${init?.method} ${url.pathname}`)
@@ -1020,7 +1021,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
     // A confirmation decline leaves the purchase open for another method.
     const declinedIntent = {
       id: 'pi_ach-payment', livemode: false, currency: 'usd',
-      metadata: { krabiclaw_payment_id: 'ach-payment' },
+      metadata: { blawby_payment_id: 'ach-payment' },
       status: 'requires_payment_method', amount: 10000,
       last_payment_error: { type: 'card_error', code: 'card_declined' },
     } as Stripe.PaymentIntent
@@ -1052,7 +1053,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
 
     // The bank can fail long after the checkout expires. The financial event cancels the booking.
     const failedIntent = {
-      id: 'pi_ach-payment', livemode: false, currency: 'usd', metadata: { krabiclaw_payment_id: 'ach-payment' },
+      id: 'pi_ach-payment', livemode: false, currency: 'usd', metadata: { blawby_payment_id: 'ach-payment' },
       status: 'requires_payment_method', amount: 10000,
       last_payment_error: { code: 'bank_account_unusable', message: 'The bank payment failed' },
     } as unknown as Stripe.PaymentIntent
@@ -1094,14 +1095,14 @@ test('a business registered for Stripe Tax has tax calculated by Stripe from the
       }
       if (url.pathname === '/v1/payment_intents/pi_taxed' && init?.method === 'POST') {
         sent.update = body
-        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: Number(body.get('amount')), currency: 'usd', livemode: false, metadata: { krabiclaw_payment_id: 'taxed' }, payment_method: 'pm_cardUS', amount_details: { surcharge: { status: 'available', maximum_amount: 330 } } })
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: Number(body.get('amount')), currency: 'usd', livemode: false, metadata: { blawby_payment_id: 'taxed' }, payment_method: 'pm_cardUS', amount_details: { surcharge: { status: 'available', maximum_amount: 330 } } })
       }
       if (url.pathname === '/v1/payment_intents/pi_taxed' && init?.method === 'GET') {
-        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: 11025, currency: 'usd', livemode: false, metadata: { krabiclaw_payment_id: 'taxed' }, payment_method: 'pm_cardUS' })
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: 11025, currency: 'usd', livemode: false, metadata: { blawby_payment_id: 'taxed' }, payment_method: 'pm_cardUS' })
       }
       if (url.pathname === '/v1/payment_intents/pi_taxed/confirm' && init?.method === 'POST') {
         sent.confirm = body
-        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'processing', amount: 11355, currency: 'usd', client_secret: 'pi_taxed_secret', payment_method: 'pm_cardUS', livemode: false, metadata: { krabiclaw_payment_id: 'taxed' } })
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'processing', amount: 11355, currency: 'usd', client_secret: 'pi_taxed_secret', payment_method: 'pm_cardUS', livemode: false, metadata: { blawby_payment_id: 'taxed' } })
       }
       throw new Error(`Unexpected Stripe request: ${init?.method} ${url.pathname}`)
     })
@@ -1383,7 +1384,7 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
   const document = await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, 'webhook-wins', claim, sealed)
   assert.ok(document)
   const tenant = { query: "SELECT id FROM organization WHERE subdomain=? AND status='active'", params: ['payments'] }
-  const unauthorized = paymentReturnDocumentGuard({ ...tenant, params: ['krabiclaw'] }, document)
+  const unauthorized = paymentReturnDocumentGuard({ ...tenant, params: ['blawby'] }, document)
   await assert.rejects(db.batch([db.prepare(unauthorized.query).bind(...unauthorized.params ?? [])]), /PAYMENT_RETURN_DOCUMENT_STALE/)
   const trace = new H3Event(new Request('http://payments.localhost/api/public/payments/webhook-wins/return'))
   const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
@@ -1391,7 +1392,7 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
   const calls = fakeStripe(t, async (url, init) => {
    if (!webhook && init?.method === 'GET' && url.pathname === '/v1/payment_intents/pi_webhook-wins') {
     webhook = processPaymentEvent(db, stripe, { id: 'evt_webhook_wins', type: 'payment_intent.succeeded', account: 'acct_seller',
-     livemode: false, data: { object: { id: 'pi_webhook-wins', metadata: { krabiclaw_payment_id: 'webhook-wins' } } } } as unknown as Stripe.Event, env)
+     livemode: false, data: { object: { id: 'pi_webhook-wins', metadata: { blawby_payment_id: 'webhook-wins' } } } } as unknown as Stripe.Event, env)
     await webhook
    }
    return null
@@ -1432,7 +1433,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
    return null
   }, statuses)
   const stripe = getStripe(env)
-  const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
+  const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { blawby_payment_id: id } } } } as unknown as Stripe.Event, env)
   const bookingsOf = (id: string) => db.prepare('SELECT count(*) n FROM bookings b JOIN payment_checkout_holds h ON h.converted_booking_id=b.id WHERE h.payment_id=?').bind(id).first('n')
 
   // Someone booked the last seat while this purchase was authorizing.
@@ -1456,7 +1457,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   await assert.rejects(() => deliver('voided'))
   assert.equal(await bookingsOf('voided'), 1)
   statuses.voided = 'canceled'
-  await processPaymentEvent(db, stripe, { id: 'evt_voided_canceled', type: 'payment_intent.canceled', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_voided', metadata: { krabiclaw_payment_id: 'voided' } } } } as unknown as Stripe.Event, env)
+  await processPaymentEvent(db, stripe, { id: 'evt_voided_canceled', type: 'payment_intent.canceled', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_voided', metadata: { blawby_payment_id: 'voided' } } } } as unknown as Stripe.Event, env)
   await events.runNext(env, 'payment.financial')
   assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE conversation_id='request-voided' AND event_name='payment.payment_failed'").first('n'), 1)
   assert.equal(await bookingsOf('voided'), 1)
@@ -1480,11 +1481,11 @@ test('a bank debit that loses its seat is cancelled, and a clearing retry record
    }
    if (statuses[id] !== 'processing') return null
    return Response.json({ id: `pi_${id}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000,
-    status: 'processing', payment_method: { id: 'pm_proof', type: 'us_bank_account' }, metadata: { krabiclaw_payment_id: id } })
+    status: 'processing', payment_method: { id: 'pm_proof', type: 'us_bank_account' }, metadata: { blawby_payment_id: id } })
   }, statuses)
   const stripe = getStripe(env)
   const deliver = (id: string, event: string, type: string) => processPaymentEvent(db, stripe, { id: event, type, account: 'acct_seller', livemode: false,
-   data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
+   data: { object: { id: `pi_${id}`, metadata: { blawby_payment_id: id } } } } as unknown as Stripe.Event, env)
 
   await confirmable(db, 'taken', inMinutes(30))
   const seat = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })

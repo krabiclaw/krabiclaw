@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { HTTPError } from 'nitro'
 import { jobAssigneeSql, sessionPrepTaskQueries } from '~/server/domain/tasks'
 import { BOOKING_ENDS_SQL, BOOKING_RECORDS_SQL, bookingDay, parseGuestRequest, stayRequestPayBySql, stayRequestRespondBySql } from '~/server/domain/requests'
@@ -286,13 +287,13 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
     if (message.actorUserId && message.actorUserId !== context.primaryGuestId && message.actorName) return firstName(message.actorName)
     return context.guestName
   }
-  if (message.authorKind === 'krabiclaw' && message.eventName === MIRRORED_EVENT) return 'Airbnb Support'
+  if (message.authorKind === PLATFORM_MESSAGE_AUTHOR_KIND && message.eventName === MIRRORED_EVENT) return 'Airbnb Support'
   if (context.buyer) return context.business
   if (message.authorKind === 'member' && message.actorUserId && message.actorUserId !== context.viewerId) {
     if (!message.actorName) throw new Error('A team reply has no author name')
     return firstName(message.actorName)
   }
-  return message.authorKind === 'krabiclaw' ? 'Blawby' : 'You'
+  return message.authorKind === PLATFORM_MESSAGE_AUTHOR_KIND ? 'Blawby' : 'You'
 }
 
 /**

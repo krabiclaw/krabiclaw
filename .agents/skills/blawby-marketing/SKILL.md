@@ -65,7 +65,7 @@ Pacing:
 
 The ending: the phone scales to 0.92 and fades on the brand name, then the Blawby shield (`public/platform/blawby.svg`) lands on white and holds for about 2 s. Use the mark alone, with no wordmark next to it.
 
-No captions are burned into the picture; make a subtitle track if one is needed. Add a quiet music bed only after the picture is approved, as Airbnb's film has. Take it from the YouTube Studio Audio Library of the Blawby channel (the `@krabiclaw` brand account until it is renamed), opened through the owner's Chrome as above: choose an instrumental with no vocals, longer than the film, whose license reads "No attribution is required", and record the title, artist and license next to the file. Mix it at −26 LUFS under the −16 LUFS voice (about 14 dB below, as Airbnb's), fade in over about 1 s and out over the last 3 s. No sound effects.
+No captions are burned into the picture; make a subtitle track if one is needed. Add a quiet music bed only after the picture is approved, as Airbnb's film has. Take it from the YouTube Studio Audio Library of the Blawby channel, opened through the owner's Chrome as above: choose an instrumental with no vocals, longer than the film, whose license reads "No attribution is required", and record the title, artist and license next to the file. Mix it at −26 LUFS under the −16 LUFS voice (about 14 dB below, as Airbnb's), fade in over about 1 s and out over the last 3 s. No sound effects.
 
 ## Checking and delivery
 

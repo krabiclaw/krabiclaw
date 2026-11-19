@@ -1,5 +1,8 @@
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxPhoto, InboxThreadKind } from '~/server/domain/guest-threads/types'
 
+// Stored on messages so existing conversations keep their author and visibility.
+export const PLATFORM_MESSAGE_AUTHOR_KIND = 'krabiclaw'
+
 export type ConversationViewerRole = 'guest' | 'member'
 
 export function guestConversationPath(orgSlug: string, conversationId: string): string {

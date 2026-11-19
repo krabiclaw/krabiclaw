@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { isLodgingConfirmationMode, LODGING_BOOKING_CHOICES } from '~/shared/lodging-booking'
 import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
-import { isLegalPracticeSite, PLATFORM_THEME_ID, resolvePublicSite } from '~/utils/site-routing'
+import { isLegalPracticeSite, isPlatformSite, resolvePublicSite } from '~/utils/site-routing'
 import { getPublicCompliance, getPublicConsultationSettings } from '~/server/utils/professional-services'
 import { deleteConfig, getConfig, setConfig } from '~/server/utils/organization-config'
 import { createSystemSubdomain, isSystemSubdomainSpent } from '~/server/utils/domains'
@@ -639,7 +639,7 @@ export async function updateOrganizationSettingsFields(
   // A palette change resolves to the whole palette the site will render, so
   // what is stored is always complete and validated before anything is written.
   if (updates.palette !== undefined) {
-    if (organization.theme_id === PLATFORM_THEME_ID) {
+    if (isPlatformSite({ themeId: organization.theme_id })) {
       return { status: 400, data: { error: "Blawby's own site has fixed colors" } }
     }
     if (updates.palette !== null) {
@@ -738,7 +738,7 @@ export async function updateOrganizationSettingsFields(
 
     // The platform hostname is deployment configuration. Its stored alias
     // remains routable across a display name change.
-    if (organization.theme_id === PLATFORM_THEME_ID) {
+    if (isPlatformSite({ themeId: organization.theme_id })) {
       return attemptOrganizationUpdate(db, env, organization, organizationId, updates, userId, null)
     }
 
