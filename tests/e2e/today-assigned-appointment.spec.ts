@@ -200,6 +200,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const documentResponse = await page.goto(new URL(bookingPath, baseURL!).toString())
     expect(documentResponse?.status()).toBe(200)
     expect(documentResponse?.headers()['cache-control']).toContain('no-store')
+    expect(await documentResponse?.text()).toContain('id="dashboard-panel-booking-details"')
     await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
     // The attorney is the practice area's: the owner reads who handles it and changes it on the practice area.
     const ownerDetail = page.locator('#dashboard-panel-booking-details')
