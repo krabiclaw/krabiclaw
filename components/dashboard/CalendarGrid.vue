@@ -170,7 +170,7 @@ import type { LocationQueryRaw, RouteLocationRaw } from 'vue-router'
 import type { StayCalendarStay, StayHome, StayNight } from '~/server/domain/stays'
 import type { Place, PlaceDay } from '~/server/domain/places'
 import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, STAY_CHANNEL_COLORS, STAY_CHANNEL_LABELS, parseStayCalendarRules, type StayChannel } from '~/shared/bookings'
-import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
+import { bookingEditorPath } from '~/shared/messages-contract'
 import ChannelMark from '~/lib/components/workspace/messages/ChannelMark.vue'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
@@ -294,7 +294,10 @@ const guestCount = (stay: GridStay) => `${stay.adults + stay.children} ${stay.ad
 const addressOf = (home: Home) => home.address ? [home.address.address, home.address.city].filter(Boolean).join(', ') : 'No address'
 const matches = (name: string, detail: string) => !appliedSearch.value || `${name} ${detail}`.toLowerCase().includes(appliedSearch.value.toLowerCase())
 const staysById = computed(() => new Map((homesData.value?.bookings ?? []).map(stay => [stay.booking_id, stay])))
-const stayTo = (id: string) => bookingConversationOrRecordPath(orgSlug, id, staysById.value.get(id)?.conversation_id ?? null)
+const stayTo = (id: string) => router.resolve({
+  path: bookingEditorPath(orgSlug, id),
+  query: { from: from.value, q: search.value || undefined },
+}).fullPath
 // A stay's bar spans the run of nights it holds on screen; a run cut by the window's edge still names its guest.
 const homeRows = computed<GridRow[]>(() => {
   return (homesData.value?.homes ?? [])
