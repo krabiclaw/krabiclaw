@@ -1560,6 +1560,89 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
  } finally { await runtime.dispose() }
 })
 
+test('the Stripe renewal closes the old meter before delivering usage held for its replacement', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv } = await boot()
+ try {
+  const secret = 'whsec_meter_renewal'
+  const env = { ...stripeEnv(bootEnv), STRIPE_WEBHOOK_SECRET: secret, STRIPE_BILLING_METER_MIGRATION: 'true' } as CloudflareEnv
+  const renewal = Math.floor(Date.now() / 1000) - 120
+  const period = { current_period_start: renewal, current_period_end: renewal + 31 * 86400 }
+  const metadata: Record<string, string> = { blawby_meter_renewal: String(renewal) }
+  const contract = {
+   id: 'sub_meter_renewal', customer: 'cus_operating', status: 'active', schedule: null, pending_update: null, cancel_at_period_end: false, cancel_at: null,
+   billing_mode: { type: 'flexible' }, metadata,
+   items: { has_more: false, data: [
+    { id: 'si_base', ...period, price: { id: 'price-base', product: { metadata: { plan_id: 'business' } } } },
+    { id: 'si_ads', ...period, price: { id: 'price-ad_spend', tax_behavior: 'unspecified', product: { metadata: { product_family: 'ad_spend' } } } },
+    { id: 'si_addon', ...period, price: { id: 'price-addon', product: { metadata: {} } } },
+   ] },
+  }
+  await db.prepare("INSERT INTO subscription(id,plan,referenceId,stripeCustomerId,stripeSubscriptionId,status,seats) VALUES('sub-row','business',?,'cus_operating','sub_meter_renewal','active',1)").bind(ORG).run()
+  await db.prepare("INSERT INTO usage_events(id,organization_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES('during-renewal',?,'ad_spend','USD',125,'ads:renewing',?,?,'payments')").bind(ORG,NOW,NOW).run()
+  const realFetch = globalThis.fetch
+  const reported: string[] = []
+  let changes = 0
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   if (url.hostname !== 'api.stripe.com') return realFetch(request, init)
+   const catalog = publishedCatalogResponse(url)
+   if (catalog) {
+    const list = await catalog.json() as { data: Array<{ id: string; event_name?: string; recurring?: { meter: string } }> }
+    const additional = url.pathname === '/v1/prices'
+     ? list.data.map(price => ({ ...price, id: `replacement-${price.id}`, tax_behavior: 'unspecified', recurring: { ...price.recurring, meter: `replacement-${price.recurring!.meter}` } }))
+     : url.pathname === '/v1/billing/meters'
+      ? list.data.map(meter => ({ ...meter, id: `replacement-${meter.id}`, event_name: meter.event_name!.replace('krabiclaw_', 'blawby_') }))
+      : []
+    return Response.json({ ...list, data: [...list.data, ...additional] })
+   }
+   if (url.pathname === '/v1/subscriptions/sub_meter_renewal') {
+    if (init?.method === 'POST') {
+     const form = new URLSearchParams(String(init.body))
+     assert.deepEqual(Object.fromEntries(form), {
+      'items[0][id]': 'si_ads', 'items[0][price]': 'replacement-price-ad_spend',
+      billing_cycle_anchor: 'unchanged', proration_behavior: 'none', 'metadata[blawby_meter_renewed]': String(renewal),
+     })
+     contract.items.data[1]!.price.id = 'replacement-price-ad_spend'
+     metadata.blawby_meter_renewed = String(renewal)
+     changes++
+    }
+    return Response.json(contract)
+   }
+   if (url.pathname === '/v1/billing/meter_events') {
+    const form = new URLSearchParams(String(init?.body))
+    const name = form.get('event_name')!
+    const identifier = form.get('identifier')!
+    assert.equal(form.get('payload[value]'), '125')
+    assert.equal(identifier, new Headers(init?.headers).get('idempotency-key'))
+    if (name.startsWith('blawby_')) assert.equal(changes, 1)
+    reported.push(name)
+    return Response.json({ object: 'billing.meter_event', event_name: name, identifier, timestamp: renewal, payload: {} })
+   }
+   throw new Error(`Unexpected Stripe request ${init?.method} ${url.pathname}`)
+  })
+
+  await assert.rejects(() => deliverPaymentsUsage(db, env, ORG), /not yet activated the replacement meter/)
+  assert.equal(await db.prepare("SELECT delivery_at FROM usage_events WHERE id='during-renewal'").first('delivery_at'), null)
+  const payload = JSON.stringify({ id: 'evt_meter_invoice', object: 'event', type: 'invoice.finalized', data: { object: {
+   id: 'in_renewed', customer: 'cus_operating', billing_reason: 'subscription_cycle', period_end: renewal,
+   parent: { subscription_details: { subscription: contract.id, metadata: { ...metadata } } },
+  } } })
+  const signer = new Stripe('sk_test_signer')
+  const signature = await signer.webhooks.generateTestHeaderStringAsync({ payload, secret })
+  for (let attempt = 0; attempt < 2; attempt++) {
+   const response = await createAuth(env).handler(new Request('https://proof.example/api/auth/stripe/webhook', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body: payload,
+   }))
+   assert.equal(response.status, 200, await response.text())
+  }
+  const delivered = await db.prepare("SELECT delivery_at, error FROM usage_events WHERE id='during-renewal'").first()
+  assert.ok(delivered?.delivery_at)
+  assert.equal(delivered.error, null)
+  assert.deepEqual(reported, ['krabiclaw_ad_spend', 'krabiclaw_ad_spend', 'blawby_ad_spend'])
+  assert.equal(changes, 1)
+ } finally { await runtime.dispose() }
+})
+
 test('Better Auth Stripe tells the business its new plan, its change of plan and a plan that will not renew, once each', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv } = await boot()
  try {

@@ -690,8 +690,15 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
 
     if (image) canonicalOperations.push(image)
 
+    const replacementDefinition = definition.meter?.replacementEventName
+      ? { ...definition, meter: { ...definition.meter, eventName: definition.meter.replacementEventName } }
+      : null
+    const replacementMeter = replacementDefinition ? canonicalMeter(snapshot, replacementDefinition) : null
+    const replacementPrice = replacementMeter && existing
+      ? resolveCanonicalPrice(existing, prices, replacementDefinition, seatPriceId, replacementMeter.id)
+      : null
     for (const price of prices) {
-      if (!isRecurringBasePrice(price, seatPriceId) || price.id === canonical?.id) continue
+      if (!isRecurringBasePrice(price, seatPriceId) || price.id === canonical?.id || price.id === replacementPrice?.id) continue
       destructiveOperations.push({ type: 'deactivate_price', productId: existing?.id, priceId: price.id, expected: price })
     }
 

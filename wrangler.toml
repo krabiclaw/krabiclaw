@@ -58,6 +58,7 @@ pattern = "http://*/*"
 zone_name = "blawby.com"
 
 [vars]
+STRIPE_BILLING_METER_MIGRATION = "true"
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 APPLE_SERVICES_ID = "com.krabiclaw.web"
@@ -283,6 +284,7 @@ region = "aws:us-west-2"
 crons = []
 
 [env.staging.vars]
+STRIPE_BILLING_METER_MIGRATION = "true"
 # Channex staging, where the Airbnb test accounts live. CHANNEX_API_KEY is a secret.
 CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
 # Sign in with Apple audience: the native app's bundle id.

@@ -39,19 +39,25 @@ function priceProductId(price: Stripe.Price): string {
  * family, its `monthly_price_id`, on the active meter with the event name and
  * formula `BILLING_METERS` names, at exactly the published rate.
  */
-export function selectMeteredPrices({ products, prices, meters }: StripeCatalog): Record<BillingMeterKey, Stripe.Price> {
+export function selectMeteredPrices({ products, prices, meters }: StripeCatalog, replacement = false): Record<BillingMeterKey, Stripe.Price> {
   return Object.fromEntries(BILLING_METER_KEYS.map(key => {
     const definition = BILLING_METERS[key]
     const matching = products.filter(product => product.active && product.metadata?.product_family === key)
     if (matching.length !== 1) throw new Error(`Stripe catalog has ${matching.length} active ${definition.name} products; exactly one is required`)
     const product = matching[0]!
-    const price = prices.find(row => row.id === product.metadata.monthly_price_id?.trim() && priceProductId(row) === product.id)
-    const meter = meters.find(row => row.id === price?.recurring?.meter)
+    const eventName = replacement ? definition.replacementEventName : definition.eventName
+    const defaultPriceId = product.metadata.monthly_price_id?.trim()
+    const meterIds = new Set(meters.filter(meter => meter.event_name === eventName && meter.status === 'active').map(meter => meter.id))
+    const matches = prices.filter(row => priceProductId(row) === product.id
+      && (replacement ? row.active && meterIds.has(row.recurring?.meter ?? '') : row.id === defaultPriceId))
+    if (matches.length !== 1) throw new Error(`Stripe product ${product.id} has ${matches.length} prices on the ${eventName} meter`)
+    const price = matches[0]!
+    const meter = meters.find(row => row.id === price.recurring?.meter)
     const rateMatches = price?.billing_scheme === 'per_unit' && price.unit_amount_decimal !== null && Number(String(price.unit_amount_decimal)) === Number(definition.unitAmountDecimal)
     if (!price || !price.active || price.currency !== 'usd' || price.recurring?.usage_type !== 'metered' || price.recurring.interval !== 'month'
       || price.recurring.interval_count !== 1 || !rateMatches || !meter || meter.status !== 'active'
-      || meter.event_name !== definition.eventName || meter.default_aggregation.formula !== definition.formula) {
-      throw new Error(`Stripe product ${product.id} must bill ${definition.name} monthly on the ${definition.eventName} meter at the published rate`)
+      || meter.event_name !== eventName || meter.default_aggregation.formula !== definition.formula) {
+      throw new Error(`Stripe product ${product.id} must bill ${definition.name} monthly on the ${eventName} meter at the published rate`)
     }
     return [key, price]
   })) as Record<BillingMeterKey, Stripe.Price>
