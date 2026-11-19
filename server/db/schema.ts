@@ -1,4 +1,4 @@
-import { PLATFORM_MESSAGE_AUTHOR_KIND } from "../../shared/messages-contract"
+import { PLATFORM_MESSAGE_AUTHOR_KINDS } from "../../shared/messages-contract"
 import type { OrganizationSettings } from '../../shared/organization-settings'
 import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/organization-settings'
 import type { MediaCategory } from '~/shared/media-placement-contract'
@@ -218,7 +218,7 @@ export const messages = sqliteTable("messages", {
 	organization_id: text().notNull(),
 	conversation_id: text().notNull(),
 	sequence: integer().notNull(),
-	author_kind: text({ enum: ["guest", "member", PLATFORM_MESSAGE_AUTHOR_KIND] }).notNull(),
+	author_kind: text({ enum: ["guest", "member", ...PLATFORM_MESSAGE_AUTHOR_KINDS] }).notNull(),
 	author_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
 	channel: text({ enum: ["web", "email", "whatsapp", "airbnb"] }),
 	body: text(),

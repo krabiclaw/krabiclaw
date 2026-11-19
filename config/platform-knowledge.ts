@@ -185,7 +185,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     body: 'Blawby is the business AI agent. Connect ChatGPT, Claude, and compatible AI apps to business records and supported actions. Manage menus, bookings, classes, consultations, direct stay bookings, listings, and customer messages.',
     icon: 'sparkles',
     section: 'Platform',
-    keywords: ['home', 'overview', 'ai agent', 'business ai agent', 'chatgpt', 'claude', 'platform', 'krabiclaw', 'run your business'],
+    keywords: ['home', 'overview', 'ai agent', 'business ai agent', 'chatgpt', 'claude', 'platform', 'run your business'],
     surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {

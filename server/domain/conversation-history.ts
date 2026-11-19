@@ -1,7 +1,7 @@
 import { roleMatchesSql, workspaceOperationsRoles } from '~/utils/organization-access'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
-import { PLATFORM_MESSAGE_AUTHOR_KIND, type ConversationEntriesPage, type ConversationEntry, type ConversationHeader, type ConversationMessage, type ConversationPage, type ConversationViewerRole } from '~/shared/messages-contract'
+import { PLATFORM_MESSAGE_AUTHOR_KINDS_SQL, isPlatformMessageAuthor, type ConversationEntriesPage, type ConversationEntry, type ConversationHeader, type ConversationMessage, type ConversationPage, type ConversationViewerRole } from '~/shared/messages-contract'
 import { accountActivityPath } from '~/shared/account-activity'
 import { formatFormAnswer } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
@@ -130,7 +130,7 @@ function presentEntries(
   for (const message of history.entries) {
     const mirrored = message.event_name === MIRRORED_EVENT
     const scheduled = message.event_name === SCHEDULED_MESSAGE_EVENT
-    const automatic = scheduled || (message.event_name === null && message.author_kind === PLATFORM_MESSAGE_AUTHOR_KIND)
+    const automatic = scheduled || (message.event_name === null && isPlatformMessageAuthor(message.author_kind))
     const opening = message.event_name === OPENING_EVENT || message.event_name === SUBMISSION_EVENT
     const authorKind = messageRole(message, conversation.user_id)
     const name = message.author_user_id === null ? null : history.actors.get(message.author_user_id) ?? null
@@ -144,7 +144,7 @@ function presentEntries(
     }
     const payload = parseMessagePayload(message)
     const meta = payload.meta && typeof payload.meta === 'object' ? payload.meta : null
-    const support = mirrored && authorKind === PLATFORM_MESSAGE_AUTHOR_KIND
+    const support = mirrored && isPlatformMessageAuthor(authorKind)
     const providerName = mirrored && meta ? entryText(Reflect.get(meta, 'name')) : null
     const side = authorKind === 'guest' || opening || support ? 'guest' : 'business'
     const authorUserId = guestViewer && (!mine || authorKind !== 'guest') ? null : message.author_user_id
@@ -152,7 +152,7 @@ function presentEntries(
       : side === 'guest' ? guestViewer && (mine || opening) ? 'You' : providerName || (message.author_user_id !== conversation.user_id && name) || guestName
         : guestViewer ? context.organization_name
           : scheduled ? 'Automatic'
-            : mine || mirrored ? 'You' : name ? (conversation.kind === 'team' ? name : firstName(name)) : message.author_kind === PLATFORM_MESSAGE_AUTHOR_KIND ? 'Sent automatically' : 'Deleted account'
+            : mine || mirrored ? 'You' : name ? (conversation.kind === 'team' ? name : firstName(name)) : isPlatformMessageAuthor(message.author_kind) ? 'Sent automatically' : 'Deleted account'
     const photos = history.photos.get(message.id)?.length ?? 0
     const links = mirrored && Array.isArray(payload.attachments) ? payload.attachments.length : 0
     const unshownFiles = Math.max(links - photos, 0) + (Array.isArray(payload.unshownFiles) ? payload.unshownFiles.length : 0)
@@ -163,7 +163,7 @@ function presentEntries(
     const sentAt = mirrored && typeof payload.provider_inserted_at === 'string' ? providerInstant(payload.provider_inserted_at) : message.occurred_at
     const projected = presentMessage(message, history, { author, viewerRole: role, guestName, authorUserId, side, sentAt, body,
       automatic, showAlerts: conversation.kind === 'team', unshownFiles })
-    projected.job = message.author_kind === PLATFORM_MESSAGE_AUTHOR_KIND && typeof payload.key === 'string' && payload.key.startsWith('job:')
+    projected.job = isPlatformMessageAuthor(message.author_kind) && typeof payload.key === 'string' && payload.key.startsWith('job:')
     if (side === 'business') {
       if (newestBusiness && newestBusiness.receipt !== 'Not delivered') newestBusiness.receipt = null
       newestBusiness = projected
@@ -212,7 +212,7 @@ export async function loadConversationPage(
               SELECT 1 FROM conversation_participants seat JOIN member assigned
                 ON assigned.id = t.assigned_member_id AND assigned.organizationId = seat.organization_id AND assigned.userId = seat.user_id
               WHERE seat.conversation_id = c.id AND seat.role = 'member'
-            ) THEN (SELECT m.id FROM messages m WHERE m.conversation_id = c.id AND m.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}'
+            ) THEN (SELECT m.id FROM messages m WHERE m.conversation_id = c.id AND m.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL})
               AND ${jobPostMatchSql('t', 'm')} ORDER BY m.sequence DESC LIMIT 1) END AS message_id
             FROM tasks t WHERE t.organization_id = c.organization_id AND t.status = 'open'
               AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep') AND (${jobBookingIdSql('t')}) = c.booking_id
@@ -231,7 +231,7 @@ export async function loadConversationPage(
           'product_kind', (SELECT booked.kind FROM products booked WHERE booked.id = b.product_id AND booked.organization_id = b.organization_id),
           'confirmation', CASE WHEN c.kind = 'booking' AND b.status = 'confirmed' THEN
             (SELECT json_object('at', m.occurred_at, 'message_id', m.id, 'event', m.event_name) FROM messages m
-              WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}'
+              WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL})
                 AND m.event_name IN ('booking.confirm', 'payment.payment_captured')
               ORDER BY m.sequence DESC LIMIT 1) END
         ) END` : 'NULL'} AS reservation

@@ -182,7 +182,6 @@ export interface CloudflareEnv {
   STRIPE_TEST_CONNECT_WEBHOOK_SECRET?: string
   STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET?: string
   GA4_API_SECRET?: string
-  ZARAZ_PAGEVIEW_EVENT?: string
   GOOGLE_ADS_DEVELOPER_TOKEN?: string
   APPLE_TEAM_ID?: string
   APPLE_KEY_ID?: string

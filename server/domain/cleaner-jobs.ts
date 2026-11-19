@@ -1,4 +1,4 @@
-import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
+import { PLATFORM_MESSAGE_AUTHOR_KINDS_SQL } from '~/shared/messages-contract'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { jobThreadParticipantsKey, postAutomaticTeamMessage, reseatAutomaticThread } from '~/server/domain/team-messages'
@@ -124,13 +124,13 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
       SELECT id FROM conversations WHERE organization_id = ? AND kind = 'team' AND booking_id IN (SELECT value FROM json_each(?))
       UNION
       SELECT c.id FROM conversations c JOIN messages m ON m.conversation_id = c.id
-      WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id IS NOT NULL AND m.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}'
+      WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id IS NOT NULL AND m.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL})
         AND json_extract(m.payload_json, '$.key') IN (SELECT value FROM json_each(?))
     )
     SELECT m.id AS message_id, m.conversation_id AS thread_id, t.booking_id AS subject_id, t.participants_key,
       json_extract(m.payload_json, '$.key') AS idempotency_key
     FROM relevant_threads r JOIN conversations t ON t.id = r.id JOIN messages m ON m.conversation_id = t.id
-    WHERE m.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}' AND json_type(m.payload_json, '$.key') = 'text' ORDER BY m.conversation_id, m.sequence`,
+    WHERE m.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) AND json_type(m.payload_json, '$.key') = 'text' ORDER BY m.conversation_id, m.sequence`,
     [organizationId, d1JsonStringSet(subjectIds), organizationId, d1JsonStringSet(prepKeys)]) : []
   const postsByThread = new Map<string, Map<string, string>>()
   const threads = new Map<string, { subject_id: string; participants_key: string }>()

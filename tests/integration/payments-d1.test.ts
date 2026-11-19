@@ -1670,7 +1670,7 @@ test('the Stripe renewal closes the old meter before delivering usage held for i
   t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
    const url = new URL(request instanceof Request ? request.url : String(request))
    if (url.hostname !== 'api.stripe.com') return realFetch(request, init)
-   const catalog = publishedCatalogResponse(url)
+   const catalog = publishedCatalogResponse(url, 'legacy')
    if (catalog) {
     const list = await catalog.json() as { data: Array<{ id: string; event_name?: string; recurring?: { meter: string } }> }
     const additional = url.pathname === '/v1/prices'

@@ -56,7 +56,7 @@ import {
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, destinationUnavailable, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
-import { PLATFORM_MESSAGE_AUTHOR_KIND, bookingConversationOrRecordPath } from '~/shared/messages-contract'
+import { PLATFORM_MESSAGE_AUTHOR_KIND, isPlatformMessageAuthor, bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome, type DeliverySubject } from '~/server/domain/guest-threads/deliveries'
 import { GUEST_NOTE_EVENT, appendMessage, findMessageByDedupeKey, getMessage, guestConversationMemberSql, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, messagePreview } from '~/server/domain/guest-threads/attachments'
@@ -1492,7 +1492,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       },
     })
   }
-  if (entry.conversation_id !== stay.conversation_id || entry.author_kind !== PLATFORM_MESSAGE_AUTHOR_KIND || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different message')
+  if (entry.conversation_id !== stay.conversation_id || !isPlatformMessageAuthor(entry.author_kind) || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different message')
   const stored = parseMessagePayload(entry)
   if (stored?.refund_minor !== refundMinor) throw new Error('Stay cancellation notification differs from its recorded refund')
   // A host cancellation has one required notice. Guest cancellations also
@@ -1788,7 +1788,7 @@ async function alertedMessage(db: DbClient, thread: GuestRequest, entry: Message
 /** Channex marks an Airbnb agent's message with the role AGENT (read from a live thread, 2026-10-23); the mirror records it as Blawby's relay. */
 export function isAirbnbSupportMessage(entry: MessageRow): boolean {
   const meta = entry.channel === 'airbnb' ? parseMessagePayload(entry).meta : null
-  return entry.author_kind === PLATFORM_MESSAGE_AUTHOR_KIND && isRecord(meta) && meta.role === 'AGENT'
+  return isPlatformMessageAuthor(entry.author_kind) && isRecord(meta) && meta.role === 'AGENT'
 }
 
 /** The home a channel conversation belongs to, with the clock its dates are read in. */

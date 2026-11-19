@@ -5,7 +5,7 @@ import type { MessagePhotoInput } from './guest-threads/attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThreadDeliveryPurpose } from './guest-threads/types'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
-import { PLATFORM_MESSAGE_AUTHOR_KIND, type ConversationParticipant } from '~/shared/messages-contract'
+import { PLATFORM_MESSAGE_AUTHOR_KIND, type PLATFORM_MESSAGE_AUTHOR_KINDS, PLATFORM_MESSAGE_AUTHOR_KINDS_SQL, isPlatformMessageAuthor, type ConversationParticipant } from '~/shared/messages-contract'
 import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
 import { listingGrantSql } from '~/server/domain/listing-access'
 import { assignedOperationsRoles, roleMatchesSql, workspaceGuestMessagingRoles } from '~/utils/organization-access'
@@ -23,7 +23,7 @@ import { assignedOperationsRoles, roleMatchesSql, workspaceGuestMessagingRoles }
  */
 
 export type ConversationKind = 'contact' | 'booking' | 'team'
-export type MessageAuthorKind = 'guest' | 'member' | typeof PLATFORM_MESSAGE_AUTHOR_KIND
+export type MessageAuthorKind = 'guest' | 'member' | typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number]
 export type MessageChannel = 'web' | 'email' | 'whatsapp' | 'airbnb'
 
 export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove' | 'invitation_id'> & { invitation_id: string | null }
@@ -98,7 +98,7 @@ const PLATFORM_MESSAGE_TEXT_EVENTS = new Set<string | null>([null, OPENING_EVENT
 
 /** An event Blawby recorded (a cancellation, a change, a payment), as opposed to words someone wrote. */
 export function isEventMessage(message: Pick<MessageRow, 'author_kind' | 'event_name'>): boolean {
-  return message.author_kind === PLATFORM_MESSAGE_AUTHOR_KIND && !PLATFORM_MESSAGE_TEXT_EVENTS.has(message.event_name)
+  return isPlatformMessageAuthor(message.author_kind) && !PLATFORM_MESSAGE_TEXT_EVENTS.has(message.event_name)
 }
 
 /**
@@ -117,8 +117,8 @@ export function guestVisibleSql(message: string, bookingOwner: string): string {
   const guestWords = `(${message}.author_kind = 'guest' AND ${message}.channel IN ('web', 'email', 'whatsapp'))`
   return `((${guestWords} AND ${message}.event_name IS NULL)
     OR (${message}.author_kind = 'member' AND ${message}.event_name = '${MEMBER_REPLY_EVENT}')
-    OR (${message}.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}' AND ${message}.event_name = '${SCHEDULED_MESSAGE_EVENT}')
-    OR (${bookingOwner} AND (${guestWords} OR (${message}.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}'
+    OR (${message}.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) AND ${message}.event_name = '${SCHEDULED_MESSAGE_EVENT}')
+    OR (${bookingOwner} AND (${guestWords} OR (${message}.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL})
       AND ${message}.event_name IN ('${OPENING_EVENT}', ${GUEST_VISIBLE_EVENTS.map(event => `'${event}'`).join(', ')})))))`
 }
 
@@ -247,7 +247,7 @@ export function messageQueries(input: MessageInput): { id: string; dedupeKey: st
       SELECT ?, c.organization_id, c.id, COALESCE((SELECT MAX(prior.sequence) FROM messages prior WHERE prior.conversation_id = c.id), 0) + 1, ?, ?, ?, ?, ?, ?, ?, ?, ?
         FROM conversations c WHERE c.id = ?${input.guard ? ` AND (${input.guard.sql})` : ''}
       ON CONFLICT (dedupe_key) DO NOTHING`,
-    params: [id, input.authorKind, input.authorUserId, input.channel ?? null, input.body ?? null, input.eventName ?? null,
+    params: [id, isPlatformMessageAuthor(input.authorKind) ? PLATFORM_MESSAGE_AUTHOR_KIND : input.authorKind, input.authorUserId, input.channel ?? null, input.body ?? null, input.eventName ?? null,
       JSON.stringify(input.payload ?? {}), dedupeKey, occurredAt, createdAt, input.conversationId, ...(input.guard?.params ?? [])],
   }, {
     query: `UPDATE conversations SET last_message_at = max(last_message_at, ?) WHERE id = ? AND ${written}`,
@@ -256,7 +256,7 @@ export function messageQueries(input: MessageInput): { id: string; dedupeKey: st
     query: `UPDATE conversation_participants SET archived_at = NULL WHERE conversation_id = ? AND archived_at IS NOT NULL AND user_id IS NOT ? AND ${written}`,
     params: [input.conversationId, input.authorUserId, id],
   }]
-  if (input.authorUserId && input.authorKind !== PLATFORM_MESSAGE_AUTHOR_KIND) {
+  if (input.authorUserId && !isPlatformMessageAuthor(input.authorKind)) {
     queries.push({
       query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id)
         SELECT conversation_id, organization_id, ?, id FROM messages WHERE id = ?
@@ -292,7 +292,7 @@ export function parseTranscriptWindow(query: URLSearchParams): ConversationWindo
 /** A message already under this key is this message, or the key was given to a different one. */
 function sameMessage(existing: MessageRow, input: MessageInput): MessageRow {
   const matches = existing.conversation_id === input.conversationId
-    && existing.author_kind === input.authorKind
+    && (existing.author_kind === input.authorKind || isPlatformMessageAuthor(existing.author_kind) && isPlatformMessageAuthor(input.authorKind))
     && existing.author_user_id === (input.authorUserId ?? null)
     && existing.channel === (input.channel ?? null)
     && existing.body === (input.body ?? null)
@@ -596,7 +596,7 @@ export async function assertConversationAccess(db: DbClient, principal: MemberAc
 }
 
 /** An Airbnb Support case: Airbnb's agents wrote and no guest did. */
-export const SUPPORT_CONVERSATION_SQL = (alias: string) => `(${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM messages support_message WHERE support_message.conversation_id = ${alias}.id AND support_message.author_kind = '${PLATFORM_MESSAGE_AUTHOR_KIND}' AND support_message.event_name = '${MIRRORED_EVENT}')
+export const SUPPORT_CONVERSATION_SQL = (alias: string) => `(${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM messages support_message WHERE support_message.conversation_id = ${alias}.id AND support_message.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) AND support_message.event_name = '${MIRRORED_EVENT}')
   AND NOT EXISTS (SELECT 1 FROM messages guest_message WHERE guest_message.conversation_id = ${alias}.id AND guest_message.author_kind = 'guest'))`
 
 export async function listUnreadIds(db: DbClient, conversationIds: string[], userId: string): Promise<Set<string>> {

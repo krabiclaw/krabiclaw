@@ -79,6 +79,9 @@ test('a table booking opens with its own message and the guest note, written onc
       payload: threadPayloadForGuest({ name: 'Filip Heurckmans', email: 'filip@example.test', phone: '+32475699444', locale: 'en', ipHash: null }), created_at: CREATED }, undefined, { opening: sentence, note: 'Window seat if possible' })
       .slice(1).map(query => db.prepare(query.query).bind(...(query.params ?? []))))
     assert.deepEqual(await ledger('new'), opened)
+    assert.equal(PLATFORM_MESSAGE_AUTHOR_KIND, 'blawby')
+    await db.prepare("UPDATE messages SET author_kind = 'krabiclaw' WHERE conversation_id = 'new' AND author_kind = 'blawby'").run()
+    assert.deepEqual(await messages('new'), [['guest', sentence], ['guest', 'Window seat if possible']])
 
     // Another conversation, opened the same way, where the guest wrote since: their reply is its preview, and its
     // time orders it ahead of the one whose newest message is its opening note.
@@ -105,6 +108,10 @@ test('a table booking opens with its own message and the guest note, written onc
     const list = (q?: string) => listConversations(db, null, { userId: traveler.id, buyerAudience: true, q })
     const privateWords = 'Private card receipt'
     const payment = await appendMessage(db, { conversationId: 'shared', authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, eventName: 'payment.payment_captured', body: privateWords })
+    const existingPayment = { conversationId: 'shared', authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, eventName: 'payment.payment_captured', body: privateWords, dedupeKey: 'historical-payment-replay' }
+    const historical = await appendMessage(db, existingPayment)
+    await db.prepare("UPDATE messages SET author_kind = 'krabiclaw' WHERE id = ?").bind(historical.id).run()
+    assert.equal((await appendMessage(db, existingPayment)).id, historical.id)
     const privatePage = await page(traveler.id)
     assert.deepEqual(privatePage.entries, [])
     assert.equal(privatePage.capabilities.can_invite_guest, false)

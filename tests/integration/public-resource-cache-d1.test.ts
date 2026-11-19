@@ -47,7 +47,7 @@ async function migratedCacheD1(context: TestContext) {
   const kv = await miniflare.getKVNamespace('ORGANIZATION_CACHE')
   await applySchema(db)
   await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org', 'Org', 'org', 'org', 'USD', 'UTC')").run()
-  await db.prepare("INSERT INTO organization (id, name, slug, subdomain, theme_id, default_currency, timezone) VALUES ('platform', 'Platform', 'platform', 'platform', 'krabiclaw-theme-v1', 'USD', 'UTC')").run()
+  await db.prepare("INSERT INTO organization (id, name, slug, subdomain, theme_id, default_currency, timezone) VALUES ('platform', 'Platform', 'platform', 'platform', 'blawby-theme-v1', 'USD', 'UTC')").run()
   const { GUEST_INBOX_HUBS: hubs } = await miniflare.getBindings<{ GUEST_INBOX_HUBS: DurableObjectNamespace }>()
   return { db, kv, hubs }
 }
