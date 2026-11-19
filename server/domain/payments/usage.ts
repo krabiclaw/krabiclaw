@@ -4,7 +4,7 @@ import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { BUSINESS_PLAN_ID, ratePercent, type BillingMeterKey } from '~/shared/billing-model'
 import { planSubscriptionItem } from '~/server/utils/stripe-catalog'
-import { readStripeMeterTransition, reportStripeMeterUsage } from '~/server/utils/stripe-meter-usage'
+import { readStripeMeterContract, reportStripeMeterUsage } from '~/server/utils/stripe-meter-usage'
 import { recordPaymentsVolumeBilled } from '~/server/domain/booking-analytics'
 import { tokenHash } from './buyer'
 import { readPaymentsBillingBasis } from './fx'
@@ -56,7 +56,7 @@ export async function deliverPaymentsUsage(db: DbClient, env: CloudflareEnv, org
     throw new Error(`${reason}: ${organizationId}`)
   }
   const stripe = getStripe(env)
-  const transition = await readStripeMeterTransition(stripe, env, organizationId, organization.customer)
+  const contract = await readStripeMeterContract(stripe, env, organizationId, organization.customer)
   let delivered = 0
   const refused: string[] = []
   for (const event of events) {
@@ -64,7 +64,7 @@ export async function deliverPaymentsUsage(db: DbClient, env: CloudflareEnv, org
     if (basis.currency !== 'USD') throw new Error(`Payments usage ${event.id} has no USD billing amount`)
     const identifier = `payments:${await tokenHash(event.source_id)}`
     try {
-      await reportStripeMeterUsage(stripe, USAGE_METER[event.kind], organization.customer, basis.amount, transition, identifier)
+      await reportStripeMeterUsage(stripe, USAGE_METER[event.kind], organization.customer, basis.amount, contract, identifier)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       await execute(db, 'UPDATE usage_events SET error=? WHERE id=?', [reason, event.id])
