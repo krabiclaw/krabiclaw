@@ -210,6 +210,28 @@ export async function listAgenda(
     params: [scope.organizationId, ...(query.organizationId ? [query.organizationId] : []), ...(query.locationId ? [query.locationId] : []),
       `${addLocalDays(query.from, -2)}T00:00:00.000Z`, `${addLocalDays(query.to, 2)}T23:59:59.999Z`],
   }) - 1 : -1
+  const bookingOwners = queries[bookingIndex]
+  const postOwners = queries[postIndex]
+  const locationOwners = queries[locationIndex]
+  const mediaIndex = scope.organizationId ? queries.length : -1
+  if (scope.organizationId) {
+    const media = mediaPlacementsQuery({
+      organizationId: scope.organizationId, ownerType: { sql: 'mp.owner_type' }, includeOrganizationFallback: true,
+      owners: { sql: 'SELECT owner_id FROM agenda_picture_owners WHERE owner_type = mp.owner_type' },
+    })
+    queries.push({
+      query: `WITH agenda_picture_owners(owner_type, owner_id) AS MATERIALIZED (
+        SELECT NULL, NULL WHERE 0
+        ${bookingOwners ? `UNION ALL SELECT
+          CASE WHEN product_kind <> 'table' THEN 'product' WHEN location_id IS NULL THEN 'organization' ELSE 'business_location' END,
+          CASE WHEN product_kind <> 'table' THEN product_id ELSE COALESCE(location_id, organization_id) END
+          FROM (${bookingOwners.query})` : ''}
+        ${postOwners ? `UNION ALL SELECT picture_owner_type, picture_owner_id FROM (${postOwners.query})` : ''}
+        ${locationOwners ? `UNION ALL SELECT 'business_location', id FROM (${locationOwners.query})` : ''}
+      ) ${media.query}`,
+      params: [...bookingOwners?.params ?? [], ...postOwners?.params ?? [], ...locationOwners?.params ?? [], ...media.params ?? []],
+    })
+  }
   const results = await executeBatch(db, queries, { operation: 'Read the agenda' })
   const available = results[0]!.results[0] as { booking: number; stay: number }
   const locations = (results[locationIndex]?.results ?? []) as LocationRow[]
@@ -261,14 +283,19 @@ export async function listAgenda(
   for (const stay of stays) addOwner(stay.organization_id, 'product', stay.product_id)
   const groups = [...owners.values()]
   const pictures = new Map<string, string | null>()
-  for (let offset = 0; offset < groups.length; offset += MAX_D1_BATCH_STATEMENTS) {
-    const page = groups.slice(offset, offset + MAX_D1_BATCH_STATEMENTS)
-    const media = await executeBatch(db, page.map(({ organizationId, ownerType, ids }) => mediaPlacementsQuery({
-      organizationId, ownerType, owners: [...ids], includeOrganizationFallback: true,
-    })), { operation: 'Read agenda pictures' })
-    for (const [index, { organizationId, ownerType, ids }] of page.entries()) {
-      const loaded = ownerPicturesFromRows(organizationId, ownerType, [...ids], media[index]!.results)
-      for (const [id, picture] of loaded) pictures.set(`${organizationId}\n${ownerType}\n${id}`, picture?.imageUrl ?? null)
+  const applyPictures = ({ organizationId, ownerType, ids }: typeof groups[number], rows: unknown[]) => {
+    const loaded = ownerPicturesFromRows(organizationId, ownerType, [...ids], rows)
+    for (const [id, picture] of loaded) pictures.set(`${organizationId}\n${ownerType}\n${id}`, picture?.imageUrl ?? null)
+  }
+  if (mediaIndex >= 0) {
+    for (const group of groups) applyPictures(group, results[mediaIndex]!.results)
+  } else {
+    for (let offset = 0; offset < groups.length; offset += MAX_D1_BATCH_STATEMENTS) {
+      const page = groups.slice(offset, offset + MAX_D1_BATCH_STATEMENTS)
+      const media = await executeBatch(db, page.map(({ organizationId, ownerType, ids }) => mediaPlacementsQuery({
+        organizationId, ownerType, owners: [...ids], includeOrganizationFallback: true,
+      })), { operation: 'Read buyer agenda pictures' })
+      for (const [index, group] of page.entries()) applyPictures(group, media[index]!.results)
     }
   }
   const organizationPath = query.organizationSlug ?? scope.organizationId

@@ -104,19 +104,20 @@ export function assertExactCanonicalLocale(value: unknown): string {
   return canonical
 }
 
-export async function getPersistedSourceLocale(
-  db: DbClient,
-  organizationId: string,
-): Promise<OrganizationLocaleRecord> {
-  const rows = await queryAll<OrganizationLocaleRow>(db, `
-    SELECT id, organization_id, locale, label, is_source, status, created_at, updated_at
-      FROM organization_locales
-     WHERE organization_id = ?  AND is_source = 1
-     ORDER BY id
-  `, [organizationId])
-  const source = rows.length === 1 ? rows[0]! : null
+export function sourceLocaleQuery(organizationId: string): BatchQuery {
+  return { query: `SELECT id, organization_id, locale, label, is_source, status, created_at, updated_at
+      FROM organization_locales WHERE organization_id = ? AND is_source = 1 ORDER BY id`, params: [organizationId] }
+}
+
+export function sourceLocaleFromRows(organizationId: string, rows: unknown[]): OrganizationLocaleRecord {
+  const source = rows.length === 1 ? rows[0] as OrganizationLocaleRow : null
   requireSourceLocale(organizationId, source?.locale ?? null, source?.status ?? null)
   return { ...source!, is_source: true }
+}
+
+export async function getPersistedSourceLocale(db: DbClient, organizationId: string): Promise<OrganizationLocaleRecord> {
+  const { query, params } = sourceLocaleQuery(organizationId)
+  return sourceLocaleFromRows(organizationId, await queryAll(db, query, params))
 }
 
 export function readPublicSourceLocale(event: H3Event, db: DbClient, organizationId: string): Promise<OrganizationLocaleRecord> {
@@ -202,6 +203,17 @@ export async function assertPublicOrganizationLanguage(
     }
     throw error
   }
+}
+
+export function readPublicOrganizationLanguage(
+  event: H3Event,
+  db: DbClient,
+  organizationId: string,
+  locale: string,
+  source: OrganizationLocaleRecord,
+) {
+  return oncePerRequest(event, `public-language:${organizationId}:${locale}`, () =>
+    assertPublicOrganizationLanguage(db, organizationId, locale, source))
 }
 
 function mapLocalization(row: ResourceLocalizationRow): ResourceLocalizationRecord {

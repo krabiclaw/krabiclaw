@@ -12,13 +12,13 @@ import { loadPublicBase } from '~/server/utils/public-base'
 import { buildPublicShellPayload, readPublicExperiences, readPublicShellRows } from '~/server/utils/public-shell-query'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 import { getOptionalPublicConsultationSettings, getPublicCompliance } from '~/server/utils/professional-services'
-import { listPublishedTenantPagePaths } from '~/server/utils/content/pages'
+import { readPublishedTenantPagePaths } from '~/server/utils/content/pages'
 import { platformLocale } from '~/shared/platform-locales'
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { isPublicShellPayload } from '~/utils/public-resource-contracts'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, readPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
 import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
   indexStoredPublicLocalizations,
@@ -89,6 +89,7 @@ export async function loadPublicShellSource(
     readPublicSourceLocale(event, db, organizationId),
   ])
   const sourceLocale = source.locale
+  const resolvedLanguage = readPublicOrganizationLanguage(event, db, organization.id, locale ?? sourceLocale, source)
   // The language, the shell rows and the bookable experiences depend on the
   // site alone; they were three sequential round trips on every cold shell.
   const [
@@ -100,13 +101,13 @@ export async function loadPublicShellSource(
     publishedPages,
     localizedRows,
   ] = await Promise.all([
-    assertPublicOrganizationLanguage(db, organization.id, locale ?? sourceLocale, source),
+    resolvedLanguage,
     readPublicShellRows(event, db, organization.id, previewAuthorized && organization.vertical === 'restaurant'),
     readPublicExperiences(event, db, organization.id, env),
     // Only a legal practice books consultations; a venue's site has no schedule page.
     isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) ? getOptionalPublicConsultationSettings(db, organization.id) : null,
     getPublicCompliance(db, organization.id),
-    listPublishedTenantPagePaths(db, organization.id, locale ?? sourceLocale),
+    resolvedLanguage.then(language => readPublishedTenantPagePaths(db, organization.id, language.locale)),
     locale && locale !== sourceLocale ? queryAll<StoredPublicLocalizationRow>(db, `
       SELECT resource_type, resource_id, locale, values_json, route_path
        FROM ${RESOURCE_LOCALIZATIONS_SQL}

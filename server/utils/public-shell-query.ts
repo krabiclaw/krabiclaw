@@ -1,9 +1,10 @@
+import { splitLocalePrefix } from '~/utils/tenant-locale-path'
 import type { H3Event } from 'nitro'
 import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { executeBatch, type BatchQuery, type DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
 import { projectPublicLocation } from '~/shared/location-sharing'
-import { publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
+import { publicLocationPrivacySql, publicReviewLocationProtectedSql } from '~/server/utils/public-location-privacy'
 import { projectExactLocalizedCollection, type ExactPublicLocalization } from '~/server/utils/public-localization'
 import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSection, type PublicShellPayload, type PublicSiteSection } from '~/utils/public-resource-contracts'
 import { listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
@@ -45,6 +46,7 @@ export interface PublicShellQueryIndexes {
   content: Record<PublicContentSection, number>
   catalog: number
   media: number
+  reviews?: number
 }
 
 /**
@@ -168,10 +170,27 @@ function appendPublicShellQueries(
   }
 }
 
-export function readPublicShellRows(event: H3Event, db: DbClient, organizationId: string, previewMenu: boolean) {
-  return oncePerRequest(event, `public-shell-rows:${organizationId}:${previewMenu}`, async () => {
+export function readPublicShellRows(
+  event: H3Event,
+  db: DbClient,
+  organizationId: string,
+  previewMenu: boolean,
+  includeReviews = splitLocalePrefix(event.url.pathname).sourcePath.replace(/\/$/, '') === '/reviews',
+) {
+  return oncePerRequest(event, `public-shell-rows:${organizationId}:${previewMenu}:${includeReviews}`, async () => {
     const queries: BatchQuery[] = []
     const indexes = appendPublicShellQueries(queries, organizationId, previewMenu)
+    if (includeReviews) indexes.reviews = queries.push({
+      query: `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source,
+              r.original_review_date, r.original_reference, r.google_review_metadata,
+              r.owner_reply, r.owner_reply_at, r.location_id, bl.title AS location_title,
+              ${publicReviewLocationProtectedSql('r')} AS is_stay_location
+       FROM reviews r
+       LEFT JOIN business_locations bl ON bl.id = r.location_id
+       WHERE r.organization_id = ? AND r.status = 'approved'
+       ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 50`,
+      params: [organizationId],
+    }) - 1
     const results = await executeBatch(db, queries)
     return { indexes, results }
   })

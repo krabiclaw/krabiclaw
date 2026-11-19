@@ -2,7 +2,8 @@ import type { EarningsPerformance, PayoutDetail, PayoutItem } from '~/shared/ear
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { loadOwnerPictures } from '~/server/notifications/hero'
+import { loadOwnerPictures, ownerPicturesFromRows } from '~/server/notifications/hero'
+import { mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { authorizePayments, type FinancialPrincipal, type Payment, type VisiblePayment } from './index'
@@ -23,6 +24,12 @@ interface PaymentPicture {
 type PaymentSubject = Omit<PaymentPicture, 'title' | 'image_url'> & { id: string; product_id: string | null }
 const paymentBookingJoin = "LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id"
 
+function paymentSnapshot(payment: Pick<Payment, 'id' | 'price_snapshot_json'>) {
+  const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
+  if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error(`Payment ${payment.id} has no immutable title`)
+  return snapshot as { title: string; stay?: unknown }
+}
+
 /** The payment's immutable title, its subject's picture and dates, and the buyer when the list presents them: named by what they typed, never an anonymous account's "Anonymous". */
 async function paymentPictures(db: DbClient, organizationId: string, payments: readonly Pick<Payment, 'id' | 'location_id' | 'price_snapshot_json'>[], includeBuyer = false): Promise<Map<string, PaymentPicture>> {
   if (!payments.length) return new Map()
@@ -40,8 +47,7 @@ async function paymentPictures(db: DbClient, organizationId: string, payments: r
   [organizationId, JSON.stringify(payments.map(payment => payment.id))])
   const byId = new Map(subjects.map(row => [row.id, row]))
   const entries = payments.map(payment => {
-    const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
-    if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error(`Payment ${payment.id} has no immutable title`)
+    const snapshot = paymentSnapshot(payment)
     const subject = byId.get(payment.id)
     if (!subject) throw new Error(`Payment ${payment.id} is missing from its business`)
     return { id: payment.id, title: snapshot.title, subject, locationId: !subject.booking_id && 'stay' in snapshot ? payment.location_id : null }
@@ -69,15 +75,21 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
   const monthStart = `${month}-01`
   const next = new Date(Date.UTC(monthYear!, monthNumber!, 1)).toISOString()
   const monthEnd = next.slice(0, 10)
-  const [yearResult, monthResult, organization, channel] = await executeBatch(db, [
+  const period = `FROM payments p ${paymentBookingJoin}
+    WHERE p.organization_id = ? AND p.created_at >= ? AND p.created_at < ? AND p.captured_amount > 0`
+  const periodParams = [organizationId, `${monthStart}T00:00:00.000Z`, next]
+  const imagesFor = (ownerType: 'product' | 'business_location', selection: string) =>
+    mediaPlacementsQuery({ organizationId, ownerType, includeOrganizationFallback: true, owners: { sql: selection, params: periodParams } })
+  const [yearResult, monthResult, organization, channel, productMedia, locationMedia] = await executeBatch(db, [
     { query: `SELECT strftime('%Y-%m', created_at) AS month, currency, SUM(captured_amount) AS paid, SUM(refunded_amount) AS refunded
         FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`,
       params: [organizationId, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`] },
-    { query: `SELECT id, location_id, price_snapshot_json, captured_amount, refunded_amount
-        FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? AND captured_amount > 0`,
-      params: [organizationId, `${monthStart}T00:00:00.000Z`, next] },
+    { query: `SELECT p.id, p.location_id, p.price_snapshot_json, p.captured_amount, p.refunded_amount,
+        b.id AS booking_id, b.product_id ${period}`, params: periodParams },
     { query: 'SELECT default_currency FROM organization WHERE id = ?', params: [organizationId] },
     channelReservationAmountQuery(organizationId, monthStart, monthEnd),
+    imagesFor('product', `SELECT b.product_id ${period} AND b.product_id IS NOT NULL`),
+    imagesFor('business_location', `SELECT p.location_id ${period} AND b.id IS NULL AND json_type(p.price_snapshot_json, '$.stay') IS NOT NULL`),
   ], { operation: 'Read the earnings period' })
   const rows = yearResult!.results as Array<{ month: string; currency: string; paid: number; refunded: number }>
   const currencies = [...new Set(rows.map(row => row.currency))]
@@ -87,15 +99,21 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
     const row = rows.find(entry => entry.month === key)
     return { month: key, paid: row?.paid ?? 0, refunded: row?.refunded ?? 0 }
   })
-  const payments = monthResult!.results as Array<Pick<Payment, 'id' | 'location_id' | 'price_snapshot_json' | 'captured_amount' | 'refunded_amount'>>
-  const pictures = await paymentPictures(db, organizationId, payments)
+  const payments = monthResult!.results as Array<Pick<Payment, 'id' | 'location_id' | 'price_snapshot_json' | 'captured_amount' | 'refunded_amount'>
+    & { booking_id: string | null; product_id: string | null }>
+  const productIds = payments.flatMap(payment => payment.product_id ? [payment.product_id] : [])
+  const locationIds = payments.flatMap(payment => payment.location_id ? [payment.location_id] : [])
+  const products = ownerPicturesFromRows(organizationId, 'product', productIds, productMedia!.results)
+  const locations = ownerPicturesFromRows(organizationId, 'business_location', locationIds, locationMedia!.results)
   const byTitle = new Map<string, { title: string; image_url: string | null; paid: number; count: number }>()
   for (const payment of payments) {
-    const picture = pictures.get(payment.id)!
-    const entry = byTitle.get(picture.title) ?? { title: picture.title, image_url: picture.image_url, paid: 0, count: 0 }
+    const snapshot = paymentSnapshot(payment)
+    const picture = payment.product_id ? products.get(payment.product_id)
+      : !payment.booking_id && 'stay' in snapshot && payment.location_id ? locations.get(payment.location_id) : null
+    const entry = byTitle.get(snapshot.title) ?? { title: snapshot.title, image_url: picture?.imageUrl ?? null, paid: 0, count: 0 }
     entry.paid += payment.captured_amount - payment.refunded_amount
     entry.count += 1
-    byTitle.set(picture.title, entry)
+    byTitle.set(snapshot.title, entry)
   }
   const currency = currencies[0] ?? (organization!.results[0] as { default_currency: string } | undefined)?.default_currency
   if (!currency) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })

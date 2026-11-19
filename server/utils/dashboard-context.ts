@@ -319,8 +319,7 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
   }
 }
 
-export async function readDashboardLocations(
-  db: DbClient,
+export function prepareDashboardLocations(
   organizationId: string,
   assignedUserId?: string,
   includeInactive = false,
@@ -333,36 +332,45 @@ export async function readDashboardLocations(
         AND (EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = l.id)
           OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))))` : ''}`
   type Location = Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null; is_stay_location: number }
-  const [locations, media, logo] = await executeBatch(db, [
+  const queries = [
     { query: `SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.stay_map_sharing, l.latitude, l.longitude,
       ${publicLocationProtectedSql('l')} AS is_stay_location ${visible} ORDER BY l.title ASC`, params },
     mediaPlacementsQuery({ organizationId, ownerType: 'business_location',
       owners: { sql: `SELECT l.id ${visible}`, params }, includeOrganizationFallback: true }),
     ...(includeLogo ? [mediaPlacementsQuery({ organizationId, ownerType: 'organization', owners: [organizationId], slot: 'logo' })] : []),
-  ], { operation: 'Read dashboard locations and pictures' })
-  const placements = groupMediaPlacements(media!.results)
-  const organizationMedia = (placements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
-  const rows = (locations!.results as Location[]).map(({ is_stay_location, ...location }) => {
-    const ownMedia = (placements.get(location.id) ?? []).filter(item => item.owner_type === 'business_location')
-    const locationMedia = publicLocationSocialMediaFromPlacements({ is_stay_location }, ownMedia, organizationMedia)
-    const hero = locationMedia.media.filter(item => item.slot === 'hero')
-    return {
-      ...location,
-      address: parsePostalAddress(location.address),
-      // The location tile shows its hero; the rest of its media is its own screens'.
-      media: hero,
-      // The tile's picture, decided by resolveOwnerPicture like every other
-      // owner picture: a hero photo, else the brand's share image, else a
-      // video's poster frame.
-      picture_url: mediaStillUrl(resolveOwnerPicture('business_location', hero, organizationMedia)),
-      social_image: locationMedia.social_image,
-    }
-  })
-  const organizationLogo = groupMediaPlacements(logo?.results ?? []).get(organizationId) ?? []
-  const organizationMediaForDashboard = organizationLogo.map(({ asset_id, slot, public_url, thumbnail_url, kind, presentation }) => ({
-    asset_id, slot, public_url, thumbnail_url, kind, presentation,
-  }))
-  return { locations: rows, media: organizationMediaForDashboard }
+  ]
+  return { queries, read }
+
+  function read([locations, media, logo]: Awaited<ReturnType<typeof executeBatch>>) {
+    const placements = groupMediaPlacements(media!.results)
+    const organizationMedia = (placements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
+    const rows = (locations!.results as Location[]).map(({ is_stay_location, ...location }) => {
+      const ownMedia = (placements.get(location.id) ?? []).filter(item => item.owner_type === 'business_location')
+      const locationMedia = publicLocationSocialMediaFromPlacements({ is_stay_location }, ownMedia, organizationMedia)
+      const hero = locationMedia.media.filter(item => item.slot === 'hero')
+      return {
+        ...location,
+        address: parsePostalAddress(location.address),
+        // The location tile shows its hero; the rest of its media is its own screens'.
+        media: hero,
+        // The tile's picture, decided by resolveOwnerPicture like every other
+        // owner picture: a hero photo, else the brand's share image, else a
+        // video's poster frame.
+        picture_url: mediaStillUrl(resolveOwnerPicture('business_location', hero, organizationMedia)),
+        social_image: locationMedia.social_image,
+      }
+    })
+    const organizationLogo = groupMediaPlacements(logo?.results ?? []).get(organizationId) ?? []
+    const organizationMediaForDashboard = organizationLogo.map(({ asset_id, slot, public_url, thumbnail_url, kind, presentation }) => ({
+      asset_id, slot, public_url, thumbnail_url, kind, presentation,
+    }))
+    return { locations: rows, media: organizationMediaForDashboard }
+  }
+}
+
+export async function readDashboardLocations(db: DbClient, organizationId: string, assignedUserId?: string, includeInactive = false, includeLogo = false) {
+  const plan = prepareDashboardLocations(organizationId, assignedUserId, includeInactive, includeLogo)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read dashboard locations and pictures' }))
 }
 
 export async function listDashboardLocations(db: DbClient, organizationId: string, assignedUserId?: string, includeInactive = false) {

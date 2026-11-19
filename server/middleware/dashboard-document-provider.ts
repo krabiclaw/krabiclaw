@@ -1,9 +1,9 @@
-import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { readDashboardAgenda } from '~/server/utils/dashboard-agenda-reader'
 import { readDashboardConnections } from '~/server/utils/dashboard-connections'
 import { readDashboardEarnings } from '~/server/utils/dashboard-earnings'
 import { readDashboardStayHomes } from '~/server/utils/dashboard-stay-homes'
-import { readGoogleCalendarSettings } from '~/server/utils/google-calendar'
+import { readCalendarSettingsForMember } from '~/server/utils/google-calendar'
 import { defineHandler, HTTPError } from 'nitro'
 import { setHeader } from 'nitro/h3'
 import { loadDashboardCatalog } from '~/server/utils/dashboard-catalog'
@@ -33,8 +33,8 @@ export default defineHandler(event => {
           case '/api/dashboard/settings':
             return readDashboardConnections(event, orgSlug)
           case '/api/dashboard/integrations/google-calendar': {
-            const { organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
-            return readGoogleCalendarSettings(event, organization.id, true)
+            const { db, organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
+            return readCalendarSettingsForMember(db, organization)
           }
           default:
             throw new HTTPError({ statusCode: 500, message: 'Dashboard document resource is unavailable' })

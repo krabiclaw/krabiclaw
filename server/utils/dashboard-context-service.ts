@@ -1,5 +1,4 @@
 import type { H3Event } from 'nitro'
-import { cloudflareEnv } from '~/server/utils/api-response'
 import {
   dashboardOrgQueryParam,
   getDashboardMemberContext,
@@ -8,6 +7,17 @@ import {
 import { getOrganizationPlan } from '~/server/utils/billing-access'
 import { loadOrganizationFeatures } from '~/server/utils/cms-capabilities'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
+import { oncePerRequest } from '~/server/utils/request-scope'
+
+export function readDashboardWorkspaceAccess(
+  event: H3Event,
+  { db, env, organization }: Pick<Awaited<ReturnType<typeof getDashboardMemberContext>>, 'db' | 'env' | 'organization'>,
+) {
+  return oncePerRequest(event, `dashboard-workspace-access:${organization.id}`, () => Promise.all([
+    getOrganizationPlan(env, organization.id),
+    loadOrganizationFeatures(db, organization.id),
+  ]))
+}
 
 // The scope is the route's `org` query param. No organization is a 400 and one
 // this session cannot see is a 404 (getDashboardContext). Neither is a payload
@@ -21,17 +31,16 @@ export async function loadDashboardContext(
   scope: { orgSlug: string | null } = { orgSlug: dashboardOrgQueryParam(event) },
 ) {
   const contextStartedAt = performance.now()
-  const env = cloudflareEnv(event)
-  const { db, organization } = await getDashboardMemberContext(event, {
+  const context = await getDashboardMemberContext(event, {
     organizationSlug: scope.orgSlug,
   })
+  const { db, organization } = context
   recordRequestPhase(event, 'context', contextStartedAt)
 
   const resourcesStartedAt = performance.now()
-  const [effective_plan, { locations, media }, features] = await Promise.all([
-    getOrganizationPlan(env, organization.id),
+  const [[effective_plan, features], { locations, media }] = await Promise.all([
+    readDashboardWorkspaceAccess(event, context),
     readDashboardLocations(db, organization.id, undefined, false, true),
-    loadOrganizationFeatures(db, organization.id),
   ])
   recordRequestPhase(event, 'resources', resourcesStartedAt)
 

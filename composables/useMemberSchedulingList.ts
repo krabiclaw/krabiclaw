@@ -18,6 +18,6 @@ export function useMemberSchedulingList(organizationId: MaybeRefOrGetter<string 
             && (member.scheduling === null || isRecord(member.scheduling))),
       })
     },
-    { server: !deferred, lazy: deferred },
+    { server: !deferred, lazy: deferred, immediate: !deferred },
   )
 }

@@ -10,7 +10,7 @@ import { d1JsonArray, d1JsonValue, executeBatch, queryAll, queryFirst, type Batc
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
-import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
+import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, groupMediaPlacements, mediaPlacementsQuery, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
 import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
@@ -257,45 +257,60 @@ function mapPriceRow(row: Row): Price {
  * x collections x details multiplies rows, and reconstructing distinct sets
  * from that product is where duplicate and dropped children come from.
  */
-async function hydrate(db: DbClient, organizationId: string, products: Product[]): Promise<Product[]> {
-  if (products.length === 0) return products
-  const ids = d1JsonArray(products.map(product => product.id))
-  const byId = new Map(products.map(product => [product.id, product]))
-
-  // One batch, not nine round trips. The databases are a long way from the
-  // Workers that read them, so each extra statement is real latency on every
-  // catalog page; D1 charges one round trip for the batch.
-  const [batched, photoRooms, accessibility] = await Promise.all([executeBatch(db, [
+function productHydrationQueries(organizationId: string, selection: BatchQuery): BatchQuery[] {
+  return [
     { query: `SELECT id, product_id, name, sku, active, sort_order FROM product_variants
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order, id`, params: [organizationId, ids] },
+      WHERE organization_id = ? AND product_id IN (${selection.query}) ORDER BY sort_order, id`, params: [organizationId, ...selection.params ?? []] },
     // Variants first, then each one's prices by index. Joined the other way
     // the planner walked every price of the site and re-read the product list
     // for each: 184,000 rows for one 365-dish menu.
     { query: `SELECT pr.* FROM product_variants v
       CROSS JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
-      WHERE v.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?)) AND pr.stay_date IS NULL AND pr.weekend = 0
-      ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params: [organizationId, ids] },
+      WHERE v.organization_id = ? AND v.product_id IN (${selection.query}) AND pr.stay_date IS NULL AND pr.weekend = 0
+      ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params: [organizationId, ...selection.params ?? []] },
     { query: `SELECT product_id, organization_id, published FROM product_publications
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY organization_id`, params: [organizationId, ids] },
+      WHERE organization_id = ? AND product_id IN (${selection.query}) ORDER BY organization_id`, params: [organizationId, ...selection.params ?? []] },
     { query: `SELECT product_id, location_id, active, published FROM product_locations
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY location_id`, params: [organizationId, ids] },
+      WHERE organization_id = ? AND product_id IN (${selection.query}) ORDER BY location_id`, params: [organizationId, ...selection.params ?? []] },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
+      WHERE organization_id = ? AND product_id IN (${selection.query}) ORDER BY collection_id`, params: [organizationId, ...selection.params ?? []] },
     // A session offering's booking; a home's is presented with its stay settings below.
     { query: `SELECT product_id, duration_minutes, seating_interval_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions,
         party_size_min, party_size_max, minimum_guest_age, accessibility_contact_required, payment_basis, payment_min_party_size FROM product_booking_configs
-      WHERE organization_id = ? AND unit = 'slot' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+      WHERE organization_id = ? AND unit = 'slot' AND product_id IN (${selection.query})`, params: [organizationId, ...selection.params ?? []] },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
-      WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+      WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (${selection.query})`, params: [organizationId, ...selection.params ?? []] },
     // How a home is booked is its booking configuration, presented here with what the home is.
     { query: `SELECT c.product_id, c.internal_name, c.location_id, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
         b.cancellation_policy, b.long_term_cancellation_policy, b.assigned_member_id, b.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id AND b.unit = 'nights'
-      WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-  ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
+      WHERE c.organization_id = ? AND c.product_id IN (${selection.query})`, params: [organizationId, ...selection.params ?? []] },
+  ]
+}
+
+async function hydrate(db: DbClient, organizationId: string, products: Product[]): Promise<Product[]> {
+  if (!products.length) return products
+  const stayIds = products.filter(product => product.kind === 'stay').map(product => product.id)
+  const [rows, photoRooms, accessibility] = await Promise.all([
+    executeBatch(db, productHydrationQueries(organizationId, {
+      query: 'SELECT value FROM json_each(?)', params: [d1JsonArray(products.map(product => product.id))],
+    }), { operation: 'Hydrate products' }),
+    readStayPhotoRooms(db, organizationId, stayIds),
+    readStayHomeAccessibility(db, organizationId, stayIds),
+  ])
+  return hydrateProductRows(products, rows, photoRooms, accessibility)
+}
+
+function hydrateProductRows(
+  products: Product[],
+  batched: Awaited<ReturnType<typeof executeBatch>>,
+  photoRooms: Awaited<ReturnType<typeof readStayPhotoRooms>>,
+  accessibility: Awaited<ReturnType<typeof readStayHomeAccessibility>>,
+) {
+  const byId = new Map(products.map(product => [product.id, product]))
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
   const variantRows = rowsAt(0)
   const priceRows = rowsAt(1)
@@ -496,12 +511,7 @@ function productListCounts(rows: readonly { kind: ProductKind; count?: number }[
 }
 
 /** Editable catalogue pages read one extra row. Public readiness and counts precede pagination. */
-export function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts: true }): Promise<ProductListResult>
-export function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts?: false }): Promise<Product[]>
-export async function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts?: boolean }): Promise<Product[] | ProductListResult> {
-  if (input.productIds?.length === 0) return input.withCounts ? { products: [], counts: productListCounts([]) } : []
-  const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
-  const window = requireReadiness ? undefined : input.window
+function organizationProductSelection(input: OrganizationProductListInput) {
   const selection = `FROM products p
     LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
     WHERE p.organization_id = ? AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
@@ -510,6 +520,62 @@ export async function listOrganizationProducts(db: DbClient, input: Organization
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
     ...(input.assignedUserId ? [input.assignedUserId] : [])]
+  return { selection, params }
+}
+
+/** Menu cards use the canonical product projection without waiting for product IDs in JavaScript. */
+export function prepareOrganizationDishRead(organizationId: string, publishedOnly: boolean) {
+  const { selection, params } = organizationProductSelection({ organizationId, kind: 'dish', publishedOnly })
+  const relationships = productHydrationQueries(organizationId, { query: `SELECT p.id ${selection}`, params }).slice(0, 7)
+  // A dish cannot carry stay settings.
+  const queries = [{ query: `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id`, params }, ...relationships]
+  return {
+    queries,
+    read: ([products, ...rows]: Awaited<ReturnType<typeof executeBatch>>) =>
+      hydrateProductRows((products!.results as Row[]).map(mapProductRow), rows, new Map(), new Map()),
+  }
+}
+
+/** Catalog cards need offering facts, prices and one image. The editor reads the complete product. */
+export function prepareCatalogOfferings(input: { organizationId: string; assignedUserId?: string; kind?: ProductKind; locationId?: string }) {
+  const { organizationId } = input
+  const base = organizationProductSelection(input)
+  const selection = `${base.selection} AND p.kind <> 'dish'${input.locationId ? ' AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ?)' : ''}`
+  const params = [...base.params, ...(input.locationId ? [input.locationId] : [])]
+  const ids = { query: `SELECT p.id ${selection}`, params }
+  const relationships = productHydrationQueries(organizationId, ids).slice(0, 7)
+  const queries = [
+    { query: `SELECT ${PRODUCT_COLUMNS}, c.internal_name AS stay_internal_name FROM (
+      SELECT ${PRODUCT_COLUMNS} ${selection}
+    ) p LEFT JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+      AND EXISTS (SELECT 1 FROM product_booking_configs b WHERE b.organization_id = p.organization_id AND b.product_id = p.id AND b.unit = 'nights')
+    ORDER BY p.name, p.id`, params },
+    ...relationships,
+    mediaPlacementsQuery({ organizationId, ownerType: 'product', slot: 'image', owners: { sql: ids.query, params } }),
+  ]
+  return {
+    queries,
+    read: ([products, ...rest]: Awaited<ReturnType<typeof executeBatch>>) => {
+      const rows = products!.results as Row[]
+      const images = groupMediaPlacements(rest.at(-1)!.results)
+      const offerings = hydrateProductRows(rows.map(mapProductRow), rest.slice(0, -1), new Map(), new Map())
+      return offerings.map((product, index) => ({
+        product,
+        internalName: rows[index]!.stay_internal_name == null ? null
+          : requireTrimmedProductString(rows[index]!.stay_internal_name, 'stay.internal_name', PRODUCT_LIMITS.name),
+        image: images.get(product.id)?.[0],
+      }))
+    },
+  }
+}
+
+export function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts: true }): Promise<ProductListResult>
+export function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts?: false }): Promise<Product[]>
+export async function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts?: boolean }): Promise<Product[] | ProductListResult> {
+  if (input.productIds?.length === 0) return input.withCounts ? { products: [], counts: productListCounts([]) } : []
+  const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
+  const window = requireReadiness ? undefined : input.window
+  const { selection, params } = organizationProductSelection(input)
   const [rows, counts] = await Promise.all([
     queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
     input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
@@ -2436,6 +2502,10 @@ export async function removeProductLocation(db: DbClient, input: {
 /** Sections as the API returns them, each with its own picture read in one query. */
 async function mapCollectionRows(db: DbClient, organizationId: string, rows: Row[]): Promise<Collection[]> {
   const images = await readMediaPlacements(db, { organizationId, ownerType: 'collection', ownerIds: rows.map(row => String(row.id)), slot: 'image' })
+  return collectionRows(rows, images)
+}
+
+function collectionRows(rows: Row[], images: Awaited<ReturnType<typeof readMediaPlacements>>): Collection[] {
   return rows.map(row => ({
     id: String(row.id), organization_id: String(row.organization_id),
     location_id: row.location_id === null ? null : String(row.location_id),
@@ -2448,18 +2518,31 @@ async function mapCollectionRows(db: DbClient, organizationId: string, rows: Row
   }))
 }
 
-export async function listCollections(db: DbClient, input: {
-  organizationId: string; locationId?: string | null; assignedUserId?: string
-}): Promise<Collection[]> {
-  const rows = await queryAll<Row>(db, `
-    SELECT * FROM collections
+interface CollectionReadScope { organizationId: string; locationId?: string | null; assignedUserId?: string }
+
+export function prepareCollectionList(input: CollectionReadScope) {
+  const selection = `
+    FROM collections
     WHERE organization_id = ? 
       AND (? = 0 OR location_id IS ?)
       ${input.assignedUserId ? `AND EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
         WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${ASSIGNED_SERVICE_SQL}))` : ''}
-    ORDER BY sort_order, name, id
-  `, [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId] : [])])
-  return mapCollectionRows(db, input.organizationId, rows)
+  `
+  const params = [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId] : [])]
+  return {
+    queries: [
+      { query: `SELECT * ${selection} ORDER BY sort_order, name, id`, params },
+      mediaPlacementsQuery({ organizationId: input.organizationId, ownerType: 'collection', slot: 'image',
+        owners: { sql: `SELECT id ${selection}`, params } }),
+    ],
+    read: ([rows, media]: Awaited<ReturnType<typeof executeBatch>>) =>
+      collectionRows(rows!.results as Row[], groupMediaPlacements(media!.results)),
+  }
+}
+
+export async function listCollections(db: DbClient, input: CollectionReadScope): Promise<Collection[]> {
+  const plan = prepareCollectionList(input)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read collections and pictures' }))
 }
 
 export async function createCollection(db: DbClient, input: {

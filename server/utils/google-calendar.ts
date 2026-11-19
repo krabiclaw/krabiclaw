@@ -1,6 +1,6 @@
 import type { H3Event } from 'nitro'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
-import { memberCalendarCoverage } from '~/server/domain/member-scheduling'
+import { memberCalendarCoverageQuery } from '~/server/domain/member-scheduling'
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import type { GoogleCalendarIntegration } from '~/shared/organization-settings'
 import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -178,15 +178,31 @@ export function calendarEvent(subject: CalendarSubject, managementUrl: string | 
     ...(consultation ? { attendees, guestsCanInviteOthers: false, guestsCanModify: false, guestsCanSeeOtherGuests: false } : {}),
   }
 }
+const calendarIntegrationSql = `SELECT account_id, target_id AS calendar_id, target_name AS calendar_name, status, last_error, revision, created_at, updated_at
+  FROM organization_integrations WHERE organization_id=? AND provider='google_calendar' AND status <> 'setting_up'`
+
 export async function readCalendarIntegration(db: DbClient, organizationId: string): Promise<GoogleCalendarIntegration | null> {
-  return (await queryFirst<GoogleCalendarIntegration>(db, "SELECT account_id, target_id AS calendar_id, target_name AS calendar_name, status, last_error, revision, created_at, updated_at FROM organization_integrations WHERE organization_id=? AND provider='google_calendar' AND status <> 'setting_up'", [organizationId])) ?? null
+  return (await queryFirst<GoogleCalendarIntegration>(db, calendarIntegrationSql, [organizationId])) ?? null
 }
+
+function calendarConnectionQuery(organizationId: string) {
+  return {
+    query: `SELECT calendar.*, CASE WHEN calendar.status = 'disabled' THEN EXISTS (
+      SELECT 1 FROM google_calendar_event_links WHERE organization_id = ? AND state <> 'deleted'
+    ) ELSE 0 END AS cleanup_pending FROM (${calendarIntegrationSql}) calendar`,
+    params: [organizationId, organizationId],
+  }
+}
+
+function calendarConnectionFromRow(row: (GoogleCalendarIntegration & { cleanup_pending: number }) | undefined) {
+  if (!row) return { calendar: null, cleanup_pending: false }
+  const { cleanup_pending, ...calendar } = row
+  return { calendar, cleanup_pending: Boolean(cleanup_pending) }
+}
+
 export async function readCalendarConnection(db: DbClient, organizationId: string) {
-  const calendar = await readCalendarIntegration(db, organizationId)
-  const pending = calendar?.status === 'disabled'
-    ? await queryFirst<{ pending: number }>(db, "SELECT EXISTS(SELECT 1 FROM google_calendar_event_links WHERE organization_id = ? AND state <> 'deleted') AS pending", [organizationId])
-    : null
-  return { calendar, cleanup_pending: Boolean(pending?.pending) }
+  const { query, params } = calendarConnectionQuery(organizationId)
+  return calendarConnectionFromRow(await queryFirst<GoogleCalendarIntegration & { cleanup_pending: number }>(db, query, params) ?? undefined)
 }
 
 // The canonical subject query serves both changed-subject batches and one
@@ -446,9 +462,17 @@ export async function drainCalendarCleanup(env: CloudflareEnv, organizationId: s
 
 export async function readGoogleCalendarSettings(event: H3Event, organizationId: string, includeCoverage: boolean) {
   const { db, organization } = await requireOrganizationAccess(event, organizationId)
-  const connection = await readCalendarConnection(db, organization.id)
-  if (!includeCoverage) return connection
+  if (!includeCoverage) return readCalendarConnection(db, organization.id)
+  return readCalendarSettingsForMember(db, organization.membership)
+}
+
+export async function readCalendarSettingsForMember(db: DbClient, membership: Parameters<typeof memberCalendarCoverageQuery>[0]) {
+  const [calendarResult, coverageResult] = await executeBatch(db, [
+    calendarConnectionQuery(membership.organizationId),
+    await memberCalendarCoverageQuery(membership),
+  ], { operation: 'Read Google Calendar connection and coverage' })
+  const connection = calendarConnectionFromRow(calendarResult!.results[0] as (GoogleCalendarIntegration & { cleanup_pending: number }) | undefined)
   const coverage = connection.calendar && connection.calendar.status !== 'disabled'
-    ? await memberCalendarCoverage(db, organization.membership) : null
+    ? coverageResult!.results[0] as { members: number; checking: number } : null
   return { ...connection, coverage }
 }

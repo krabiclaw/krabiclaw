@@ -1,27 +1,26 @@
 import { MEMBER_NAME_SQL, RESERVATION_HOST_SQL, type PublicProvider } from '~/shared/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { getGuestRequest, getThreadOperationalRecord, requestActions } from '~/server/domain/requests'
+import { getGuestRequest, timedBookingActions } from '~/server/domain/requests'
 import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/domain/conversations'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { formatBookingPolicySummary, parseBookingPolicy, type FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
 import { freeCancellationUntil, outsideNotice } from '~/shared/availability-settings'
 import type { ProductKind } from '~/shared/product-details'
-import { getSourceLocale } from '~/server/utils/organization-locales'
-import { loadOwnerPictures } from '~/server/notifications/hero'
-import { readMediaPlacements } from '~/server/utils/media-asset-manager'
-import { readProductPhotos } from '~/server/utils/media-placement'
-import { mediaStillUrl, resolveOwnerPicture } from '~/shared/media-placement-contract'
+import { sourceLocaleFromRows, sourceLocaleQuery } from '~/server/utils/localization'
+import { loadOwnerPictures, ownerPicturesFromRows } from '~/server/notifications/hero'
+import { groupMediaPlacements, mediaPlacementsQuery, type StoredMediaPlacementItem } from '~/server/utils/media-asset-manager'
+import { mediaStillUrl, resolveOwnerPicture, uniqueMediaAssets } from '~/shared/media-placement-contract'
 import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
 import { listBookableSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { pendingBookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
-import { readPaymentReceipts } from '~/server/domain/payments'
+import { paymentReceiptsFromRows, paymentReceiptsQuery, readPaymentReceipts } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
 import { historicalNoShowAtSql } from '~/server/utils/review-requests'
@@ -235,9 +234,7 @@ function localTimeOf(row: Pick<BookingRow, 'starts_at' | 'timezone'>): string {
 }
 
 /** The latest proposal on the thread with no acceptance or decline answering it. */
-async function pendingBookingChange(db: DbClient, threadId: string | null): Promise<DashboardBookingDetails['pending_change']> {
-  if (!threadId) return null
-  const row = await queryFirst<MessageRow>(db, "SELECT * FROM messages WHERE conversation_id=? AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1", [threadId])
+async function pendingBookingChange(db: DbClient, threadId: string, row?: MessageRow): Promise<DashboardBookingDetails['pending_change']> {
   if (!row) return null
   const thread = await getGuestRequest(db, threadId)
   if (!thread) return null
@@ -276,17 +273,12 @@ export async function loadStaffBookingDetails(context: BookingAccessContext, boo
  * the team, and the payments are the ones this account made.
  */
 // A reservation shows its offering's photos, or the location's photos for a table.
-async function loadResourcePhotos(db: DbClient, row: BookingRow): Promise<string[]> {
-  const { organization_id: organizationId, product_id: productId, location_id: locationId } = row
-  if (row.product_kind !== 'table') {
-    const photos = (await readProductPhotos(db, { organizationId, productIds: [productId] })).get(productId) ?? []
-    return photos.map(mediaStillUrl).filter((url): url is string => url !== null)
-  }
-  if (!locationId) return []
-  const photos = (await readMediaPlacements(db, { organizationId, ownerType: 'business_location', ownerIds: [locationId] })).get(locationId) ?? []
-  const cover = resolveOwnerPicture('business_location', photos, [])
-  const ordered = [cover, ...photos.filter(photo => photo.slot === 'gallery')]
-  return [...new Set(ordered.map(mediaStillUrl).filter((url): url is string => url !== null))]
+function resourcePhotoUrls(kind: ProductKind, photos: StoredMediaPlacementItem[]): string[] {
+  const gallery = photos.filter(photo => photo.slot === 'gallery')
+  if (kind !== 'table') return uniqueMediaAssets([...photos.filter(photo => photo.slot === 'image'), ...gallery])
+    .map(mediaStillUrl).filter((url): url is string => url !== null)
+  return [...new Set([resolveOwnerPicture('business_location', photos, []), ...gallery]
+    .map(mediaStillUrl).filter((url): url is string => url !== null))]
 }
 
 export async function loadBuyerBookingDetails(
@@ -317,22 +309,38 @@ async function composeBookingDetails(
   if (pinFailure) throw new HTTPError({ statusCode: 500, message: pinFailure.error, data: { code: 'INVALID_STORED_LOCATION', field: pinFailure.field } })
 
   // A table may move to the business's tables at any of its locations; anything else stays where it is.
-  const visibleLocations = row.product_kind === 'table'
-    ? await queryAll<{ id: string; title: string }>(db, `SELECT DISTINCT l.id, l.title
+  const locationSelection = row.product_kind === 'table' ? {
+    query: `SELECT DISTINCT l.id, l.title
          FROM business_locations l JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
-         JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id AND p.kind = 'table'
+         JOIN products p ON p.id = pl.product_id AND p.organization_id = l.organization_id AND p.kind = 'table'
          JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-        WHERE l.organization_id = ? ORDER BY l.title`, [row.organization_id])
-    : row.location_id === null ? [] : [{ id: row.location_id, title: location_title! }]
-  const locationPictures = await loadOwnerPictures(db, row.organization_id, 'business_location', visibleLocations.map(location => location.id))
+        WHERE l.organization_id = ? ORDER BY l.title`, params: [row.organization_id],
+  } : { query: 'SELECT ? AS id, ? AS title WHERE ? IS NOT NULL', params: [row.location_id, location_title, row.location_id] }
+  const resourceId = row.product_kind === 'table' ? row.location_id : row.product_id
+  const canReadPayments = Boolean(reader.buyerUserId || reader.canReadPayments)
+  const [places, placeMedia, photos, locale, proposal, review, receipt] = await executeBatch(db, [
+    locationSelection,
+    mediaPlacementsQuery({ organizationId: row.organization_id, ownerType: 'business_location', includeOrganizationFallback: true,
+      owners: { sql: `SELECT id FROM (${locationSelection.query})`, params: locationSelection.params } }),
+    mediaPlacementsQuery({ organizationId: row.organization_id, ownerType: row.product_kind === 'table' ? 'business_location' : 'product',
+      owners: resourceId ? [resourceId] : [] }),
+    sourceLocaleQuery(row.organization_id),
+    { query: "SELECT * FROM messages WHERE conversation_id=? AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1", params: [row.conversation_id] },
+    { query: 'SELECT first_sent_at, submitted_at, revoked_at, expires_at FROM review_requests WHERE booking_id = ? AND ? = 1 ORDER BY created_at DESC LIMIT 1',
+      params: [row.booking_id, Number(!reader.buyerUserId)] },
+    ...(canReadPayments ? [paymentReceiptsQuery(row.organization_id, { bookingId: row.booking_id }, reader.buyerUserId)] : []),
+  ], { operation: 'Read reservation locations, media and display facts' })
+  const visibleLocations = places!.results as { id: string; title: string }[]
+  const locationPictures = ownerPicturesFromRows(row.organization_id, 'business_location', visibleLocations.map(location => location.id), placeMedia!.results)
+  const resourcePhotos = resourcePhotoUrls(row.product_kind, resourceId ? groupMediaPlacements(photos!.results).get(resourceId) ?? [] : [])
   const policy = parseBookingPolicy(row.policy_json)
-  const policyLocale = await getSourceLocale(db, row.organization_id)
-
+  const policyLocale = sourceLocaleFromRows(row.organization_id, locale!.results).locale
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
-  const payments = reader.buyerUserId || reader.canReadPayments
-    ? await readPaymentReceipts(db, reader.env, row.organization_id, { bookingId: row.booking_id }, reader.buyerUserId)
-    : null
+  const [payments, pendingChange] = await Promise.all([
+    receipt ? paymentReceiptsFromRows(reader.env, receipt.results) : null,
+    pendingBookingChange(db, row.conversation_id, proposal!.results[0] as MessageRow | undefined),
+  ])
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, bookingId: row.booking_id, requestId: row.conversation_id, buyerUserId: reader.buyerUserId }))
   return {
@@ -340,7 +348,7 @@ async function composeBookingDetails(
     unit: 'slot',
     available_actions: reader.buyerUserId ? [] : [
       'edit',
-      ...requestActions(await getThreadOperationalRecord(db, row.conversation_id), now).map(action => action === 'change' ? 'move' : action),
+      ...timedBookingActions(row, now).map(action => action === 'change' ? 'move' : action),
     ],
     payment_id: null,
     host: host_json === null ? null : JSON.parse(host_json) as PublicProvider,
@@ -349,7 +357,7 @@ async function composeBookingDetails(
     location_address: formatPostalAddress(address) || null,
     location_pin: latitude === null || longitude === null ? null : { latitude, longitude },
     location_maps_url: calculateMapUrl({ title: location_title ?? '', address, latitude, longitude, maps_url: location_maps_url }),
-    resource_photo_urls: await loadResourcePhotos(db, row),
+    resource_photo_urls: resourcePhotos,
     // The picture is the buyer's own account picture when they booked signed in; an emailed guest has none.
     // The screen shows a local date and time; the record holds one instant and
     // the zone it belongs to, so these are read off it rather than stored
@@ -362,7 +370,7 @@ async function composeBookingDetails(
     policy: formatBookingPolicySummary(policy, policyLocale, row.product_kind),
     private_notes: reader.buyerUserId ? null : private_notes,
     answers: formAnswerSnapshotsSchema.parse(JSON.parse(answers_json)),
-    pending_change: await pendingBookingChange(db, row.conversation_id),
+    pending_change: pendingChange,
     locations: visibleLocations.map(location => ({ ...location, image_url: locationPictures.get(location.id)?.imageUrl ?? null })),
     payments,
     // The same rule the public cancel route applies, read here so the screen
@@ -370,14 +378,14 @@ async function composeBookingDetails(
     guest_can_cancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at && (policy.advance_notice_minutes === null || outsideNotice(row.starts_at, policy.advance_notice_minutes, Date.parse(now))),
     guest_can_retry_cancellation: guestCanRetryCancellation,
     guest_cancel_refunds: now <= freeCancellationUntil(row.starts_at, policy.advance_notice_minutes),
-    review_invitation: reader.buyerUserId ? null : await reviewInvitationState(db, row.booking_id, now),
+    review_invitation: reviewInvitationState(review!.results[0] as ReviewInvitationRow | undefined, now),
   }
 }
 
 /** The latest invitation minted for the visit, as the team reads it. */
-async function reviewInvitationState(db: DbClient, bookingId: string, now: string): Promise<DashboardBookingDetails['review_invitation']> {
-  const request = await queryFirst<{ first_sent_at: string | null; submitted_at: string | null; revoked_at: string | null; expires_at: string }>(db,
-    'SELECT first_sent_at, submitted_at, revoked_at, expires_at FROM review_requests WHERE booking_id = ? ORDER BY created_at DESC LIMIT 1', [bookingId])
+type ReviewInvitationRow = { first_sent_at: string | null; submitted_at: string | null; revoked_at: string | null; expires_at: string }
+
+function reviewInvitationState(request: ReviewInvitationRow | undefined, now: string): DashboardBookingDetails['review_invitation'] {
   if (!request?.first_sent_at) return null
   if (request.submitted_at) return { state: 'submitted', at: request.submitted_at }
   if (request.revoked_at) return { state: 'revoked', at: request.revoked_at }

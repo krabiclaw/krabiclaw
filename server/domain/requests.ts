@@ -394,6 +394,11 @@ export function requestActions(record: ThreadOperationalRecord | null, now: stri
     if (record.pay_by) return !record.payment_processing && record.pay_by > now ? ['cancel'] : []
     return record.respond_by > now ? ['confirm', 'reject'] : []
   }
+  return timedBookingActions(record, now)
+}
+
+export function timedBookingActions(record: { status: string; ends_at: string }, now: string): string[] {
+  if (!['pending', 'confirmed'].includes(record.status) || record.ends_at <= now) return []
   return record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']
 }
 
