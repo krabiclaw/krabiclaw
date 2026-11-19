@@ -104,23 +104,37 @@ export function assertExactCanonicalLocale(value: unknown): string {
   return canonical
 }
 
-export async function getPersistedSourceLocale(
-  db: DbClient,
-  organizationId: string,
-): Promise<OrganizationLocaleRecord> {
-  const rows = await queryAll<OrganizationLocaleRow>(db, `
-    SELECT id, organization_id, locale, label, is_source, status, created_at, updated_at
-      FROM organization_locales
-     WHERE organization_id = ?  AND is_source = 1
-     ORDER BY id
-  `, [organizationId])
-  const source = rows.length === 1 ? rows[0]! : null
+export function sourceLocaleQuery(organizationId: string | { sql: string }): BatchQuery {
+  return { query: `SELECT id, organization_id, locale, label, is_source, status, created_at, updated_at
+      FROM organization_locales WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND is_source = 1 ORDER BY id`,
+    params: typeof organizationId === 'string' ? [organizationId] : [],
+  }
+}
+
+export function sourceLocaleFromRows(organizationId: string, rows: unknown[]): OrganizationLocaleRecord {
+  const source = rows.length === 1 ? rows[0] as OrganizationLocaleRow : null
   requireSourceLocale(organizationId, source?.locale ?? null, source?.status ?? null)
   return { ...source!, is_source: true }
 }
 
-export function readPublicSourceLocale(event: H3Event, db: DbClient, organizationId: string): Promise<OrganizationLocaleRecord> {
-  return oncePerRequest(event, `public-source-locale:${organizationId}`, () => getPersistedSourceLocale(db, organizationId))
+export async function getPersistedSourceLocale(db: DbClient, organizationId: string): Promise<OrganizationLocaleRecord> {
+  const { query, params } = sourceLocaleQuery(organizationId)
+  return sourceLocaleFromRows(organizationId, await queryAll(db, query, params))
+}
+
+function publicTenantLocales(event: H3Event, organizationId: string) {
+  const preloaded = event.context.tenantSourceLocaleRows as { organizationId: string; rows: unknown[]; published: string[] } | undefined
+  return preloaded?.organizationId === organizationId ? preloaded : undefined
+}
+
+export function publicTenantLocaleNames(event: H3Event, organizationId: string) {
+  return publicTenantLocales(event, organizationId)?.published
+}
+
+export function readPublicSourceLocale(event: H3Event, db: DbClient, organizationId: string, results?: unknown[]): Promise<OrganizationLocaleRecord> {
+  const rows = results ?? publicTenantLocales(event, organizationId)?.rows
+  return oncePerRequest(event, `public-source-locale:${organizationId}`, async () =>
+    rows ? sourceLocaleFromRows(organizationId, rows) : getPersistedSourceLocale(db, organizationId))
 }
 
 export function requireSourceLocale(organizationId: string, locale: string | null, status: string | null): string {
@@ -202,6 +216,24 @@ export async function assertPublicOrganizationLanguage(
     }
     throw error
   }
+}
+
+export function readPublicOrganizationLanguage(
+  event: H3Event,
+  db: DbClient,
+  organizationId: string,
+  locale: string,
+  source: OrganizationLocaleRecord,
+) {
+  return oncePerRequest(event, `public-language:${organizationId}:${locale}`, async () => {
+    const published = publicTenantLocaleNames(event, organizationId)
+    if (!published) return assertPublicOrganizationLanguage(db, organizationId, locale, source)
+    const catalog = platformLocale(assertExactCanonicalLocale(locale))
+    if (!catalog || (locale !== source.locale && !published.includes(locale))) {
+      throw new HTTPError({ statusCode: 404, statusMessage: 'Localized route was not found' })
+    }
+    return { locale, source: locale === source.locale, status: 'published' as const, platform_messages: { ...catalog.messages } }
+  })
 }
 
 function mapLocalization(row: ResourceLocalizationRow): ResourceLocalizationRecord {

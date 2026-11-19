@@ -39,13 +39,14 @@ import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, requirePayment } from '../../server/domain/payments/index.ts'
 import { paymentTransactionDestination } from '../../server/domain/payments/earnings.ts'
-import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
+import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, preparePaymentReturn, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
 import { reconcilePaymentIntent, processPaymentEvent } from '../../server/domain/payments/events.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
 import { NOT_HANDLED } from '../../server/utils/mcp-tools/execution.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
 import { getRequestDataMetrics, instrumentD1 } from '../../server/utils/request-metrics.ts'
+import { openPaymentReturnDocument, paymentReturnDocumentGuard, sealPaymentReturnDocument } from '../../server/utils/payment-return-document.ts'
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { applySchema } from './support/schema.ts'
@@ -1317,9 +1318,18 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
 
   // Stripe sends the guest back before the success webhook arrives.
   statuses.redirect = 'succeeded'
-  const receipt = await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest')
+  const trace = new H3Event(new Request(origin + '/api/public/payments/redirect/return'))
+  const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
+  const returnPayment = (client: typeof requestDb) => completePaymentReturn(client, { ...env, DB: client }, ORG, 'redirect', claim,
+   async () => 'guest', undefined, async () => ({ locale: 'en', source: true }), async () => 'guest')
+  const receipt = await returnPayment(requestDb)
   assert.equal(receipt.state, 'paid')
   if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  assert.equal(receipt.booking?.status, 'confirmed')
+  assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
+  const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
+  // This provider session reads the attorney's availability and its older purchase reads two attribution rows.
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 4 })
   const response = await request('/api/public/booking-requests/' + receipt.conversation_id, { headers: { authorization: `Bearer ${receipt.cancellation_token}` } })
   assert.equal(response.status, 200)
   const { booking } = await response.json() as { booking: { status: string } }
@@ -1328,10 +1338,11 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
   const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.succeeded', account: 'acct_seller', livemode: false,
    data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
   await deliver('redirect')
-  assert.deepEqual(await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest'), receipt)
+  assert.deepEqual(await returnPayment(db), receipt)
   const booked = await requirePayment(db, ORG, 'redirect')
   assert.ok(booked.subject_id)
   assert.equal(booked.captured_amount, 10000)
+  assert.equal(booked.claimed_user_id, 'guest')
 
   const capture = events.take('payment.captured')
   assert.ok(capture, 'a settled redirect queues the captured payment')
@@ -1353,6 +1364,60 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
   assert.equal((await holdOf(db, 'taken'))?.status, 'released')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
   assert.deepEqual([calls.capture, calls.cancel, calls.refund], [[], [], ['pi_taken']])
+ } finally { await runtime.dispose() }
+})
+
+test('the checkout return reuses a booking the webhook saved while Stripe was responding', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv, events } = await boot()
+ try {
+  const env = stripeEnv(bootEnv)
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  const claim = await confirmable(db, 'webhook-wins', inMinutes(15))
+  const host = 'payments.localhost'
+  const language = { locale: 'en', source: true }
+  const plan = await preparePaymentReturn({ query: '?', params: [ORG] }, 'webhook-wins', claim)
+  const row = await db.prepare(plan.query).bind(...plan.params).first()
+  const sealed = await sealPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, claim, row, language)
+  assert.ok(sealed)
+  assert.equal(await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, 'other.localhost', 'webhook-wins', claim, sealed), null)
+  const document = await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, 'webhook-wins', claim, sealed)
+  assert.ok(document)
+  const tenant = { query: "SELECT id FROM organization WHERE subdomain=? AND status='active'", params: ['payments'] }
+  const unauthorized = paymentReturnDocumentGuard({ ...tenant, params: ['krabiclaw'] }, document)
+  await assert.rejects(db.batch([db.prepare(unauthorized.query).bind(...unauthorized.params ?? [])]), /PAYMENT_RETURN_DOCUMENT_STALE/)
+  const trace = new H3Event(new Request('http://payments.localhost/api/public/payments/webhook-wins/return'))
+  const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
+  let webhook: Promise<void> | undefined
+  const calls = fakeStripe(t, async (url, init) => {
+   if (!webhook && init?.method === 'GET' && url.pathname === '/v1/payment_intents/pi_webhook-wins') {
+    webhook = processPaymentEvent(db, stripe, { id: 'evt_webhook_wins', type: 'payment_intent.succeeded', account: 'acct_seller',
+     livemode: false, data: { object: { id: 'pi_webhook-wins', metadata: { krabiclaw_payment_id: 'webhook-wins' } } } } as unknown as Stripe.Event, env)
+    await webhook
+   }
+   return null
+  }, { 'webhook-wins': 'succeeded' })
+  const stripe = getStripe(env)
+  const receipt = await completePaymentReturn(requestDb, { ...env, DB: requestDb }, ORG, 'webhook-wins', claim,
+   async () => 'guest', undefined, async () => language, async () => 'guest',
+   { ...document, userId: 'guest', guard: paymentReturnDocumentGuard(tenant, document) })
+  assert.ok(webhook)
+  await webhook
+  assert.equal(receipt.state, 'paid')
+  if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  assert.equal(receipt.booking?.status, 'confirmed')
+  assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
+  const result = await db.prepare(`SELECT b.status,p.captured_amount,p.claimed_user_id FROM bookings b
+    JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id
+    JOIN payments p ON p.subject_id=b.id AND p.organization_id=b.organization_id WHERE c.id=?`).bind(receipt.conversation_id).first()
+  assert.deepEqual(result, { status: 'confirmed', captured_amount: 10000, claimed_user_id: 'guest' })
+  assert.equal((await holdOf(db, 'webhook-wins'))?.status, 'converted')
+  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
+  assert.deepEqual(calls.refund, [])
+  assert.ok(events.take('payment.captured'))
+  assert.equal(events.take('payment.captured'), undefined)
+  const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
+  // This fixture reads the provider and legacy attribution while preparing the guarded batch.
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 3 })
  } finally { await runtime.dispose() }
 })
 

@@ -1,4 +1,3 @@
-import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { publicCacheRevision } from '~/server/utils/edge-cache'
 import { HTTPError } from 'nitro';
 import { oncePerRequest } from '~/server/utils/request-scope'
@@ -9,20 +8,21 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { queryAll } from '~/server/db'
 import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
-import { buildPublicShellPayload, readPublicExperiences, readPublicShellRows } from '~/server/utils/public-shell-query'
+import { buildPublicShellPayload, readPublicShellRows } from '~/server/utils/public-shell-query'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 import { getOptionalPublicConsultationSettings, getPublicCompliance } from '~/server/utils/professional-services'
-import { listPublishedTenantPagePaths } from '~/server/utils/content/pages'
 import { platformLocale } from '~/shared/platform-locales'
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { isPublicShellPayload } from '~/utils/public-resource-contracts'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, readPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
 import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
   indexStoredPublicLocalizations,
   projectExactLocalizedResource,
+  preloadedPublicLocalizations,
+  publicLocalizationsQuery,
   type StoredPublicLocalizationRow,
 } from '~/server/utils/public-localization'
 
@@ -89,30 +89,27 @@ export async function loadPublicShellSource(
     readPublicSourceLocale(event, db, organizationId),
   ])
   const sourceLocale = source.locale
+  const resolvedLanguage = readPublicOrganizationLanguage(event, db, organization.id, locale ?? sourceLocale, source)
   // The language, the shell rows and the bookable experiences depend on the
   // site alone; they were three sequential round trips on every cold shell.
   const [
     language,
-    { results: shellResults, indexes: shellIndexes },
-    experiences,
+    { results: shellResults, indexes: shellIndexes, experiences },
     sourceConsultation,
     sourceCompliance,
-    publishedPages,
     localizedRows,
   ] = await Promise.all([
-    assertPublicOrganizationLanguage(db, organization.id, locale ?? sourceLocale, source),
-    readPublicShellRows(event, db, organization.id, previewAuthorized && organization.vertical === 'restaurant'),
-    readPublicExperiences(event, db, organization.id, env),
+    resolvedLanguage,
+    resolvedLanguage.then(language => readPublicShellRows(event, db, organization, language.locale, previewAuthorized && organization.vertical === 'restaurant')),
     // Only a legal practice books consultations; a venue's site has no schedule page.
     isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) ? getOptionalPublicConsultationSettings(db, organization.id) : null,
-    getPublicCompliance(db, organization.id),
-    listPublishedTenantPagePaths(db, organization.id, locale ?? sourceLocale),
-    locale && locale !== sourceLocale ? queryAll<StoredPublicLocalizationRow>(db, `
-      SELECT resource_type, resource_id, locale, values_json, route_path
-       FROM ${RESOURCE_LOCALIZATIONS_SQL}
-       WHERE organization_id = ? AND locale = ?
-         AND resource_type IN ('organization', 'business_location')
-    `, [organization.id, locale]) : [],
+    organization.has_compliance === 0 ? null : getPublicCompliance(db, organization.id),
+    locale && locale !== sourceLocale ? resolvedLanguage.then(async () => {
+      const stored = preloadedPublicLocalizations(event, organization.id, locale)
+      if (stored) return stored.filter(row => row.resource_type === 'organization' || row.resource_type === 'business_location')
+      const { query, params } = publicLocalizationsQuery(organization.id, locale, true)
+      return queryAll<StoredPublicLocalizationRow>(db, query, params)
+    }) : [],
   ])
   options.signal?.throwIfAborted()
 
@@ -124,6 +121,7 @@ export async function loadPublicShellSource(
     can_schedule = Boolean(sourceConsultation.external_url)
   }
 
+  const publishedPages = shellResults[shellIndexes.pageLinks!]!.results as { id: string; path: string; title: string }[]
   const page_links = publishedPages
     .filter(page => page.path !== '/blog' && (page.path !== '/schedule' || can_schedule))
     .map(page => ({ id: page.id, path: page.path, title: page.title }))

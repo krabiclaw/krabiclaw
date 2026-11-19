@@ -7,10 +7,9 @@ import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { vrboEnabled } from '~/server/integrations/channex/hosted-channel'
 import { INTEGRATIONS, type IntegrationKey } from '~/shared/integrations'
 import type { CatalogAnswer, CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
-import { getOrganizationEntitlements } from '~/server/utils/billing-access'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getSocialConnections } from '~/server/utils/social-publication'
-import { loadOrganizationFeatures } from '~/server/utils/cms-capabilities'
+import { readDashboardWorkspaceAccess } from '~/server/utils/dashboard-context-service'
 import { createAuth, requireIntegrationAccount } from '~/server/utils/auth'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { loadConnectionSummary } from '~/server/utils/organization-settings'
@@ -18,6 +17,7 @@ import { assertOrganizationWideAccess, memberAccessPrincipal, roleAllows } from 
 import { memberCalendarCoverage, requireSchedulingAccess, readMemberScheduling } from '~/server/domain/member-scheduling'
 import { readCalendarConnection } from '~/server/utils/google-calendar'
 import type { getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { oncePerRequest } from '~/server/utils/request-scope'
 
 const inventory = {
   facebook: { path: 'pages', list: 'choices', id: 'id', name: 'name', key: 'page_id' },
@@ -51,12 +51,11 @@ function target(summary: Summary, integration: IntegrationKey) {
 }
 
 export async function connectionRows(
-  { db, env, organization }: Pick<Awaited<ReturnType<typeof getDashboardMemberContext>>, 'db' | 'env' | 'organization'>, summary: Summary,
+  event: H3Event, context: Parameters<typeof readDashboardWorkspaceAccess>[1], summary: Summary,
 ): Promise<ConnectionRow[]> {
-  const [features, allowed] = await Promise.all([
-    loadOrganizationFeatures(db, organization.id),
-    getOrganizationEntitlements(env, organization.id),
-  ])
+  const { env, organization } = context
+  const { effective_plan, features } = await readDashboardWorkspaceAccess(event, context)
+  const allowed = getPlanEntitlements(effective_plan)
   const base = `/dashboard/${encodeURIComponent(organization.slug)}/integrations`
   const maps = summary.google_maps
   const mapped = maps.filter(location => location.google_place_id).length
@@ -155,10 +154,10 @@ export async function dashboardConnections(
       { enabled: !disconnect, ...(accountId && !disconnect ? { account_id: accountId } : {}) })
     return { ...screen, destination: { view: 'connection-personal-calendar', query: scope } }
   }
-  const summary = await loadConnectionSummary(db, env, organization.id)
+  const summary = await loadConnectionSummary(db, organization.id)
   if (view === 'connections') {
     if (answer) return invalid('Choose a connection')
-    return { ...index('Connections', await connectionRows(context, summary)), groups: connectionGroups, filters: connectionFilters }
+    return { ...index('Connections', await connectionRows(event, context, summary)), groups: connectionGroups, filters: connectionFilters }
   }
   if (!definition || definition.key === 'airbnb') return invalid('Connection not found', 404)
   const integration = definition.key
@@ -307,9 +306,13 @@ export async function dashboardConnections(
   return managedAds ? screen : { ...screen, destination: { view: 'connection', query: scope } }
 }
 
-export async function readDashboardConnections(event: H3Event, orgSlug?: string) {
+export function readDashboardConnectionsDocument(event: H3Event, orgSlug: string, preloaded?: Summary) {
+  return oncePerRequest(event, `dashboard-connections:${orgSlug}`, () => readDashboardConnections(event, orgSlug, preloaded))
+}
+
+export async function readDashboardConnections(event: H3Event, orgSlug?: string, preloaded?: Summary) {
   const { db, env, organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
-  const integrations = await loadConnectionSummary(db, env, organization.id)
-  const connections = await connectionRows({ db, env, organization }, integrations)
+  const integrations = preloaded ?? await loadConnectionSummary(db, organization.id)
+  const connections = await connectionRows(event, { db, env, organization }, integrations)
   return { success: true as const, settings: { integrations }, connectionFilters, connectionGroups, connections }
 }

@@ -12,7 +12,6 @@ import type { CurrencyCode } from '~/shared/currencies'
 export interface PublicBase {
   organization: {
     id: string
-    organization_id: string
     default_currency: CurrencyCode | null
     contact_email: string | null
     contact_phone: string | null
@@ -24,7 +23,15 @@ export interface PublicBase {
     seo_description: string | null
     canonical_url: string | null
     search_console_verification: string | null
+    has_compliance: number
   }
+}
+
+export function publicBaseColumns(alias: string) {
+  return `${alias}.id, ${alias}.default_currency, ${alias}.contact_email, ${alias}.contact_phone, ${alias}.name,${alias}.vertical,
+    ${alias}.theme_id, ${alias}.brand_description, ${alias}.seo_title, ${alias}.seo_description, ${alias}.canonical_url,
+    CASE WHEN json_type(${alias}.settings_json, '$.compliance') = 'object' THEN 1 ELSE 0 END AS has_compliance,
+    (SELECT i.verification_token FROM organization_integrations i WHERE i.organization_id = ${alias}.id AND i.provider = 'google_search_console') AS search_console_verification`
 }
 
 /**
@@ -73,11 +80,7 @@ export function loadPublicBase(
     try {
       const organization = await queryFirst<PublicBase['organization']>(
         db,
-        `SELECT s.id, s.default_currency, s.contact_email, s.contact_phone, s.name, s.vertical,
-                s.theme_id,
-                s.brand_description,
-                s.seo_title, s.seo_description, s.canonical_url,
-                (SELECT i.verification_token FROM organization_integrations i WHERE i.organization_id = s.id AND i.provider = 'google_search_console') AS search_console_verification
+        `SELECT ${publicBaseColumns('s')}
            FROM organization s
           WHERE s.id = ? AND ${publicTenantVisibilitySql('s', options.previewAuthorized)}
           LIMIT 1`,
@@ -89,4 +92,9 @@ export function loadPublicBase(
       recordRequestPhase(event, 'base', startedAt)
     }
   })
+}
+
+export async function seedPublicBase(event: H3Event, organization: PublicBase['organization'], previewAuthorized: boolean) {
+  const key = `public-base:${organization.id}:${previewAuthorized ? 'preview' : 'public'}`
+  await oncePerRequest(event, key, async () => ({ organization }))
 }

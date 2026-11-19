@@ -22,7 +22,7 @@ const route = useRoute()
 const document = useState('dashboard:server-document', () => (import.meta.server || nuxt.isHydrating)
   && typeof route.params.org_slug === 'string'
   && (rendersDashboardCalendar(route.path, route.query)
-    || /^\/dashboard\/[^/]+(?:\/(?:bookings\/[^/]+|products|earnings(?:\/performance)?|integrations(?:\/google-calendar)?))?\/?$/.test(route.path)))
+    || /^\/dashboard\/[^/]+(?:\/(?:bookings\/[^/]+|products|earnings(?:\/(?:performance|payouts))?|integrations(?:\/google-calendar)?))?\/?$/.test(route.path)))
 const wrapper = document.value ? 'div' : ClientOnly
 
 // The shell reads the theme breakpoints during setup, so the document must

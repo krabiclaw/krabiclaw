@@ -8,7 +8,7 @@ import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQuery } from '~/server/db'
 import { isRecord } from '~/server/utils/type-guards'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
-import { assertBookingBatchWrite, bookingBatchWriteRefused, CapacityUnavailableError, sessionClaimQuery } from '~/server/utils/availability'
+import { assertBookingBatchWrite, bookingBatchWriteRefused, CapacityUnavailableError, sessionAllocationFactsQuery, sessionClaimQuery, type SessionAllocationInput } from '~/server/utils/availability'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 import { paymentsStripe, platformLivemode } from '~/server/utils/stripe-connect'
 import { approvedStayBooking, executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
@@ -34,15 +34,22 @@ export interface CheckoutHold {
   retained_for_servicing: number
   receipt_conversation_id: string | null
   receipt_cancellation_hash: string | null
+  session_allocation: NonNullable<SessionAllocationInput['saved']> | null
 }
 
-type CapturedPayment = Payment & { retained_without_organization: number }
+type CapturedPayment = Payment & { retained_without_organization: number; checkout_hold: string | null }
+
+type PaymentReconciliation = { intent: Stripe.PaymentIntent; settlement?: { payment: Payment; hold: CheckoutHold | null; receiptRows?: D1Result[] } }
 
 /** The checkout record for the payment aliased as p, including its converted receipt if present. */
 export const checkoutHoldSql = `SELECT json_object(
   'id',h.id,'organization_id',h.organization_id,'product_id',h.product_id,'variant_id',h.variant_id,'session_id',h.session_id,
   'location_id',h.location_id,'buyer_user_id',h.buyer_user_id,'conversation_id',h.conversation_id,
   'starts_at',h.starts_at,'ends_at',h.ends_at,'quantity',h.quantity,'status',h.status,'converted_booking_id',h.converted_booking_id,
+  'session_allocation',json(CASE WHEN h.session_id IS NOT NULL AND h.status='active' THEN (
+    SELECT json_object('starts_at',starts_at,'ends_at',ends_at,'location_id',location_id,'timezone',timezone,
+      'status',status,'opening_hours',opening_hours,'special_hours',special_hours,'provider_id',provider_id)
+    FROM (${sessionAllocationFactsQuery('h.organization_id', 'h.product_id', 'h.session_id')})) END),
   'home',json(CASE WHEN h.session_id IS NULL AND h.status <> 'converted'
     THEN (SELECT json_object('location_id',c.location_id,'timezone',l.timezone,'check_in_time',b.check_in_time,'check_out_time',b.check_out_time,
       'variants',json((SELECT json_group_array(v.id) FROM product_variants v WHERE v.organization_id=h.organization_id AND v.product_id=h.product_id)))
@@ -63,7 +70,8 @@ export async function readCheckoutHold(db: DbClient, payment: Payment) {
 }
 
 /** Provider retrieval, account/mode and frozen money checks precede every conversion. */
-export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv, knownHold?: CheckoutHold | null):Promise<Stripe.PaymentIntent> {
+export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv, knownHold?: CheckoutHold | null,
+ receiptQueries: BatchQuery[] = [], guard?: BatchQuery, scheduleRefreshed = false):Promise<PaymentReconciliation> {
   if (reported.livemode !== Boolean(payment.livemode) || reported.currency.toUpperCase() !== payment.currency || stripeMetadataId('payment', reported.metadata) !== payment.id || payment.stripe_payment_intent_id !== reported.id) throw new Error('Stripe PaymentIntent financial identity mismatch')
   // The intent is the one this purchase opened, on this account and mode; what it charged is Stripe's.
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
@@ -77,7 +85,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       ((typeof reported.payment_method === 'object' && reported.payment_method?.type === 'us_bank_account') ||
        (typeof reported.latest_charge === 'object' && reported.latest_charge?.payment_method_details?.type === 'us_bank_account')))
   const failed = reported.status === 'requires_payment_method' && reported.last_payment_error
-  if (!debitInitiated && !failed && !['requires_capture', 'succeeded', 'canceled'].includes(reported.status)) return reported
+  if (!debitInitiated && !failed && !['requires_capture', 'succeeded', 'canceled'].includes(reported.status)) return { intent: reported }
 
   let intent = reported
   let hold = payment.subject_type === 'booking' ? knownHold === undefined ? await readCheckoutHold(db, payment) : knownHold : null
@@ -132,7 +140,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
   } else if (failed) {
     if (approval) await releaseApprovedStayConfirmation(db, env, payment)
   }
-  if (intent.status !== 'succeeded') return intent
+  if (intent.status !== 'succeeded') return { intent }
 
   let bookingId = hold?.status === 'converted' ? hold.converted_booking_id : null
   if (intent.application_fee_amount) throw new Error('Direct charges carry no application fee')
@@ -152,7 +160,8 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
          WHERE id=? AND organization_id=? AND captured_amount=0
          RETURNING *, EXISTS (SELECT 1 FROM payment_servicing_tenants s
            WHERE s.organization_id=payments.organization_id AND s.stripe_account_id=payments.stripe_account_id AND s.livemode=payments.livemode
-             AND NOT EXISTS (SELECT 1 FROM organization o WHERE o.id=payments.organization_id)) AS retained_without_organization`,
+             AND NOT EXISTS (SELECT 1 FROM organization o WHERE o.id=payments.organization_id)) AS retained_without_organization,
+           (SELECT (${checkoutHoldSql}) FROM payments p WHERE p.id=payments.id AND p.organization_id=payments.organization_id) AS checkout_hold`,
       params: [charge.id, charge.receipt_url, (intent as Stripe.PaymentIntent & { amount_details?: { surcharge?: { amount?: number } } }).amount_details?.surcharge?.amount ?? 0,
         intent.amount_received, taxAmount, now, payment.id, payment.organization_id] },
       // Usage is billed in the platform's mode only: a demo's test-mode capture on a live platform is never billable volume.
@@ -164,24 +173,64 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
     )
   }
   let conversion: Awaited<ReturnType<typeof saveCheckoutBooking>> | undefined
+  let concurrentCapture: Payment | undefined
+  const leading = guard ? [guard] : []
   if (hold?.status === 'active' && hold.organization_exists && payment.refunded_amount === 0) {
+    // The browser can arrive while the webhook is committing this visit. A
+    // matching converted hold can supply the same receipt without another write.
+    const capturedVisit: BatchQuery | undefined = hold.session_id && receiptQueries.length ? {
+      query: `SELECT p.*, (${checkoutHoldSql}) AS checkout_hold FROM payments p
+        JOIN payment_checkout_holds h ON h.id=? AND h.organization_id=p.organization_id AND h.payment_id=p.id
+        JOIN conversations c ON c.id=? AND c.organization_id=p.organization_id AND c.kind='booking' AND c.booking_id=p.subject_id
+        WHERE p.id=? AND p.organization_id=? AND p.stripe_payment_intent_id=? AND p.stripe_charge_id=?
+          AND p.stripe_account_id=? AND p.livemode=? AND p.currency=? AND p.captured_amount=?
+          AND h.status='converted' AND h.converted_booking_id=p.subject_id`,
+      params: [hold.id, hold.conversation_id, payment.id, payment.organization_id, intent.id, charge.id,
+        payment.stripe_account_id, Number(intent.livemode), payment.currency, intent.amount_received],
+    } : undefined
     // Redirect methods can succeed without a separate authorization. Claim what was
     // purchased and record the verified charge together.
     try {
-      conversion = await saveCheckoutBooking(db, env, payment, hold, snapshot, new Date(charge.created * 1000).toISOString(), captureQueries)
+      conversion = await saveCheckoutBooking(db, env, payment, hold, snapshot, new Date(charge.created * 1000).toISOString(), captureQueries, receiptQueries, capturedVisit, guard)
       bookingId = conversion.bookingId
     } catch (error) {
       if (!isStayNightConflict(error) && !bookingBatchWriteRefused(error) && !(error instanceof CapacityUnavailableError)) throw error
-      await execute(db, "UPDATE payment_checkout_holds SET status='released' WHERE id=? AND organization_id=? AND status='active'", [hold.id, payment.organization_id])
-      hold = await readCheckoutHold(db, payment)
+      if (hold.session_id) {
+        // A schedule edit can also invalidate the prepared visit. Re-read
+        // those facts before deciding that the paid visit needs a refund.
+        const currentHold = await readCheckoutHold(db, payment)
+        if (currentHold?.status === 'active' && JSON.stringify(currentHold.session_allocation) !== JSON.stringify(hold.session_allocation)) {
+          if (scheduleRefreshed) throw new Error('The visit schedule changed during payment settlement', { cause: error })
+          return reconcilePaymentIntent(db, stripe, payment, intent, env, currentHold, receiptQueries, guard, true)
+        }
+      }
+      const [, current] = (await executeBatch(db, [
+        ...leading,
+        { query: "UPDATE payment_checkout_holds SET status='released' WHERE id=? AND organization_id=? AND status='active'",
+          params: [hold.id, payment.organization_id] },
+        { query: `SELECT p.*, (${checkoutHoldSql}) AS hold FROM payments p WHERE p.id=? AND p.organization_id=?`,
+          params: [payment.id, payment.organization_id] },
+      ], { operation: 'Resolve concurrent checkout settlement' })).slice(leading.length)
+      const latest = current?.results[0] as (Payment & { hold: string | null }) | undefined
+      hold = latest?.hold ? JSON.parse(latest.hold) as CheckoutHold : null
       if (hold?.status !== 'converted' && hold?.status !== 'released') throw error
       bookingId = hold.converted_booking_id
+      if (latest && latest.captured_amount > 0) {
+        if (!matchesCapture(latest)) throw new Error('Stored capture does not match Stripe', { cause: error })
+        concurrentCapture = latest
+      }
     }
   }
-  const [write] = !conversion && captureQueries.length ? await executeBatch(db, captureQueries, { operation: 'Record payment capture' }) : []
+  const [write] = !conversion && !concurrentCapture && captureQueries.length
+    ? (await executeBatch(db, [...leading, ...captureQueries], { operation: 'Record payment capture' })).slice(leading.length) : []
+  if (conversion?.existing) {
+    const { checkout_hold, ...recorded } = conversion.existing
+    return { intent, settlement: { payment: recorded, hold: JSON.parse(checkout_hold) as CheckoutHold, receiptRows: conversion.receiptRows } }
+  }
   const capture = conversion?.capture ?? write?.results[0] as CapturedPayment | undefined
+  if (capture?.checkout_hold) hold = JSON.parse(capture.checkout_hold) as CheckoutHold
   // Confirm and the Stripe webhook may observe the same capture.
-  const recorded = capture ?? (captureQueries.length ? await requirePayment(db, payment.organization_id, payment.id) : payment)
+  const recorded = capture ?? concurrentCapture ?? (captureQueries.length ? await requirePayment(db, payment.organization_id, payment.id) : payment)
   if (!matchesCapture(recorded)) throw new Error('Stored capture does not match Stripe')
   const keepPaymentOnly = hold && !hold.organization_exists && (hold.session_id === null || (hold.retained_for_servicing && bookingId))
   if (payment.subject_type === 'booking' && !keepPaymentOnly && !bookingId) {
@@ -197,7 +246,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       intent_created: intent.created, saved_method_id: intent.customer && typeof charge.payment_method === 'string' ? charge.payment_method : null,
       booking,
     })
-    return intent
+    return { intent, settlement: { payment: recorded, hold, receiptRows: conversion?.receiptRows } }
   }
   if (!bookingId || !hold || keepPaymentOnly || recorded.refunded_amount > 0 || capture?.retained_without_organization) return finish()
   if (hold.session_id === null) return finish({ unit: 'nights', id: bookingId })
@@ -244,23 +293,29 @@ function frozenAnswers(snapshot: Record<string, unknown>): FormAnswerSnapshot[] 
 }
 
 /** Save the booking, claim inventory and attach the payment in one transaction. */
-async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Payment, hold: CheckoutHold, snapshot: Record<string, unknown>, now: string, captureQueries: BatchQuery[] = []) {
+async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Payment, hold: CheckoutHold, snapshot: Record<string, unknown>, now: string,
+ captureQueries: BatchQuery[] = [], receiptQueries: BatchQuery[] = [], capturedVisit?: BatchQuery, guard?: BatchQuery) {
  if (!hold.product_id || !isRecord(snapshot.policy)) throw new Error('Booking payment has no offering or frozen policy')
  const approval = approvedStayBooking(snapshot)
  const bookingId = approval?.bookingId ?? crypto.randomUUID()
  const policy=JSON.stringify(snapshot.policy)
  const activeCheckout = { query: "EXISTS (SELECT 1 FROM payment_checkout_holds WHERE id=? AND organization_id=? AND status='active')",
    params: [hold.id, payment.organization_id] }
+ const assertWrite = (predicate: BatchQuery) => assertBookingBatchWrite(capturedVisit ? {
+   query: `(${predicate.query}) OR EXISTS (${capturedVisit.query})`,
+   params: [...predicate.params ?? [], ...capturedVisit.params ?? []],
+ } : predicate)
  let claim:BatchQuery[]
  if(hold.session_id){
   if(!hold.conversation_id)throw new Error('Visit hold has no guest conversation')
   if(!hold.variant_id)throw new Error('Booking hold has no offering or session')
-  claim=[await sessionClaimQuery(db,{env,bookingId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,now,payment: { id: payment.id, startsAt: hold.starts_at, endsAt: hold.ends_at, locationId: hold.location_id },policyJson:policy,answers:frozenAnswers(snapshot),websiteSource:await checkoutWebsiteSource(db,payment,hold.conversation_id)}),
-   assertBookingBatchWrite({ query: 'changes() = 1', params: [] }),
+  claim=[await sessionClaimQuery(db,{env,bookingId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,saved:hold.session_allocation,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,now,payment: { id: payment.id, startsAt: hold.starts_at, endsAt: hold.ends_at, locationId: hold.location_id },policyJson:policy,answers:frozenAnswers(snapshot),websiteSource:await checkoutWebsiteSource(db,payment,hold.conversation_id)}),
+   assertWrite({ query: 'changes() = 1', params: [] }),
    // The conversation the checkout waited in is the booking's; an operator's checkout records the status the booking was created in.
    {query:`UPDATE conversations SET booking_id=v.id,payload_json=CASE WHEN json_type(payload_json,'$.provenance')='object' THEN json_set(payload_json,'$.provenance.creation_status',v.status) ELSE payload_json END FROM bookings v
      WHERE v.id=? AND conversations.id=? AND conversations.organization_id=v.organization_id AND conversations.kind='booking' AND conversations.booking_id IS NULL`,params:[bookingId,hold.conversation_id]},
-   ...conversationTaskQueries(hold.conversation_id,now)]
+   ...conversationTaskQueries({ query: '(SELECT id FROM conversations WHERE id=? AND organization_id=? AND booking_id=?)',
+     params: [hold.conversation_id, payment.organization_id, bookingId] }, now)]
  }else{
   const purchase=snapshot.stay
   if(!isStayPurchase(purchase)||purchase.product_id!==hold.product_id||purchase.total_minor!==payment.amount)throw new Error('Stay payment has no valid stay purchase')
@@ -291,19 +346,24 @@ async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Pa
     home, policy, availability, websiteSource: await checkoutWebsiteSource(db, payment, hold.conversation_id) })
   }
  }
- const writes = await executeBatch(db, [...claim,
+ const writes = await executeBatch(db, [...(guard ? [guard] : []), ...claim,
    { query: "UPDATE payment_checkout_holds SET status='converted', converted_booking_id=? WHERE id=? AND organization_id=? AND status='active'",
      params: [bookingId, hold.id, payment.organization_id] },
-   assertBookingBatchWrite({ query: 'changes() = 1', params: [] }),
+   assertWrite({ query: 'changes() = 1', params: [] }),
    { query: 'UPDATE payments SET subject_id=?, updated_at=? WHERE id=? AND organization_id=? AND subject_id IS NULL',
      params: [bookingId, now, payment.id, payment.organization_id] },
-   assertBookingBatchWrite({ query: `changes()=1 AND EXISTS (SELECT 1 FROM conversations WHERE organization_id=? AND booking_id=? AND kind='booking'
+   assertWrite({ query: `changes()=1 AND EXISTS (SELECT 1 FROM conversations WHERE organization_id=? AND booking_id=? AND kind='booking'
      AND (? IS NULL OR id=?))`, params: [payment.organization_id, bookingId, hold.conversation_id, hold.conversation_id] }),
    ...captureQueries,
+   ...receiptQueries,
+   ...(capturedVisit ? [capturedVisit] : []),
  ], { operation: 'Save checkout booking' })
  await publishChangedJobs(env, payment.organization_id, changedTaskIds(writes))
- const capture = captureQueries.length ? writes.at(-captureQueries.length)?.results[0] as CapturedPayment | undefined : undefined
- return { bookingId, capture }
+ const receiptEnd = writes.length - Number(Boolean(capturedVisit))
+ const receiptStart = receiptEnd - receiptQueries.length
+ const capture = captureQueries.length ? writes[receiptStart - captureQueries.length]?.results[0] as CapturedPayment | undefined : undefined
+ const existing = !capture && capturedVisit ? writes[receiptEnd]?.results[0] as (Payment & { checkout_hold: string }) | undefined : undefined
+ return { bookingId, capture, existing, receiptRows: receiptQueries.length ? writes.slice(receiptStart, receiptEnd) : undefined }
 }
 
 const CONFIRMATION_HOLD_MS=60*60*1000

@@ -4,7 +4,7 @@ import { publishEvent } from '~/server/events'
 import { bookingReviewDueAt } from '~/server/utils/review-requests'
 import { publishConversationEvent, scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
-import { bookingSessionFrom, CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, savedBookingOpeningQuery, sessionAllocationPredicate, type SavedBookingOpening } from '~/server/utils/availability'
+import { bookingOpeningInstant, bookableSessions, resolveCalendarOpening, slotCalendars, slotReadQueries, CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, savedBookingOpeningQuery, type ResolvedBookingSession, type SavedBookingOpening } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
@@ -31,7 +31,8 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
 import { checkoutAttemptQuery, createPaymentCheckout, type CheckoutAttempt } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
-import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { checkoutSellerFromRows, checkoutSellerQuery, prepareOrganizationPlan } from '~/server/utils/billing-access'
+import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { isRecord } from '~/server/utils/type-guards'
 import { createStay, createStayRequest, publicStayHomeFrom, publicStayHomeQueries, publishStayRequest, quoteStayAvailability, stayAccessFor, stayCheckoutPolicy, stayCreationHomeQuery, stayQuoteNightQueries, type StayCreationHome } from '~/server/domain/stays'
 import { LODGING_BOOKING_POLICY_COLUMNS, lodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
@@ -114,10 +115,23 @@ function bookingOfferingQuery(organization: BatchQuery, selector: { slug?: strin
 function timedBookingQueries(organization: BatchQuery, product: BatchQuery, input: { sessionId: string; requestedVariantId: string }): BatchQuery[] {
   const variants = { query: `SELECT id,name FROM product_variants WHERE organization_id=${organization.query} AND product_id=${product.query} AND active=1`,
     params: [...organization.params ?? [], ...product.params ?? []] }
-  return [savedBookingOpeningQuery(organization, product, input.sessionId), variants, timedBookingPricesQuery(organization, {
+  const opening = savedBookingOpeningQuery(organization, product, input.sessionId)
+  return [opening, variants, timedBookingPricesQuery(organization, {
     query: `SELECT id FROM (${variants.query}) WHERE (? = '' OR id=?) LIMIT 1`,
     params: [...variants.params, input.requestedVariantId, input.requestedVariantId],
   })]
+}
+
+function timedCalendarQueries(organization: BatchQuery, product: BatchQuery, opening: BatchQuery, sessionId: string, now: string) {
+  const starts = { query: `COALESCE((SELECT starts_at FROM (${opening.query})), ?)`,
+    params: [...opening.params ?? [], bookingOpeningInstant(sessionId)] }
+  return slotReadQueries({
+    organization: { ...organization, params: organization.params ?? [] },
+    products: { query: `SELECT ${product.query}`, params: product.params ?? [] },
+    fromInstant: starts,
+    toInstant: { query: `strftime('%Y-%m-%dT%H:%M:%fZ', ${starts.query}, '+0.001 seconds')`, params: starts.params },
+    now, scope: 'bookable',
+  })
 }
 
 function timedBookingFrom([opening, variants, prices]: Awaited<ReturnType<typeof executeBatch>>) {
@@ -128,13 +142,21 @@ function timedBookingFrom([opening, variants, prices]: Awaited<ReturnType<typeof
   }
 }
 
-async function timedBookingTerms(db: DbClient, env: CloudflareEnv, input: {
-  organizationId: string; productId: string; sessionId: string; requestedVariantId: string
-  partySize: number; currency: string; actorId: string; now: string
-}, facts: ReturnType<typeof timedBookingFrom>) {
+function timedCalendarFrom(env: CloudflareEnv, productId: string, sessionId: string, opening: SavedBookingOpening | undefined, now: string, rows: D1Result[]) {
+  const starts = bookingOpeningInstant(sessionId, opening)
+  if (!starts) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
+  const calendar = slotCalendars(env, { fromInstant: starts, toInstant: new Date(Date.parse(starts) + 1).toISOString(),
+    locationId: opening?.location_id, scope: 'bookable', now }, rows).get(productId)
+  if (!calendar) throw new HTTPError({ statusCode: 404, message: 'This product does not take bookings' })
+  return calendar
+}
+
+function timedBookingPriceTerms<T extends Pick<ResolvedBookingSession, 'session' | 'config'>>(
+  input: { requestedVariantId: string; partySize: number; currency: string; now: string },
+  { variants, prices }: ReturnType<typeof timedBookingFrom>,
+  resolved: T,
+) {
   const { requestedVariantId, partySize } = input
-  const { opening, variants, prices } = facts
-  const resolved = await bookingSessionFrom(db, { ...input, env }, opening)
   if (!variants.length) return { failure: creationResult({ error: 'This product has no bookable option' }, { status: 409 }) }
   if (!requestedVariantId && variants.length > 1) return { failure: creationResult({ error: 'Choose an option before booking' }, { status: 400 }) }
   const variant = requestedVariantId ? variants.find(candidate => candidate.id === requestedVariantId) : variants[0]
@@ -155,36 +177,66 @@ function throwQuoteFailure(failure: ReturnType<typeof creationResult>): never {
   throw new HTTPError({ statusCode: failure.status, message: error, data })
 }
 
-/** Read the same terms a timed booking will use, without claiming inventory. */
-export async function quoteTimedBooking(db: DbClient, env: CloudflareEnv, input: {
-  organizationId: string; slug: string; product_session_id?: unknown; product_variant_id?: unknown; party_size?: unknown
-}) {
+type TimedQuoteInput = { slug: string; product_session_id?: unknown; product_variant_id?: unknown; party_size?: unknown }
+
+/** Price the exact same read-only slot snapshot that supplies availability. The write still guards the claim. */
+export function preparePublicTimedQuote(organization: BatchQuery, input: TimedQuoteInput) {
   const selection = readTimedSelection(input)
-  if (selection.failure) throwQuoteFailure(selection.failure)
-  const offeringQuery = bookingOfferingQuery(bookingParameter(input.organizationId), input)
-  const [offering, organization] = await Promise.all([
-    queryFirst<BookingOffering>(db, offeringQuery.query, offeringQuery.params),
-    queryFirst<{ default_currency: string }>(db, "SELECT default_currency FROM organization WHERE id=? AND status='active'", [input.organizationId]),
-  ])
-  if (!offering || offering.unit !== 'slot' || offering.on_sale !== 1 || !organization) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
-  if (offering.order_url) throw new HTTPError({ statusCode: 409, message: 'Book this product on its configured external website.', data: { external_url: offering.order_url } })
-  const now = new Date().toISOString()
-  const facts = await executeBatch(db, timedBookingQueries(bookingParameter(input.organizationId), bookingParameter(offering.id), selection), { operation: 'Read booking quote terms' })
-  const terms = await timedBookingTerms(db, env, { ...selection, organizationId: input.organizationId, productId: offering.id, currency: organization.default_currency, actorId: 'system', now }, timedBookingFrom(facts))
-  if (terms.failure) throwQuoteFailure(terms.failure)
-  const { resolved, config, variant, price, requiresPayment, policy } = terms
-  const allocation = await sessionAllocationPredicate(db, { env, organizationId: input.organizationId, productId: offering.id, sessionId: resolved.session.id, partySize: selection.partySize, now, resolved, preview: true })
-  if (!await queryFirst(db, `SELECT 1 WHERE ${allocation.query}`, allocation.params)) {
-    throw new HTTPError({ statusCode: 409, message: 'This time no longer has capacity for your party', data: { code: 'capacity_unavailable' } })
+  const offering = bookingOfferingQuery(organization, { slug: input.slug })
+  const now = new Date()
+  const billing = prepareOrganizationPlan({ sql: '(SELECT organization_id FROM viewer)' }, now)
+  const viewer: BatchQuery = {
+    query: `SELECT o.id AS organization_id, o.default_currency, p.* FROM organization o CROSS JOIN (${offering.query}) p
+      WHERE o.id = ${organization.query} AND o.status = 'active'`,
+    params: [...offering.params ?? [], ...organization.params ?? []],
   }
-  if (requiresPayment && !await hasOrganizationEntitlement(env, input.organizationId, 'payments')) {
-    throw new HTTPError({ statusCode: 409, message: 'Payments entitlement is required to collect online payment', data: { code: 'payment_required' } })
+  const org = { query: '(SELECT organization_id FROM viewer)', params: [] }
+  const product = { query: "(SELECT id FROM viewer WHERE unit = 'slot')", params: [] }
+  const queries: BatchQuery[] = [viewer]
+  if (!selection.failure) {
+    const terms = timedBookingQueries(org, product, selection)
+    queries.push(...[billing.query, ...terms, ...timedCalendarQueries(org, product, terms[0]!, selection.sessionId, now.toISOString())]
+      .map(query => withViewer(viewer, query)))
   }
-  const { id, location_id, starts_at, ends_at, timezone } = resolved.session
-  return { unit: 'slot' as const, product_id: offering.id, product_variant_id: variant.id, product_session_id: id, party_size: selection.partySize,
-    location_id, starts_at, ends_at, timezone, currency: price.currency, tax_behavior: price.tax_behavior,
-    total_minor: requiresPayment ? price.unit_amount * paidQuantity(config, selection.partySize) : 0, payment_required: requiresPayment, policy }
+  return { queries, read }
+
+  async function read(env: CloudflareEnv, organizationId: string, [offeringRows, subscription, ...rows]: D1Result[]) {
+    const offering = offeringRows?.results[0] as (BookingOffering & { organization_id: string; default_currency: string }) | undefined
+    if (!offering || offering.organization_id !== organizationId) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
+    if (offering.kind === 'stay') return { unit: 'nights' as const, productId: offering.id }
+    if (selection.failure) throwQuoteFailure(selection.failure)
+    if (offering.unit !== 'slot' || offering.on_sale !== 1) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
+    if (offering.order_url) throw new HTTPError({ statusCode: 409, message: 'Book this product on its configured external website.', data: { external_url: offering.order_url } })
+    const facts = timedBookingFrom(rows.slice(0, 3))
+    const time = now.toISOString()
+    const calendar = timedCalendarFrom(env, offering.id, selection.sessionId, facts.opening, time, rows.slice(3))
+    const opening = bookableSessions(calendar.schedule, (await calendar.places()).sessions, time)
+      .find(session => session.id === selection.sessionId)
+    if (!opening) throw new HTTPError({ statusCode: 409, message: 'That session is no longer offered. Choose an available time.' })
+    const terms = timedBookingPriceTerms({ ...selection, currency: offering.default_currency, now: time }, facts, { config: calendar.schedule.config, session: opening })
+    if (terms.failure) throwQuoteFailure(terms.failure)
+    if (opening.remaining !== null && opening.remaining < selection.partySize) {
+      throw new HTTPError({ statusCode: 409, message: 'This time no longer has capacity for your party', data: { code: 'capacity_unavailable' } })
+    }
+    if (terms.requiresPayment && getPlanEntitlements(billing.read(subscription!, organizationId)).payments !== true) {
+      throw new HTTPError({ statusCode: 409, message: 'Payments entitlement is required to collect online payment', data: { code: 'payment_required' } })
+    }
+    const { id, location_id, starts_at, ends_at, timezone } = opening
+    const { config, variant, price, requiresPayment, policy } = terms
+    return { unit: 'slot' as const, product_id: offering.id, product_variant_id: variant.id, product_session_id: id, party_size: selection.partySize,
+      location_id, starts_at, ends_at, timezone, currency: price.currency, tax_behavior: price.tax_behavior,
+      total_minor: requiresPayment ? price.unit_amount * paidQuantity(config, selection.partySize) : 0, payment_required: requiresPayment, policy }
+  }
 }
+
+export async function quoteTimedBooking(db: DbClient, env: CloudflareEnv, input: TimedQuoteInput & { organizationId: string }) {
+  const plan = preparePublicTimedQuote(bookingParameter(input.organizationId), input)
+  const quote = await plan.read(env, input.organizationId, await executeBatch(db, plan.queries, { operation: 'Read booking quote terms' }))
+  if (quote.unit !== 'slot') throw new HTTPError({ statusCode: 404, message: 'Product not found' })
+  return quote
+}
+
+export type PublicTimedQuoteRead = { slug: string; plan: ReturnType<typeof preparePublicTimedQuote>; rows: D1Result[] }
 
 /** Creation delivery is shared by ordinary claims and authenticated Checkout conversion. */
 export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClient, organizationId: string, requestId: string) {
@@ -245,8 +297,24 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
 type BookingOrganization = { id: string; slug: string; default_currency: string; vertical: string | null; source_locale: string | null;
   locale_status: string | null; policy_type: string | null; confirmation_mode: unknown }
 
-async function readBookingCreation(db: DbClient, organization: BatchQuery, input: {
+type BookingReplay = { id: string; status: string; fingerprint: string | null; completed: number | null; creation_status: string | null; product_session_id: string; product_variant_id: string; party_size: number }
+
+export function timedBookingConversationId(organizationId: string, idempotencyKey: string, operator = false) {
+  return hashIdentifier(JSON.stringify(operator ? [organizationId, idempotencyKey] : ['website-booking', organizationId, idempotencyKey]))
+}
+
+function bookingReplayQuery(organization: BatchQuery, threadId: string): BatchQuery {
+  return { query: `SELECT b.id, b.status, b.product_session_id, b.product_variant_id, b.party_size,
+    json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint,
+    json_extract(r.payload_json, '$.provenance.followups_completed') AS completed,
+    json_extract(r.payload_json, '$.provenance.creation_status') AS creation_status
+    FROM conversations r JOIN bookings b ON b.id=r.booking_id AND b.organization_id=r.organization_id
+    WHERE r.organization_id=${organization.query} AND r.id=?`, params: [...organization.params ?? [], threadId] }
+}
+
+export function prepareBookingCreation(organization: BatchQuery, input: {
   slug?: string; productId?: string; body: Record<string, unknown>; idempotencyKey: string
+  replay?: { organizationId: string; threadId: string }
 }, membership: BatchQuery | null, includeStayHome: boolean) {
   const offeringQuery = bookingOfferingQuery(organization, input)
   const organizationQuery: BatchQuery = { query: `
@@ -260,19 +328,39 @@ async function readBookingCreation(db: DbClient, organization: BatchQuery, input
     : bookingParameter(input.productId)
   const reads = [organizationQuery, offeringQuery]
   if (includeStayHome) reads.push(stayCreationHomeQuery(organization, product, input.body.check_in_date, input.idempotencyKey))
-  if (!selection.failure) reads.push(checkoutAttemptQuery(organization, input.idempotencyKey), ...timedBookingQueries(organization, product, selection))
-  const results = await executeBatch(db, membership ? [membership, ...reads.map(read => withViewer(membership, read))] : reads,
-    { operation: 'Read booking creation facts' })
-  const member = membership ? results.shift()!.results[0] : undefined
-  const [orgRows, offeringRows] = results.splice(0, 2)
-  const home = includeStayHome ? results.shift()!.results[0] as StayCreationHome | undefined : undefined
-  const [attempts, ...timed] = results
+  if (input.replay) reads.push(bookingReplayQuery(organization, input.replay.threadId))
+  const now = new Date().toISOString()
+  if (!selection.failure) {
+    const terms = timedBookingQueries(organization, product, selection)
+    reads.push(checkoutAttemptQuery(organization, input.idempotencyKey), checkoutSellerQuery(organization), ...terms,
+      ...timedCalendarQueries(organization, product, terms[0]!, selection.sessionId, now))
+  }
   return {
-    member, home, organization: orgRows!.results[0] as BookingOrganization | undefined, offering: offeringRows!.results[0] as BookingOffering | undefined,
-    checkoutAttempt: attempts?.results[0] as CheckoutAttempt | undefined, timed: selection.failure ? null : timedBookingFrom(timed),
+    queries: membership ? [membership, ...reads.map(read => withViewer(membership, read))] : reads,
+    read(results: D1Result[]) {
+      const member = membership ? results.shift()!.results[0] : undefined
+      const [orgRows, offeringRows] = results.splice(0, 2)
+      const home = includeStayHome ? results.shift()!.results[0] as StayCreationHome | undefined : undefined
+      const replay = input.replay ? { ...input.replay, row: results.shift()!.results[0] as BookingReplay | undefined } : undefined
+      const [attempts, seller, ...timed] = results
+      return {
+        member, home, organization: orgRows!.results[0] as BookingOrganization | undefined,
+        offering: offeringRows!.results[0] as BookingOffering | undefined,
+        checkoutAttempt: attempts?.results[0] as CheckoutAttempt | undefined,
+        replay,
+        seller: seller?.results,
+        timed: selection.failure ? null : { ...timedBookingFrom(timed.slice(0, 3)), calendar: timed.slice(3), now },
+      }
+    },
   }
 }
 
+export type BookingCreationRead = ReturnType<ReturnType<typeof prepareBookingCreation>['read']>
+
+async function readBookingCreation(db: DbClient, ...input: Parameters<typeof prepareBookingCreation>) {
+  const plan = prepareBookingCreation(...input)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read booking creation facts' }))
+}
 /** The authenticated member creates a booking through the selected offering's inventory. */
 export async function createMemberBooking(event: H3Event, input: {
   body: Record<string, unknown>; operator: Omit<BookingOperator, 'userId'>; financialWritesAllowed?: boolean
@@ -302,7 +390,7 @@ export async function createMemberBooking(event: H3Event, input: {
 }
 
 /** Create a booking or checkout using the offering's canonical inventory unit. */
-export async function createProductBooking(event: H3Event, context: BookingCreationContext) {
+export async function createProductBooking(event: H3Event, context: BookingCreationContext, prepared?: BookingCreationRead) {
   const { organizationId, slug, body } = context
   if (!organizationId || !slug) return creationResult({ error: 'Organization and slug are required' }, { status: 400 })
 
@@ -311,11 +399,11 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   if (!db) return creationResult({ error: 'Database not available' }, { status: 500 })
 
   const idempotencyKey = context.operator?.idempotencyKey ?? (typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : '')
-  const facts = await readBookingCreation(db, bookingParameter(organizationId), { ...context, idempotencyKey }, null, false)
+  const facts = prepared ?? await readBookingCreation(db, bookingParameter(organizationId), { ...context, idempotencyKey }, null, false)
   return createBookingFrom(event, env, context, facts)
 }
 
-async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: BookingCreationContext, facts: Awaited<ReturnType<typeof readBookingCreation>>) {
+async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: BookingCreationContext, facts: BookingCreationRead) {
   const { organizationId, slug, body, operator } = context
   const { organization, offering, checkoutAttempt } = facts
   const db = env.DB
@@ -356,10 +444,14 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
   const { sessionId, requestedVariantId, partySize } = selection
   const pageEventId = readPageEventId(body.page_event_id)
 
-  const threadId = await hashIdentifier(JSON.stringify(operator ? [organizationId, idempotencyKey] : ['website-booking', organizationId, idempotencyKey]))
+  const threadId = await timedBookingConversationId(organizationId, idempotencyKey, Boolean(operator))
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, sessionId, requestedVariantId, partySize, guestName, guestEmail, phone: normalizedGuestPhone, notes, answers: formAnswersFingerprint(body.answers), source: operator?.source ?? 'website', externalReference: operator?.externalReference ?? null, guestAcknowledgement: operator?.guestAcknowledgement ?? true }))
-  const replay = async () => {
-    const existing = await queryFirst<{ id: string; status: string; fingerprint: string | null; completed: number | null; creation_status: string | null; product_session_id: string; product_variant_id: string; party_size: number }>(db, `SELECT b.id, b.status, b.product_session_id, b.product_variant_id, b.party_size, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint, json_extract(r.payload_json, '$.provenance.followups_completed') AS completed, json_extract(r.payload_json, '$.provenance.creation_status') AS creation_status FROM conversations r JOIN bookings b ON b.id = r.booking_id AND b.organization_id = r.organization_id WHERE b.organization_id = ? AND r.id = ?`, [organizationId, threadId])
+  const replay = async (fresh = false) => {
+    const booking = bookingReplayQuery(bookingParameter(organizationId), threadId)
+    const prepared = facts.replay
+    const existing = !fresh && prepared?.organizationId === organizationId && prepared.threadId === threadId
+      ? prepared.row
+      : await queryFirst<BookingReplay>(db, booking.query, booking.params)
     if (!existing) return null
     if (existing.fingerprint !== fingerprint) return creationResult({ error: 'Idempotency key was reused with different booking details', code: 'idempotency_conflict' }, { status: 409 })
     if (!existing.completed) {
@@ -412,11 +504,11 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
   // A restaurant calls a table's guest when plans change, so a table booking needs a phone number.
   if (product.kind === 'table' && !normalizedGuestPhone) return creationResult({ error: 'Please enter your phone number.' }, { status: 400 })
 
-  const now = new Date().toISOString()
   if (!facts.timed) throw new Error('Validated timed selection is missing its booking facts')
-  const terms = await timedBookingTerms(db, env, {
-    ...selection, organizationId, productId: product.id, currency: organization.default_currency, actorId: operator?.userId ?? 'system', now,
-  }, facts.timed)
+  const { now } = facts.timed
+  const calendar = timedCalendarFrom(env, product.id, sessionId, facts.timed.opening, now, facts.timed.calendar)
+  const resolvedOpening = await resolveCalendarOpening(calendar, sessionId, now, operator?.userId ?? 'system')
+  const terms = timedBookingPriceTerms({ ...selection, currency: organization.default_currency, now }, facts.timed, resolvedOpening)
   if (terms.failure) return terms.failure
   const { resolved, variant, config, price, requiresPayment, policy } = terms
   // Freeze the wording the guest answered before any seat claim or checkout.
@@ -459,7 +551,7 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
     const checkout = await createPaymentCheckout(db, env, {
       unit: 'slot', organizationId, buyerUserId: userId, buyer, productId: product.id, variantId: productVariantId,
       sessionId: session.id, terms: { resolved, price, title: product.name, taxCode: product.tax_code }, answers, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
-      previous: checkoutAttempt,
+      previous: checkoutAttempt, seller: !checkoutAttempt && facts.seller ? checkoutSellerFromRows(facts.seller) : undefined,
       origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
@@ -499,7 +591,7 @@ async function createBookingFrom(event: H3Event, env: CloudflareEnv, context: Bo
     })
   } catch (error) {
     // Nothing to roll back: the batch either applied whole or not at all.
-    const existing = await replay()
+    const existing = await replay(true)
     if (existing) return existing
     if (!(error instanceof CapacityUnavailableError)) throw error
     return creationResult({ error: 'This session just filled up. Please pick another time.', code: 'capacity_unavailable' }, { status: 409 })

@@ -6,7 +6,8 @@ import { freeCancellationUntil } from '~/shared/availability-settings'
 /** Declining or cancelling a paid booking of any kind returns the whole payment, as Airbnb's host cancellation does. */
 export type VisitRefundAction='reject'|'cancel'
 export const visitRefundKey=(action:VisitRefundAction,bookingId:string)=>`${action==='reject'?'rejected':'cancelled'}:${bookingId}`
-export const guestVisitRefundKey=(bookingId:string)=>`guest-cancelled-booking:${bookingId}`
+const guestVisitRefundPrefix = 'guest-cancelled-booking:'
+export const guestVisitRefundKey=(bookingId:string)=>`${guestVisitRefundPrefix}${bookingId}`
 const authorizationActionFor=(action:VisitRefundAction)=>action==='reject'?'reject_booking':'cancel_booking'
 
 export function visitRefundPaymentQuery(organizationId: string, bookingId: string): BatchQuery {
@@ -73,13 +74,19 @@ export async function guestVisitRefundQueries(db: DbClient, input: {
 export async function canRetryGuestVisitRefund(db: DbClient, input: {
  organizationId: string; bookingId: string; requestId: string; buyerUserId?: string
 }): Promise<boolean> {
- return Boolean(await queryFirst(db, `SELECT f.id FROM payment_refunds f JOIN payments p ON p.id = f.payment_id
+ const { query, params } = retryGuestVisitRefundQuery({ query: '?', params: [input.organizationId] },
+   { query: '?', params: [input.bookingId] }, input.requestId, input.buyerUserId)
+ return Boolean(await queryFirst(db, query, params))
+}
+
+export function retryGuestVisitRefundQuery(organization: BatchQuery, booking: BatchQuery, requestId: string, buyerUserId?: string): BatchQuery {
+ return { query: `SELECT f.id FROM payment_refunds f JOIN payments p ON p.id = f.payment_id
   JOIN bookings v ON v.id = p.subject_id AND v.organization_id = p.organization_id
   JOIN conversations r ON r.booking_id = v.id AND r.organization_id = v.organization_id AND r.kind = 'booking'
-  WHERE p.organization_id = ? AND p.subject_type = 'booking' AND p.subject_id = ? AND r.id = ?
+  WHERE p.organization_id = ${organization.query} AND p.subject_type = 'booking' AND p.subject_id = ${booking.query} AND r.id = ?
     AND v.status = 'cancelled' AND json_extract(r.payload_json, '$.cancellation.used_at') IS NOT NULL
-    AND f.idempotency_key = ? AND f.status IN ('queued', 'creating')
-    AND EXISTS (SELECT 1 FROM messages WHERE conversation_id = r.id AND dedupe_key = ?)
-    ${input.buyerUserId ? 'AND r.user_id = ? AND v.user_id = ? AND p.buyer_user_id = ?' : ''}`,
- [input.organizationId, input.bookingId, input.requestId, guestVisitRefundKey(input.bookingId), `booking:${input.bookingId}:guest-cancel`, ...(input.buyerUserId ? [input.buyerUserId, input.buyerUserId, input.buyerUserId] : [])]))
+    AND f.idempotency_key = '${guestVisitRefundPrefix}' || v.id AND f.status IN ('queued', 'creating')
+    AND EXISTS (SELECT 1 FROM messages WHERE conversation_id = r.id AND dedupe_key = 'booking:' || v.id || ':guest-cancel')
+    ${buyerUserId ? 'AND r.user_id = ? AND v.user_id = ? AND p.buyer_user_id = ?' : ''}`,
+ params: [...organization.params ?? [], ...booking.params ?? [], requestId, ...(buyerUserId ? [buyerUserId, buyerUserId, buyerUserId] : [])] }
 }

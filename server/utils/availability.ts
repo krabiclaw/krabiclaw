@@ -970,15 +970,19 @@ type StoredConfig = StoredBookingConfig & { product_kind: string; product_on_sal
 type Placement = { product_id: string; location_id: string; active: number; published: number }
 
 /** The statements of one slot read, in the order `slotFacts` reads them. */
-export function slotReadQueries(read: SlotRead): BatchQuery[] {
+export function slotReadQueries(read: Omit<SlotRead, 'fromInstant' | 'toInstant'> & {
+  fromInstant: string | BatchQuery; toInstant: string | BatchQuery
+}): BatchQuery[] {
   const org = read.organization, products = read.products
   const members = {
     query: `SELECT assigned_member_id FROM product_booking_configs WHERE organization_id=${org.query} AND product_id IN (${products.query}) AND scheduling_mode='provider' UNION SELECT ?`,
     params: [...org.params!, ...products.params!, read.prepared?.config.scheduling_mode === 'provider' ? read.prepared.config.assigned_member_id : null],
   }
-  const from = Date.parse(read.fromInstant), to = Date.parse(read.toInstant)
+  const from = typeof read.fromInstant === 'string' ? { query: '?', params: [read.fromInstant] } : read.fromInstant
+  const to = typeof read.toInstant === 'string' ? { query: '?', params: [read.toInstant] } : read.toInstant
   // A provider's commitment that overlaps any slot in the window: slots start inside it and last at most a day.
-  const reach = { from: new Date(from - 86_400_000).toISOString(), to: new Date(to + 86_400_000).toISOString() }
+  const reachFrom = `strftime('%Y-%m-%dT%H:%M:%fZ', ${from.query}, '-1 day')`
+  const reachTo = `strftime('%Y-%m-%dT%H:%M:%fZ', ${to.query}, '+1 day')`
   // A moved weekly or hours session keeps the occurrence key of the time it came from.
   const keyDate = `CASE WHEN s.source_occurrence_key LIKE 'hours:%' THEN substr(s.source_occurrence_key,-24,10) ELSE substr(s.source_occurrence_key,-16,10) END`
   const consuming = `FROM bookings b WHERE b.organization_id=s.organization_id AND b.product_session_id=s.id AND ${CAPACITY_CONSUMING_SQL}`
@@ -995,9 +999,9 @@ export function slotReadQueries(read: SlotRead): BatchQuery[] {
   }, {
     query: `SELECT l.id, l.title, l.timezone, l.status, l.opening_hours, l.special_hours FROM business_locations l
       WHERE l.organization_id=${org.query} AND (l.id IN (SELECT location_id FROM product_locations WHERE organization_id=l.organization_id AND product_id IN (${products.query}))
-        OR l.id IN (SELECT location_id FROM product_sessions WHERE organization_id=l.organization_id AND product_id IN (${products.query}) AND starts_at>=? AND starts_at<?)
+        OR l.id IN (SELECT location_id FROM product_sessions WHERE organization_id=l.organization_id AND product_id IN (${products.query}) AND starts_at>=${from.query} AND starts_at<${to.query})
         OR l.id IS ?)`,
-    params: [...org.params!, ...products.params!, ...products.params!, read.fromInstant, read.toInstant, typeof read.locationId === 'string' ? read.locationId : null],
+    params: [...org.params!, ...products.params!, ...products.params!, ...from.params ?? [], ...to.params ?? [], typeof read.locationId === 'string' ? read.locationId : null],
   }, {
     query: `SELECT id, organization_id, product_id, location_id, timezone, weekday, start_time, capacity FROM product_availability_rules
       WHERE organization_id=${org.query} AND product_id IN (${products.query}) ORDER BY weekday, start_time, id`,
@@ -1013,16 +1017,16 @@ export function slotReadQueries(read: SlotRead): BatchQuery[] {
     query: `SELECT s.*, COALESCE((SELECT SUM(b.party_size) ${consuming}), 0) AS booked, (SELECT COUNT(*) ${consuming}) AS bookings,
         ${historySql('s')} AS has_history
       FROM product_sessions s WHERE s.organization_id=${org.query} AND s.product_id IN (${products.query})
-        AND ((s.starts_at>=? AND s.starts_at<?) OR (s.source_occurrence_key IS NOT NULL AND ${keyDate}>=? AND ${keyDate}<=?))
+        AND ((s.starts_at>=${from.query} AND s.starts_at<${to.query}) OR (s.source_occurrence_key IS NOT NULL AND ${keyDate}>=substr(${reachFrom},1,10) AND ${keyDate}<=substr(${reachTo},1,10)))
       ORDER BY s.starts_at, s.id`,
-    params: [...org.params!, ...products.params!, read.fromInstant, read.toInstant, reach.from.slice(0, 10), reach.to.slice(0, 10)],
+    params: [...org.params!, ...products.params!, ...from.params ?? [], ...to.params ?? [], ...from.params ?? [], ...to.params ?? []],
   }, {
     query: `SELECT config.assigned_member_id AS member_id, occupied.id AS session_id, occupied.starts_at, occupied.ends_at FROM bookings b
         JOIN product_sessions occupied ON occupied.id=b.product_session_id AND occupied.organization_id=b.organization_id
         JOIN product_booking_configs config ON config.product_id=b.product_id AND config.organization_id=b.organization_id AND config.scheduling_mode='provider'
       WHERE b.organization_id=${org.query} AND config.assigned_member_id IN (${members.query}) AND b.status IN ('pending','confirmed')
-        AND occupied.starts_at<? AND occupied.ends_at>?`,
-    params: [...org.params!, ...members.params!, reach.to, reach.from],
+        AND occupied.starts_at<${reachTo} AND occupied.ends_at>${reachFrom}`,
+    params: [...org.params!, ...members.params!, ...to.params ?? [], ...from.params ?? []],
   }]
 }
 
@@ -1212,9 +1216,15 @@ export async function listScheduleSessions(db: DbClient, input: SlotRange & { en
 
 /** One session: a saved one with its places left, or a time the schedule offers. */
 export async function getScheduleSession(db: DbClient, env: CloudflareEnv, input: SessionSelector): Promise<SessionAvailability> {
-  const found = await findOpening(db, env, input, input.now ?? new Date().toISOString(), 'editor')
-  const places = found && await found.calendar.places()
-  const session = places && (places.recorded.find(row => row.id === input.sessionId) ?? (found.opening && places.place(found.opening.session)))
+  const now = input.now ?? new Date().toISOString()
+  const calendar = await calendarAtOpening(db, env, input, await readSavedBookingOpening(db, input), now, 'editor')
+  if (!calendar) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
+  const opening = openingInCalendar(calendar, input.sessionId, now)
+  if (!opening && !calendar.stored.some(row => row.id === input.sessionId)) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
+  }
+  const places = await calendar.places()
+  const session = places.recorded.find(row => row.id === input.sessionId) ?? (opening && places.place(opening.session))
   if (!session) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
   return session as SessionAvailability
 }
@@ -1374,25 +1384,31 @@ function readSavedBookingOpening(db: DbClient, input: SessionSelector) {
   return queryFirst<SavedBookingOpening>(db, query, params)
 }
 
+export function bookingOpeningInstant(sessionId: string, saved?: SavedBookingOpening): string | null {
+  const starts = saved?.starts_at ?? projectedIdPattern.exec(sessionId)?.[1]
+  return starts && Number.isFinite(Date.parse(starts)) ? starts : null
+}
+
 /** The offered time a session id names, read through the slot reader at that instant. */
-async function openingAt(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, saved: SavedBookingOpening | undefined, now: string, scope: SlotReadScope) {
-  const starts = saved?.starts_at ?? projectedIdPattern.exec(input.sessionId)?.[1]
-  if (!starts || !Number.isFinite(Date.parse(starts))) return null
-  const calendar = await readSlotCalendar(db, env, {
+async function calendarAtOpening(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, saved: SavedBookingOpening | undefined, now: string, scope: SlotReadScope) {
+  const starts = bookingOpeningInstant(input.sessionId, saved)
+  if (!starts) return null
+  return readSlotCalendar(db, env, {
     ...input, now, scope, locationId: input.locationId === undefined ? saved?.location_id : input.locationId,
     fromInstant: starts, toInstant: new Date(Date.parse(starts) + 1).toISOString(),
   })
-  const opening = calendar.openings.find(item => item.session.id === input.sessionId)
-  return { calendar, opening: opening && bookableSessions(calendar.schedule, [opening.session as BookableSession], now).length ? opening : null }
 }
 
-async function findOpening(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, now: string, scope: SlotReadScope) {
-  return openingAt(db, env, input, await readSavedBookingOpening(db, input), now, scope)
+function openingInCalendar(calendar: SlotCalendar, sessionId: string, now: string) {
+  const opening = calendar.openings.find(item => item.session.id === sessionId)
+  return opening && bookableSessions(calendar.schedule, [opening.session as BookableSession], now).length ? opening : null
 }
 
 /** Verify a session selector without storing its occurrence. */
 export async function findBookableSession(db: DbClient, input: SessionSelector, scope: 'bookable' | 'editor' = 'bookable'): Promise<SessionFacts | null> {
-  return (await findOpening(db, null, input, input.now ?? new Date().toISOString(), scope))?.opening?.session ?? null
+  const now = input.now ?? new Date().toISOString()
+  const calendar = await calendarAtOpening(db, null, input, await readSavedBookingOpening(db, input), now, scope)
+  return calendar ? openingInCalendar(calendar, input.sessionId, now)?.session ?? null : null
 }
 
 /** Re-derive the exact offered occurrence and prepare its first claim. */
@@ -1406,11 +1422,15 @@ export async function bookingSessionFrom(db: DbClient, input: SessionSelector & 
   env: CloudflareEnv; actorId: string
 }, saved: SavedBookingOpening | undefined, scope: SlotReadScope = 'bookable'): Promise<ResolvedBookingSession> {
   const now = input.now ?? new Date().toISOString()
-  const found = await openingAt(db, input.env, input, saved, now, scope)
-  if (!found) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
-  const { calendar, opening } = found
+  const calendar = await calendarAtOpening(db, input.env, input, saved, now, scope)
+  if (!calendar) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
+  return resolveCalendarOpening(calendar, input.sessionId, now, input.actorId)
+}
+
+export async function resolveCalendarOpening(calendar: SlotCalendar, sessionId: string, now: string, actorId: string) {
+  const opening = openingInCalendar(calendar, sessionId, now)
   if (!opening) throw new HTTPError({ statusCode: 409, message: 'That session is no longer offered. Choose an available time.' })
-  return prepareResolvedOpening(calendar.schedule, opening, now, input.actorId, (await calendar.places()).availability)
+  return prepareResolvedOpening(calendar.schedule, opening, now, actorId, (await calendar.places()).availability)
 }
 
 function prepareResolvedOpening(schedule: SlotSchedule, opening: ScheduledOpening, now: string, actorId: string | null, providerAvailability: string): ResolvedBookingSession {
@@ -1471,6 +1491,7 @@ export interface SessionAllocationInput {
   env: CloudflareEnv
   organizationId: string; productId: string; sessionId: string; partySize: number; now: string
   resolved?: ResolvedBookingSession
+  saved?: SessionAllocationFacts | null
   /** Test a proposed allocation without writing its projected session. */
   preview?: boolean
   /** Publication keeps its page when sale is disabled; bookings require active sale by default. */
@@ -1478,6 +1499,15 @@ export interface SessionAllocationInput {
   replacingBookingId?: string | null
   /** The conversation the claim answers, and the key its decision is recorded under: the claim lands only while nobody has answered. */
   requireUndecided?: { requestId: string; organizationId: string; decisionDedupeKey: string } | null
+}
+
+type SessionAllocationFacts = Pick<ProductSession, 'starts_at' | 'ends_at' | 'location_id'> &
+  Pick<SessionLocation, 'opening_hours' | 'special_hours'> & { timezone: string | null; status: string | null; provider_id: string | null }
+
+export function sessionAllocationFactsQuery(organization: string, product: string, session: string) {
+  return `SELECT s.starts_at,s.ends_at,s.location_id,l.timezone,l.status,l.opening_hours,l.special_hours,${providerMemberSql('s')} AS provider_id
+    FROM product_sessions s LEFT JOIN business_locations l ON l.id=s.location_id AND l.organization_id=s.organization_id
+    WHERE s.id=${session} AND s.organization_id=${organization} AND s.product_id=${product} AND s.status='scheduled'`
 }
 
 export async function sessionAllocationPredicate(db: DbClient, input: SessionAllocationInput): Promise<BatchQuery> {
@@ -1492,11 +1522,8 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
     location = resolved.guard
     availability = resolved.providerAvailability
   } else {
-    const session = await queryFirst<Pick<ProductSession, 'starts_at' | 'ends_at' | 'location_id'> &
-      Pick<SessionLocation, 'opening_hours' | 'special_hours'> & { timezone: string | null; status: string | null; provider_id: string | null }>(db, `
-      SELECT s.starts_at,s.ends_at,s.location_id,l.timezone,l.status,l.opening_hours,l.special_hours,${providerMemberSql('s')} AS provider_id
-      FROM product_sessions s LEFT JOIN business_locations l ON l.id=s.location_id AND l.organization_id=s.organization_id
-      WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND s.status='scheduled'`, [input.sessionId, input.organizationId, input.productId])
+    const session = input.saved === undefined ? await queryFirst<SessionAllocationFacts>(db, sessionAllocationFactsQuery('?', '?', '?'),
+      [input.sessionId, input.organizationId, input.productId]) : input.saved
     if (!session) return { query: '0', params: [] }
     location = { query: 's.location_id IS ? AND s.starts_at=? AND s.ends_at=?', params: [session.location_id, session.starts_at, session.ends_at] }
     if (session.location_id !== null) {
@@ -1576,6 +1603,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
   productId: string
   sessionId: string
   resolved?: ResolvedBookingSession
+  saved?: SessionAllocationFacts | null
   productVariantId: string
   partySize: number
   /** The Better Auth user the booking belongs to. */
