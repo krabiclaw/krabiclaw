@@ -13,7 +13,7 @@
     :home-error="homesError ? getErrorMessage(homesError, 'The places to stay could not be loaded') : ''"
     :offerings-error="offeringsError"
   />
-  <CalendarPage v-else :key="productId ?? 'agenda'" :session-product="scoped?.product" :session-locations="scoped?.locations ?? []" :offerings-error="offeringsError" :can-create-stay="Boolean(homes?.manage && homes.homes.length)" :has-homes="Boolean(homes?.homes.length)" :has-places="Boolean(places?.places.length)" />
+  <CalendarPage v-else :key="productId ?? 'agenda'" :session-product="scoped?.product" :session-locations="scoped?.locations ?? []" :offerings-error="offeringsError" :can-create-stay="Boolean(homes?.manage && homes.homes.length)" :has-homes="Boolean(homes?.homes.length)" :has-places="places?.has_places === true" />
 </template>
 
 <script setup lang="ts">
@@ -26,7 +26,6 @@ import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import { getErrorMessage } from '~/utils/errors'
 import { isValidTimezone } from '~/utils/timezone'
-import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
 
 definePageMeta({ layout: 'dashboard', tab: 'calendar' })
 
@@ -45,7 +44,6 @@ type Homes = { homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | '
 const isHomes = (value: unknown): value is Homes => isRecord(value) && typeof value.manage === 'boolean' && Array.isArray(value.homes)
   && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.internal_name === 'string' && typeof home.timezone === 'string' && isValidTimezone(home.timezone))
 // The available views can be decided in parallel.
-const todayKey = today(dashboard.organization.value?.timezone ?? getLocalTimeZone()).toString()
 const [{ data: homes, error: homesError }, { data: places, error: placesError }] = await Promise.all([
   useAsyncData(
     () => `calendar-homes:${String(route.params.org_slug)}`,
@@ -53,8 +51,7 @@ const [{ data: homes, error: homesError }, { data: places, error: placesError }]
   ),
   useAsyncData(
     () => `calendar-places:${String(route.params.org_slug)}`,
-    () => api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: todayKey, to: parseDate(todayKey).add({ days: 1 }).toString() }, validate: (value): value is { places: unknown[] } => isRecord(value) && Array.isArray(value.places) }),
-    { lazy: route.query.view !== 'places', server: route.query.view === 'places' },
+    () => api('/api/dashboard/bookings/calendar', { query: { view: 'scope' }, validate: (value): value is { has_places: boolean } => isRecord(value) && typeof value.has_places === 'boolean' }),
   ),
 ])
 const knownHome = computed(() => homes.value?.homes.find(home => home.product_id === productId.value))

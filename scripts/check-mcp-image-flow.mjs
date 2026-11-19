@@ -5,7 +5,7 @@ import { authHeaders, BASE_URL, expectStatus, expectValue, LOCATION_ID, mcp, ORG
 
 // A public https image stands in for the file reference ChatGPT supplies for an
 // attached or generated image; the tool downloads it the same way.
-const FIXTURE_IMAGE = { download_url: 'https://krabiclaw.com/krabi-claw-logo.png', file_id: 'mcp-image-flow-fixture', mime_type: 'image/png', file_name: 'krabi-claw-logo.png' }
+const FIXTURE_IMAGE = { download_url: 'https://blawby.com/platform/blawby-192.png', file_id: 'mcp-image-flow-fixture', mime_type: 'image/png', file_name: 'blawby-192.png' }
 
 async function assertResolvableImage(url, label) {
   const res = await fetch(url, { method: 'HEAD' })

@@ -1,22 +1,25 @@
+import { splitLocalePrefix } from '~/utils/tenant-locale-path'
 import type { H3Event } from 'nitro'
 import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { executeBatch, type BatchQuery, type DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
 import { projectPublicLocation } from '~/shared/location-sharing'
-import { publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
+import { publicLocationPrivacySql, publicReviewLocationProtectedSql } from '~/server/utils/public-location-privacy'
 import { projectExactLocalizedCollection, type ExactPublicLocalization } from '~/server/utils/public-localization'
 import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSection, type PublicShellPayload, type PublicSiteSection } from '~/utils/public-resource-contracts'
-import { listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
+import { prepareCollectionList, preparePublicProductSelection, preparePublicExperiences, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import type { Product } from '~/server/types/products'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { productSurfaceOf } from '~/utils/product-presentation'
 import { publicLocationSql } from '~/server/utils/public-locations'
+import { cloudflareEnv } from '~/server/utils/api-response'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
 import { parsePostalAddress } from '~/utils/postal-address'
 import { publicLocationSocialMediaFromPlacements, type PublicMediaPlacement } from '~/server/utils/public-social-image'
 import { publicSocialMediaFromPlacements } from '~/utils/social-metadata'
 import type { PublicConsultationSettings, PublicCompliance, PublicPageLink } from '~/types/public-site'
+import { publishedTenantPagePathsQuery } from '~/server/utils/content/pages'
 
 type BatchResult = { results?: unknown[] }
 
@@ -45,6 +48,8 @@ export interface PublicShellQueryIndexes {
   content: Record<PublicContentSection, number>
   catalog: number
   media: number
+  pageLinks?: number
+  reviews?: number
 }
 
 /**
@@ -121,14 +126,18 @@ export function publicSections(vertical: string | null, catalog: readonly Public
   }
 }
 
+type PublicSqlScope = string | { sql: string }
+
 function appendPublicShellQueries(
   queries: BatchQuery[],
-  organizationId: string,
+  organizationId: PublicSqlScope,
   previewMenu = false,
 ): PublicShellQueryIndexes {
   const push = (query: string, params: unknown[]) => {
     const index = queries.length
-    queries.push({ query, params })
+    queries.push(typeof organizationId === 'string'
+      ? { query, params }
+      : { query: query.replaceAll('?', organizationId.sql) })
     return index
   }
 
@@ -168,18 +177,103 @@ function appendPublicShellQueries(
   }
 }
 
-export function readPublicShellRows(event: H3Event, db: DbClient, organizationId: string, previewMenu: boolean) {
-  return oncePerRequest(event, `public-shell-rows:${organizationId}:${previewMenu}`, async () => {
-    const queries: BatchQuery[] = []
-    const indexes = appendPublicShellQueries(queries, organizationId, previewMenu)
-    const results = await executeBatch(db, queries)
-    return { indexes, results }
+export function readPublicShellRows(
+  event: H3Event,
+  db: DbClient,
+  organization: PublicBase['organization'],
+  locale: string,
+  previewMenu: boolean,
+  includeReviews = splitLocalePrefix(event.url.pathname).sourcePath.replace(/\/$/, '') === '/reviews',
+  collectionKind = publicDocumentCollectionKind(splitLocalePrefix(event.url.pathname).sourcePath.replace(/\/$/, '')),
+) {
+  const organizationId = organization.id
+  return oncePerRequest(event, `public-shell-rows:${organizationId}:${locale}:${previewMenu}:${includeReviews}:${collectionKind}`, async () => {
+    const preloaded = event.context.publicDocumentShell as PublicDocumentShell | undefined
+    if (!previewMenu && preloaded?.organizationId === organizationId && preloaded.locale === locale
+      && preloaded.includeReviews === includeReviews && preloaded.collectionKind === collectionKind) {
+      return preloaded.plan.read(db, cloudflareEnv(event), organization, preloaded.results)
+    }
+    const plan = preparePublicShellRows(organizationId, locale, { previewMenu, includeReviews, collectionKind })
+    return plan.read(db, cloudflareEnv(event), organization, await executeBatch(db, plan.queries, {
+      operation: includeReviews ? 'Read public shell and reviews' : 'Read public shell',
+    }))
   })
 }
 
-export function readPublicExperiences(event: H3Event, db: DbClient, organizationId: string, env: CloudflareEnv): Promise<Product[]> {
-  return oncePerRequest(event, `public-experiences:${organizationId}`, () =>
-    listOrganizationProducts(db, { organizationId, kind: 'experience', publishedOnly: true, env }))
+export interface PublicDocumentShell {
+  organizationId: string
+  locale: string
+  includeReviews: boolean
+  collectionKind: PublicDocumentCollectionKind | undefined
+  plan: ReturnType<typeof preparePublicShellRows>
+  results: D1Result[]
+}
+
+export function preparePublicShellRows(
+  organizationId: PublicSqlScope, locale: PublicSqlScope,
+  { previewMenu, includeReviews, collectionKind }: { previewMenu: boolean; includeReviews: boolean; collectionKind?: PublicDocumentCollectionKind },
+) {
+  const queries: BatchQuery[] = []
+  const indexes = appendPublicShellQueries(queries, organizationId, previewMenu)
+  indexes.pageLinks = queries.push(publishedTenantPagePathsQuery(organizationId, locale)) - 1
+  if (includeReviews) indexes.reviews = queries.push({
+    query: `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source,
+            r.original_review_date, r.original_reference, r.google_review_metadata,
+            r.owner_reply, r.owner_reply_at, r.location_id, bl.title AS location_title,
+            ${publicReviewLocationProtectedSql('r')} AS is_stay_location
+     FROM reviews r
+     LEFT JOIN business_locations bl ON bl.id = r.location_id
+     WHERE r.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND r.status = 'approved'
+     ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 50`,
+    params: typeof organizationId === 'string' ? [organizationId] : [],
+  }) - 1
+  const collection = collectionKind ? preparePublicCollectionRows(organizationId, collectionKind, previewMenu) : null
+  const experiences = preparePublicExperiences(organizationId)
+  const shellLength = queries.length
+  const experienceStart = shellLength + (collection?.queries.length ?? 0)
+  return {
+    queries: [...queries, ...collection?.queries ?? [], ...experiences.queries],
+    async read(db: DbClient, env: CloudflareEnv, organization: PublicBase['organization'], results: D1Result[]) {
+      return {
+        indexes,
+        results: results.slice(0, shellLength),
+        collection: collection?.read(results.slice(shellLength, experienceStart)),
+        experiences: await experiences.read(results.slice(experienceStart), db, env, organization.id, organization.default_currency),
+      }
+    },
+  }
+}
+
+export function publicProductMediaQuery(organizationId: PublicSqlScope, kind: string | undefined, cards: boolean): BatchQuery {
+  return {
+    query: `SELECT ma.*, mp.owner_id AS product_id, mp.slot, mp.sort_order
+      FROM media_placements mp
+      JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
+      WHERE mp.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND mp.owner_type = 'product'
+        AND ${cards ? "mp.slot = 'image'" : "mp.slot IN ('image', 'gallery')"} AND mp.status = 'active'
+        ${kind ? 'AND EXISTS (SELECT 1 FROM products p WHERE p.id = mp.owner_id AND p.organization_id = mp.organization_id AND p.kind = ?)' : ''}
+      ORDER BY mp.owner_id, mp.slot, mp.sort_order, mp.id`,
+    params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(kind ? [kind] : [])],
+  }
+}
+
+type PublicDocumentCollectionKind = 'dish' | 'table'
+
+export function publicDocumentCollectionKind(path: string): PublicDocumentCollectionKind | undefined {
+  if (path === '/menu') return 'dish'
+  if (path === '/reservations') return 'table'
+}
+
+function preparePublicCollectionRows(organizationId: PublicSqlScope, kind: PublicDocumentCollectionKind, previewMenu: boolean) {
+  const products = preparePublicProductSelection(organizationId, kind, kind !== 'dish' || !previewMenu)
+  const sections = prepareCollectionList({ organizationId })
+  return {
+    queries: [publicProductMediaQuery(organizationId, kind, kind === 'dish'), ...products.queries, ...sections.queries],
+    read([media, ...rows]: D1Result[]) {
+      return { media: media!.results, products: products.read(rows.slice(0, products.queries.length)),
+        collections: sections.read(rows.slice(products.queries.length)) }
+    },
+  }
 }
 
 export function buildPublicShellPayload(

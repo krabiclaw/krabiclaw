@@ -1198,7 +1198,8 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     assert.deepEqual(reopened.booking.available_actions, ['edit', 'cancel'])
     assert.equal(reopened.can_message_guest, true)
     const detailMetrics = getRequestDataMetrics(dashboardEvent)
-    assert.equal(detailMetrics.batchRoundTrips + detailMetrics.singleStatementRoundTrips, 6)
+    assert.deepEqual([detailMetrics.batchRoundTrips, detailMetrics.singleStatementRoundTrips], [1, 0],
+      'the scoped access lookup and reservation share one batch')
 
     const updated = await hostRequest('PATCH', `/api/dashboard/bookings/${saved.booking_id}`, {
       version: persisted.version, check_in_date: date(31), check_out_date: date(33), guest_name: 'Edited guest',

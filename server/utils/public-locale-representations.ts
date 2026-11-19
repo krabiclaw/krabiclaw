@@ -16,6 +16,7 @@ interface RepresentationInput {
   resource?: { type: LocalizedResourceType; id: string; routeSuffix?: string }
   documentId?: string
   publishedLocaleRoute?: boolean
+  publishedLocales?: readonly string[]
   sourceLocale?: OrganizationLocaleRecord
 }
 
@@ -103,7 +104,9 @@ export async function listPublicLocaleRepresentations(
            ORDER BY v.locale
         `, [input.organizationId, input.documentId])
       : input.publishedLocaleRoute
-        ? await queryAll<{ locale: string; route_path: string }>(db, `
+        ? input.publishedLocales?.filter(locale => locale !== sourceLocale.locale)
+          .map(locale => ({ locale, route_path: `/${locale}${input.sourcePath === '/' ? '' : input.sourcePath}` }))
+          ?? await queryAll<{ locale: string; route_path: string }>(db, `
             SELECT sl.locale,
                    CASE WHEN ? = '/' THEN '/' || sl.locale ELSE '/' || sl.locale || ? END AS route_path
               FROM organization_locales sl

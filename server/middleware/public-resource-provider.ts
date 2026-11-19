@@ -4,7 +4,7 @@ import type { PublicResourceProvider } from '~/utils/public-resource-provider'
 import { loadPublicPage } from '~/server/utils/public-page'
 import { loadPublicShell } from '~/server/utils/public-shell'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
-import { getPublicConfig } from '~/server/utils/organization-config'
+import { getPublicConfig, publicConfigFromRow, type PublicConfigRow } from '~/server/utils/organization-config'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { cloudflareEnv } from '~/server/utils/api-response'
 
@@ -19,8 +19,9 @@ export default defineHandler((event) => {
       if (!db) throw new HTTPError({ statusCode: 500, statusMessage: 'Database not available' })
       const organizationId = options.organizationId
       const previewAuthorized = organizationId === event.context.organizationId && event.context.previewAuthorized === true
-      const config = await oncePerRequest(event, `public-config:${organizationId}:${previewAuthorized}`, () =>
-        getPublicConfig(db, organizationId, { previewAuthorized }))
+      const row = event.context.tenantConfigRow as (PublicConfigRow & { id: string }) | undefined
+      const config = await oncePerRequest(event, `public-config:${organizationId}:${previewAuthorized}`, async () =>
+        row?.id === organizationId ? publicConfigFromRow(row) : getPublicConfig(db, organizationId, { previewAuthorized }))
       return finalizeRequestMetrics(event, 'public-config-ssr', config)
     }
     if (options.resourceKind === 'shell') {

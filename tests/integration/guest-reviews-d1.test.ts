@@ -81,7 +81,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       "INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
       "INSERT INTO product_stay_configs (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
       "INSERT INTO product_booking_configs (organization_id, product_id, unit, scheduling_mode, online_payment_required, check_in_time, check_out_time, default_capacity, min_nights, created_by, updated_by) VALUES ('org', 'home', 'nights', 'business', 1, '15:00', '11:00', 4, 1, 'owner', 'owner')",
-      ...['g-dinner', 'g-early', 'g-cancelled', 'g-old', 'g-absent', 'g-consult', 'g-class', 'g-stay'].map(id => `INSERT INTO user (id, name, email, isAnonymous) VALUES ('${id}', 'Anonymous', 'anon-${id}@customers.krabiclaw.local', 1)`),
+      ...['g-dinner', 'g-early', 'g-cancelled', 'g-old', 'g-absent', 'g-consult', 'g-class', 'g-stay'].map(id => `INSERT INTO user (id, name, email, isAnonymous) VALUES ('${id}', 'Anonymous', 'anon-${id}@customers.blawby.test', 1)`),
     ]) await db.prepare(statement).run().catch((error: unknown) => { throw new Error(`${statement}: ${String(error)}`) })
 
     const now = at(0)

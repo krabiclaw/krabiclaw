@@ -7,8 +7,7 @@ export type PlatformKnowledgeResultType =
   | 'faq'
   | 'route'
   | 'platform_page'
-  // A business's own records, indexed for its dashboard's search and scoped
-  // to it by `organization_id` at query time.
+  // A business's own records searched within its dashboard.
   | 'product'
   | 'collection'
   | 'location'
@@ -25,7 +24,6 @@ export type PlatformKnowledgeSurface =
   | 'blog'
   | 'dashboard'
   | 'help'
-  | 'chowbot'
   | 'tenant_blog'
 
 export interface PlatformKnowledgeFaqEntry {
@@ -124,7 +122,7 @@ export const PLATFORM_KNOWLEDGE_ROUTE_ENTRIES: PlatformKnowledgeRouteEntry[] = [
     icon: 'book',
     section: 'Docs',
     keywords: ['docs', 'documentation', 'guide', 'setup', 'help'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'blog',
@@ -134,7 +132,7 @@ export const PLATFORM_KNOWLEDGE_ROUTE_ENTRIES: PlatformKnowledgeRouteEntry[] = [
     icon: 'newspaper',
     section: 'Blog',
     keywords: ['blog', 'articles', 'updates', 'announcements', 'seo'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'help',
@@ -188,7 +186,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'sparkles',
     section: 'Platform',
     keywords: ['home', 'overview', 'ai agent', 'business ai agent', 'chatgpt', 'claude', 'platform', 'krabiclaw', 'run your business'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'ai-agent-page',
@@ -199,7 +197,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'sparkles',
     section: 'Platform',
     keywords: ['ai agent', 'mcp', 'chatgpt', 'claude', 'agent', 'model context protocol', 'plugin', 'run your business'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'integrations-page',
@@ -210,7 +208,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'plug',
     section: 'Platform',
     keywords: ['integrations', 'airbnb sync', 'google calendar', 'stripe', 'connectors', 'sync', 'connected services'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'restaurants-page',
@@ -221,7 +219,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'utensils',
     section: 'Solutions',
     keywords: ['restaurant', 'restaurant ai agent', 'ai agent', 'menu', 'reservations', 'table booking', 'dining', 'food', 'hours'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'experiences-page',
@@ -232,7 +230,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'compass',
     section: 'Solutions',
     keywords: ['experiences', 'ai agent for classes', 'ai agent', 'classes', 'tours', 'workshops', 'sessions', 'ticketed bookings', 'activities'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'legal-page',
@@ -243,7 +241,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'scale',
     section: 'Solutions',
     keywords: ['legal', 'law firms', 'ai agent for law firm websites', 'ai agent', 'attorney', 'lawyer', 'practice areas', 'consultation', 'legal services'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'lodging-page',
@@ -254,7 +252,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'calendar',
     section: 'Solutions',
     keywords: ['lodging', 'airbnb agent', 'ai agent', 'mid term rental', 'furnished rental', 'mtr', 'pms', 'extended stay', 'airbnb host', 'vrbo', 'direct booking', 'turnover', 'calendar sync', 'listings'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'about-page',
@@ -265,7 +263,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'info',
     section: 'Platform',
     keywords: ['about', 'company', 'mission', 'blawby', 'team'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'pricing-page',
@@ -276,7 +274,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'credit-card',
     section: 'Platform',
     keywords: ['pricing', 'plan', 'billing', 'upgrade', 'business', 'lodging', 'stays', 'listings'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'features-page',
@@ -287,7 +285,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'star',
     section: 'Platform',
     keywords: ['features', 'seo', 'analytics', 'performance', 'google places', 'lodging', 'stays', 'listings', 'products'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'templates-page',
@@ -298,7 +296,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'layout-template',
     section: 'Platform',
     keywords: ['templates', 'themes', 'design', 'saya', 'blawby', 'layouts'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'templates-saya-page',
@@ -309,7 +307,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'layout-template',
     section: 'Platform',
     keywords: ['saya', 'template', 'theme', 'restaurant', 'experience', 'lodging', 'listings', 'stays', 'free'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
   {
     id: 'templates-blawby-page',
@@ -320,6 +318,6 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     icon: 'layout-template',
     section: 'Platform',
     keywords: ['blawby', 'template', 'theme', 'legal', 'lawyer', 'solo lawyer', 'law firm', 'small law firm', 'practice area', 'consultation', 'ncls'],
-    surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
+    surfaces: ['public', 'docs', 'blog', 'help'],
   },
 ]

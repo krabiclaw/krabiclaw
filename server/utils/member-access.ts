@@ -474,17 +474,18 @@ export const DASHBOARD_ORGANIZATION_COLUMNS = `o.theme_id, o.vertical, o.subdoma
   (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active') AS public_url,
   o.status, o.onboarding_status, o.default_currency, o.timezone`
 
-function membershipQuery(field: 'slug' | 'id', value: string, userId: string): BatchQuery {
+function membershipQuery(field: 'slug' | 'id', value: string, userId: string | BatchQuery): BatchQuery {
+  const user = typeof userId === 'string' ? { query: '?', params: [userId] } : userId
   return {
     query: `SELECT o.id AS organization_id, o.name, o.slug, m.id AS member_id, m.userId AS user_id, m.role,
         ${roleMatchesSql('m.role', workspaceOperationsRoles)} AS organization_wide, ${DASHBOARD_ORGANIZATION_COLUMNS}
-      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ? WHERE o.${field} = ?`,
-    params: [userId, value],
+      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ${user.query} WHERE o.${field} = ?`,
+    params: [...user.params ?? [], value],
   }
 }
 
 /** The viewer's current Better Auth membership and the tenant it names. */
-export function membershipBySlugQuery(slug: string, userId: string): BatchQuery {
+export function membershipBySlugQuery(slug: string, userId: string | BatchQuery): BatchQuery {
   return membershipQuery('slug', slug, userId)
 }
 
@@ -521,11 +522,23 @@ export function locationMemberSql(organizationSql: string, locationSql: string, 
 }
 
 /** The offering's responsibility, using the same member matching. */
-export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience' OR p.kind = 'table') AND EXISTS (
+function assignedServiceSql(user: string) {
+  return `(p.kind = 'service' OR p.kind = 'experience' OR p.kind = 'table') AND EXISTS (
   SELECT 1 FROM product_booking_configs c
   WHERE c.organization_id = p.organization_id AND c.product_id = p.id
-    AND ${assignedMemberSql('c')}
+    AND ${assignedMemberSql('c', user)}
 )`
+}
+
+export const ASSIGNED_SERVICE_SQL = assignedServiceSql('?')
+
+export type OfferingReadScope = string | { user: string; unrestricted: string }
+
+export function assignedOfferingCondition(scope: OfferingReadScope) {
+  return typeof scope === 'string'
+    ? { sql: ASSIGNED_SERVICE_SQL, params: [scope], unrestricted: '0' }
+    : { sql: assignedServiceSql(scope.user), params: [], unrestricted: scope.unrestricted }
+}
 
 export async function assertProductAccess(db: DbClient, input: MemberAccessPrincipal & { productId: string; patch?: Record<string, unknown> }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { products: ['update'] } })) return

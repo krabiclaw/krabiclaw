@@ -6,6 +6,14 @@ import { parseTaskListQuery } from '~/server/domain/tasks'
 import { readToday } from '~/server/domain/today'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 import { dashboardOrgQueryParam, getDashboardSession } from '~/server/utils/dashboard-context'
+import { oncePerRequest } from '~/server/utils/request-scope'
+
+export function readDashboardTodayDocument(event: H3Event, orgSlug: string, preloaded?: () => ReturnType<typeof readToday>) {
+  return oncePerRequest(event, `dashboard-today:${orgSlug}`, async () => {
+    if (!preloaded) return readDashboardToday(event, orgSlug)
+    return finalizeRequestMetrics(event, 'dashboard-today', await preloaded())
+  })
+}
 
 /**
  * Today and Upcoming for the person looking, one list (server/domain/today.ts).

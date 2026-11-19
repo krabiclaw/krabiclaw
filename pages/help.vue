@@ -5,11 +5,11 @@
     <PlatformHeader class="shrink-0" />
 
     <ClientOnly>
-      <HelpChowBotConversation>
+      <HelpSupportConversation>
         <template #intro>
           <PlatformHelpHero />
         </template>
-      </HelpChowBotConversation>
+      </HelpSupportConversation>
 
       <template #fallback>
         <main class="min-h-0 flex-1 overflow-y-auto">
@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import HelpChowBotConversation from '~/components/conversation/HelpChowBotConversation.vue'
+import HelpSupportConversation from '~/components/conversation/HelpSupportConversation.vue'
 import PlatformHelpHero from '~/components/platform/PlatformHelpHero.vue'
 import { PUBLIC_SUPPORT_FAQ_ENTRIES } from '~/utils/public-support'
 
@@ -35,8 +35,8 @@ if (organizationTemplate.slug !== 'platform') throw createError({ statusCode: 40
 useSocialMetadata({
   path: '/help',
   socialImage: organizationSocialImage,
-  title: 'Support',
-  description: 'Get help with Blawby, browse docs and product updates, or open a support request through ChowBot support.',
+  title: 'Blawby Support',
+  description: 'Get help with Blawby, browse docs and product updates, or send a support request to Blawby Support.',
   breadcrumbs: [
     { name: 'Home', url: '/' },
     { name: 'Support', url: '/help' },

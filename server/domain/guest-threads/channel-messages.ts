@@ -40,7 +40,9 @@ export type GuestThreadChannelRow = Omit<ChannelThreadMapping, 'product_id' | 'e
 }
 
 /** Channel routing and the home used to present this conversation come from the same join. */
-export function guestThreadChannelQuery(conversationId: string, organizationId: string): BatchQuery {
+export function guestThreadChannelQuery(conversationId: string | { sql: string }, organizationId: string | { sql: string }): BatchQuery {
+  const conversation = typeof conversationId === 'string' ? '?' : conversationId.sql
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
   return { query: `
     SELECT c.organization_id, c.id AS conversation_id, ct.external_thread_id, ct.external_booking_id, ct.moved_from_thread_id,
       ct.product_id AS mapped_product_id, COALESCE(ct.product_id, CASE WHEN b.owner = 'channel' THEN b.product_id END) AS product_id,
@@ -50,7 +52,8 @@ export function guestThreadChannelQuery(conversationId: string, organizationId: 
     FROM conversations c
     LEFT JOIN channel_threads ct ON ct.organization_id = c.organization_id AND ct.conversation_id = c.id
     LEFT JOIN bookings b ON b.organization_id = c.organization_id AND b.id = c.booking_id AND c.kind = 'booking'
-    WHERE c.id = ? AND c.organization_id = ?`, params: [conversationId, organizationId] }
+    WHERE c.id = ${conversation} AND c.organization_id = ${organization}`,
+    params: [...(typeof conversationId === 'string' ? [conversationId] : []), ...(typeof organizationId === 'string' ? [organizationId] : [])] }
 }
 
 export function parseGuestThreadChannel(row: GuestThreadChannelRow) {

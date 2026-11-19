@@ -1,4 +1,5 @@
-import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboard/dashboardScopeHeaderContext'
+import { dashboardScopeHeaderModelKey, dashboardWorkspaceLinksKey } from '~/lib/components/workspace/dashboard/dashboardScopeHeaderContext'
+import type { DashboardWorkspaceLink } from '~/composables/useDashboardOrganization'
 import { authClient } from '~/lib/auth-client'
 import { useMediaQuery } from '@vueuse/core'
 
@@ -33,11 +34,11 @@ export function useDashboardPane() {
   return useDashboardBreakpoint('lg')
 }
 
-export function useDashboardMenu() {
+export function useDashboardMenu(workspaceLinks?: ComputedRef<readonly DashboardWorkspaceLink[]>) {
   const route = useRoute()
   const scopeHeaderModel = inject(dashboardScopeHeaderModelKey, null)
   const session = authClient.useSession()
-  const organizationsState = authClient.useListOrganizations()
+  const organizations = workspaceLinks ?? inject(dashboardWorkspaceLinksKey, null)
 
   /**
    * The shell — tabs, Menu, where a destination exits to — is the
@@ -53,7 +54,7 @@ export function useDashboardMenu() {
   const organization = computed(() => {
     const routed = dashboard.organization.value
     if (routed) return { id: routed.id, slug: routed.slug, name: routed.name }
-    return unref(organizationsState).data?.find(candidate => candidate.id === activeOrganizationId.value) ?? null
+    return organizations?.value.find(candidate => candidate.id === activeOrganizationId.value) ?? null
   })
   const personal = computed(() => !organization.value)
 

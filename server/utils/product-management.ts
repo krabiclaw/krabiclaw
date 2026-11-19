@@ -1,7 +1,7 @@
 import { changedTaskIds, publishChangedJobs } from '~/server/events'
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
+import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, assignedOfferingCondition, memberAccessPrincipal, resolveMembership, type OfferingReadScope } from '~/server/utils/member-access'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { PaymentBasis, ProductBookingSetupInput } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
@@ -10,7 +10,7 @@ import { d1JsonArray, d1JsonValue, executeBatch, queryAll, queryFirst, type Batc
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
-import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
+import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, groupMediaPlacements, mediaPlacementsQuery, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
 import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
@@ -257,45 +257,62 @@ function mapPriceRow(row: Row): Price {
  * x collections x details multiplies rows, and reconstructing distinct sets
  * from that product is where duplicate and dropped children come from.
  */
-async function hydrate(db: DbClient, organizationId: string, products: Product[]): Promise<Product[]> {
-  if (products.length === 0) return products
-  const ids = d1JsonArray(products.map(product => product.id))
-  const byId = new Map(products.map(product => [product.id, product]))
-
-  // One batch, not nine round trips. The databases are a long way from the
-  // Workers that read them, so each extra statement is real latency on every
-  // catalog page; D1 charges one round trip for the batch.
-  const [batched, photoRooms, accessibility] = await Promise.all([executeBatch(db, [
+function productHydrationQueries(organizationId: string | { sql: string }, selection: BatchQuery): BatchQuery[] {
+  const org = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const params = [...(typeof organizationId === 'string' ? [organizationId] : []), ...selection.params ?? []]
+  return [
     { query: `SELECT id, product_id, name, sku, active, sort_order FROM product_variants
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order, id`, params: [organizationId, ids] },
+      WHERE organization_id = ${org} AND product_id IN (${selection.query}) ORDER BY sort_order, id`, params },
     // Variants first, then each one's prices by index. Joined the other way
     // the planner walked every price of the site and re-read the product list
     // for each: 184,000 rows for one 365-dish menu.
     { query: `SELECT pr.* FROM product_variants v
       CROSS JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
-      WHERE v.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?)) AND pr.stay_date IS NULL AND pr.weekend = 0
-      ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params: [organizationId, ids] },
+      WHERE v.organization_id = ${org} AND v.product_id IN (${selection.query}) AND pr.stay_date IS NULL AND pr.weekend = 0
+      ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params },
     { query: `SELECT product_id, organization_id, published FROM product_publications
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY organization_id`, params: [organizationId, ids] },
+      WHERE organization_id = ${org} AND product_id IN (${selection.query}) ORDER BY organization_id`, params },
     { query: `SELECT product_id, location_id, active, published FROM product_locations
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY location_id`, params: [organizationId, ids] },
+      WHERE organization_id = ${org} AND product_id IN (${selection.query}) ORDER BY location_id`, params },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
+      WHERE organization_id = ${org} AND product_id IN (${selection.query}) ORDER BY collection_id`, params },
     // A session offering's booking; a home's is presented with its stay settings below.
     { query: `SELECT product_id, duration_minutes, seating_interval_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions,
         party_size_min, party_size_max, minimum_guest_age, accessibility_contact_required, payment_basis, payment_min_party_size FROM product_booking_configs
-      WHERE organization_id = ? AND unit = 'slot' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+      WHERE organization_id = ${org} AND unit = 'slot' AND product_id IN (${selection.query})`, params },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
-      WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+      WHERE organization_id = ${org} AND row_role = 'root' AND kind = 'page' AND product_id IN (${selection.query})`, params },
     // How a home is booked is its booking configuration, presented here with what the home is.
     { query: `SELECT c.product_id, c.internal_name, c.location_id, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, ${stayWeekendPriceSql('c')} AS weekend_price_minor, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
         b.cancellation_policy, b.long_term_cancellation_policy, b.assigned_member_id, b.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id AND b.unit = 'nights'
-      WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-  ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
+      WHERE c.organization_id = ${org} AND c.product_id IN (${selection.query})`, params },
+  ]
+}
+
+async function hydrate(db: DbClient, organizationId: string, products: Product[]): Promise<Product[]> {
+  if (!products.length) return products
+  const stayIds = products.filter(product => product.kind === 'stay').map(product => product.id)
+  const [rows, photoRooms, accessibility] = await Promise.all([
+    executeBatch(db, productHydrationQueries(organizationId, {
+      query: 'SELECT value FROM json_each(?)', params: [d1JsonArray(products.map(product => product.id))],
+    }), { operation: 'Hydrate products' }),
+    readStayPhotoRooms(db, organizationId, stayIds),
+    readStayHomeAccessibility(db, organizationId, stayIds),
+  ])
+  return hydrateProductRows(products, rows, photoRooms, accessibility)
+}
+
+function hydrateProductRows(
+  products: Product[],
+  batched: Awaited<ReturnType<typeof executeBatch>>,
+  photoRooms: Awaited<ReturnType<typeof readStayPhotoRooms>>,
+  accessibility: Awaited<ReturnType<typeof readStayHomeAccessibility>>,
+) {
+  const byId = new Map(products.map(product => [product.id, product]))
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
   const variantRows = rowsAt(0)
   const priceRows = rowsAt(1)
@@ -454,7 +471,9 @@ export async function listProducts(db: DbClient, organizationId: string): Promis
  * catalog renders an empty state that says so.
  */
 /** Public experiences use the same readiness check as publication, including sold-out sessions. */
-async function publicProductWindow(db: DbClient, organizationId: string, products: Product[], window?: { limit: number; offset: number }, env?: CloudflareEnv, sharedPaymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>, bookableOnly = false): Promise<Product[]> {
+async function publicProductWindow(db: DbClient, organizationId: string, products: Product[], window?: { limit: number; offset: number }, env?: CloudflareEnv, sharedPaymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>, bookableOnly = false,
+  prepared?: { currency: CurrencyCode | null; scheduledScopes: Map<string, Set<string | null>> },
+): Promise<Product[]> {
   let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
   const requireEnv = () => {
     if (!env) throw new Error('The organization environment is required to assess booking readiness')
@@ -464,8 +483,10 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
   const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) || product.kind === 'stay' : product.kind === 'experience' || product.kind === 'stay' || Boolean(product.booking))
   const [activeLocationIds, currency, scheduledScopes] = await Promise.all([
     bookableOnly ? queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId]).then(rows => new Set(rows.map(location => location.id))) : undefined,
-    needsReadiness.some(product => !product.order_url) ? organizationDefaultCurrency(db, organizationId) : undefined,
-    bookingScheduleScopes(db, organizationId, needsReadiness.filter(product => !product.order_url && product.booking?.duration_minutes).map(product => product.id)),
+    needsReadiness.some(product => !product.order_url)
+      ? prepared ? checkedOrganizationCurrency(organizationId, prepared.currency) : organizationDefaultCurrency(db, organizationId)
+      : undefined,
+    prepared?.scheduledScopes ?? bookingScheduleScopes(db, organizationId, needsReadiness.filter(product => !product.order_url && product.booking?.duration_minutes).map(product => product.id)),
   ])
   const readiness = (product: Product, extra: { requireActive?: boolean; activeLocationIds?: ReadonlySet<string> } = {}) =>
     productBookingReadiness(db, organizationId, product, { env, paymentSetup, currency, scheduledScopes: scheduledScopes.get(product.id) ?? new Set(), ...extra })
@@ -496,20 +517,89 @@ function productListCounts(rows: readonly { kind: ProductKind; count?: number }[
 }
 
 /** Editable catalogue pages read one extra row. Public readiness and counts precede pagination. */
+function organizationProductSelection(input: Omit<OrganizationProductListInput, 'organizationId' | 'assignedUserId'> & { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope }) {
+  const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
+  const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
+  const selection = `FROM products p
+    LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+    WHERE p.organization_id = ${org} AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${assignment ? ` AND (${assignment.unrestricted} OR (${assignment.sql}))` : ''}`
+  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.publishedOnly ? 1 : 0,
+    ...(input.productIds ? [d1JsonArray(input.productIds)] : []),
+    ...(input.kind ? [input.kind] : []),
+    ...(input.featured === undefined ? [] : [Number(input.featured)]),
+    ...assignment?.params ?? []]
+  return { selection, params }
+}
+
+/** Menu cards use the canonical product projection without waiting for product IDs in JavaScript. */
+export function prepareOrganizationDishRead(organizationId: string | { sql: string }, publishedOnly: boolean) {
+  return preparePublicProductSelection(organizationId, 'dish', publishedOnly)
+}
+
+export function preparePublicProductSelection(organizationId: string | { sql: string }, kind: 'dish' | 'experience' | 'table', publishedOnly: boolean) {
+  const { selection, params } = organizationProductSelection({ organizationId, kind, publishedOnly })
+  const relationships = productHydrationQueries(organizationId, { query: `SELECT p.id ${selection}`, params }).slice(0, 7)
+  // These products cannot carry stay settings.
+  const queries = [{ query: `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id`, params }, ...relationships]
+  return {
+    queries, ids: { query: `SELECT p.id ${selection} AND (p.order_url IS NULL OR p.order_url = '')`, params },
+    read: ([products, ...rows]: Awaited<ReturnType<typeof executeBatch>>) =>
+      hydrateProductRows((products!.results as Row[]).map(mapProductRow), rows, new Map(), new Map()),
+  }
+}
+
+export function preparePublicExperiences(scope: string | { sql: string }) {
+  const selection = preparePublicProductSelection(scope, 'experience', true)
+  return {
+    queries: [...selection.queries, bookingScheduleScopesQuery(scope, selection.ids)],
+    read(rows: D1Result[], db: DbClient, env: CloudflareEnv, organizationId: string, currency: CurrencyCode | null) {
+      const products = selection.read(rows.slice(0, selection.queries.length))
+      const scheduledScopes = scheduleScopesFromRows(rows[selection.queries.length]!.results as BookingScheduleScopeRow[])
+      return publicProductWindow(db, organizationId, products, undefined, env, undefined, false, { currency, scheduledScopes })
+    },
+  }
+}
+
+/** Catalog cards need offering facts, prices and one image. The editor reads the complete product. */
+export function prepareCatalogOfferings(input: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; kind?: ProductKind; locationId?: string }) {
+  const { organizationId } = input
+  const base = organizationProductSelection(input)
+  const selection = `${base.selection} AND p.kind <> 'dish'${input.locationId ? ' AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ?)' : ''}`
+  const params = [...base.params, ...(input.locationId ? [input.locationId] : [])]
+  const ids = { query: `SELECT p.id ${selection}`, params }
+  const relationships = productHydrationQueries(organizationId, ids).slice(0, 7)
+  const queries = [
+    { query: `SELECT ${PRODUCT_COLUMNS}, c.internal_name AS stay_internal_name FROM (
+      SELECT ${PRODUCT_COLUMNS} ${selection}
+    ) p LEFT JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+      AND EXISTS (SELECT 1 FROM product_booking_configs b WHERE b.organization_id = p.organization_id AND b.product_id = p.id AND b.unit = 'nights')
+    ORDER BY p.name, p.id`, params },
+    ...relationships,
+    mediaPlacementsQuery({ organizationId, ownerType: 'product', slot: 'image', owners: { sql: ids.query, params } }),
+  ]
+  return {
+    queries,
+    read: ([products, ...rest]: Awaited<ReturnType<typeof executeBatch>>) => {
+      const rows = products!.results as Row[]
+      const images = groupMediaPlacements(rest.at(-1)!.results)
+      const offerings = hydrateProductRows(rows.map(mapProductRow), rest.slice(0, -1), new Map(), new Map())
+      return offerings.map((product, index) => ({
+        product,
+        internalName: rows[index]!.stay_internal_name == null ? null
+          : requireTrimmedProductString(rows[index]!.stay_internal_name, 'stay.internal_name', PRODUCT_LIMITS.name),
+        image: images.get(product.id)?.[0],
+      }))
+    },
+  }
+}
+
 export function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts: true }): Promise<ProductListResult>
 export function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts?: false }): Promise<Product[]>
 export async function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts?: boolean }): Promise<Product[] | ProductListResult> {
   if (input.productIds?.length === 0) return input.withCounts ? { products: [], counts: productListCounts([]) } : []
   const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
   const window = requireReadiness ? undefined : input.window
-  const selection = `FROM products p
-    LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
-  const params = [input.organizationId, input.publishedOnly ? 1 : 0,
-    ...(input.productIds ? [d1JsonArray(input.productIds)] : []),
-    ...(input.kind ? [input.kind] : []),
-    ...(input.featured === undefined ? [] : [Number(input.featured)]),
-    ...(input.assignedUserId ? [input.assignedUserId] : [])]
+  const { selection, params } = organizationProductSelection(input)
   const [rows, counts] = await Promise.all([
     queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
     input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
@@ -693,8 +783,12 @@ export async function organizationDefaultCurrency(db: DbClient, organizationId: 
   if (!organizationId) invalid('currency is required when no organization context is given')
   const organization = await queryFirst<{ default_currency: string }>(db, 'SELECT default_currency FROM organization WHERE id = ?', [organizationId])
   if (!organization) notFound('Organization not found')
-  if (!isCurrencyCode(organization.default_currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
-  return organization.default_currency
+  return checkedOrganizationCurrency(organizationId, organization.default_currency)
+}
+
+function checkedOrganizationCurrency(organizationId: string, currency: string | null) {
+  if (!isCurrencyCode(currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
+  return currency
 }
 
 interface NormalizedPrice {
@@ -2191,10 +2285,17 @@ async function productCacheInvalidations(db: DbClient, organizationId: string, p
 /** Read which product scopes have a schedule, without projecting an entire catalog. */
 export async function bookingScheduleScopes(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, Set<string | null>>> {
   if (!productIds.length) return new Map()
-  const rows = await queryAll<{ product_id: string; location_id: string | null }>(db, `
+  const { query, params } = bookingScheduleScopesQuery(organizationId, { query: 'SELECT value FROM json_each(?)', params: [d1JsonValue(productIds)] })
+  return scheduleScopesFromRows(await queryAll<BookingScheduleScopeRow>(db, query, params))
+}
+
+type BookingScheduleScopeRow = { product_id: string; location_id: string | null }
+
+function bookingScheduleScopesQuery(organizationId: string | { sql: string }, ids: BatchQuery) {
+  return { query: `
     WITH configured AS (
-      SELECT c.* FROM product_booking_configs c WHERE c.organization_id=? AND c.duration_minutes>0
-        AND c.product_id IN (SELECT value FROM json_each(?))
+      SELECT c.* FROM product_booking_configs c WHERE c.organization_id=${typeof organizationId === 'string' ? '?' : organizationId.sql} AND c.duration_minutes>0
+        AND c.product_id IN (${ids.query})
         AND (c.scheduling_mode<>'provider' OR EXISTS (
           SELECT 1 FROM member_scheduling ms WHERE ms.organization_id=c.organization_id AND ms.member_id=c.assigned_member_id
             AND ms.timezone IS NOT NULL AND json_array_length(ms.weekly_json)>0))
@@ -2215,7 +2316,10 @@ export async function bookingScheduleScopes(db: DbClient, organizationId: string
           AND s.starts_at<strftime('%Y-%m-%dT%H:%M:%fZ','now',printf('+%d days',?))))))
     UNION ALL
     SELECT c.product_id, NULL FROM configured c WHERE c.held_online=1 AND c.scheduling_mode='provider'
-  `, [organizationId, d1JsonValue(productIds), BOOKING_HORIZON_DAYS])
+  `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...ids.params ?? [], BOOKING_HORIZON_DAYS] }
+}
+
+function scheduleScopesFromRows(rows: BookingScheduleScopeRow[]) {
   const byProduct = new Map<string, Set<string | null>>()
   for (const row of rows) {
     const scopes = byProduct.get(row.product_id) ?? new Set()
@@ -2436,6 +2540,10 @@ export async function removeProductLocation(db: DbClient, input: {
 /** Sections as the API returns them, each with its own picture read in one query. */
 async function mapCollectionRows(db: DbClient, organizationId: string, rows: Row[]): Promise<Collection[]> {
   const images = await readMediaPlacements(db, { organizationId, ownerType: 'collection', ownerIds: rows.map(row => String(row.id)), slot: 'image' })
+  return collectionRows(rows, images)
+}
+
+function collectionRows(rows: Row[], images: Awaited<ReturnType<typeof readMediaPlacements>>): Collection[] {
   return rows.map(row => ({
     id: String(row.id), organization_id: String(row.organization_id),
     location_id: row.location_id === null ? null : String(row.location_id),
@@ -2448,18 +2556,33 @@ async function mapCollectionRows(db: DbClient, organizationId: string, rows: Row
   }))
 }
 
-export async function listCollections(db: DbClient, input: {
-  organizationId: string; locationId?: string | null; assignedUserId?: string
-}): Promise<Collection[]> {
-  const rows = await queryAll<Row>(db, `
-    SELECT * FROM collections
-    WHERE organization_id = ? 
+interface CollectionReadScope { organizationId: string; locationId?: string | null; assignedUserId?: string }
+
+export function prepareCollectionList(input: { organizationId: string | { sql: string }; locationId?: string | null; assignedUserId?: OfferingReadScope }) {
+  const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
+  const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
+  const selection = `
+    FROM collections
+    WHERE organization_id = ${org}
       AND (? = 0 OR location_id IS ?)
-      ${input.assignedUserId ? `AND EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
-        WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${ASSIGNED_SERVICE_SQL}))` : ''}
-    ORDER BY sort_order, name, id
-  `, [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId] : [])])
-  return mapCollectionRows(db, input.organizationId, rows)
+      ${assignment ? `AND (${assignment.unrestricted} OR EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
+        WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${assignment.sql})))` : ''}
+  `
+  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...assignment?.params ?? []]
+  return {
+    queries: [
+      { query: `SELECT * ${selection} ORDER BY sort_order, name, id`, params },
+      mediaPlacementsQuery({ organizationId: input.organizationId, ownerType: 'collection', slot: 'image',
+        owners: { sql: `SELECT id ${selection}`, params } }),
+    ],
+    read: ([rows, media]: Awaited<ReturnType<typeof executeBatch>>) =>
+      collectionRows(rows!.results as Row[], groupMediaPlacements(media!.results)),
+  }
+}
+
+export async function listCollections(db: DbClient, input: CollectionReadScope): Promise<Collection[]> {
+  const plan = prepareCollectionList(input)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read collections and pictures' }))
 }
 
 export async function createCollection(db: DbClient, input: {

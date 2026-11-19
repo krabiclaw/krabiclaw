@@ -457,6 +457,10 @@ export async function reorderMediaPlacements(db: DbClient, input: {
  */
 export async function readProductPhotos(db: DbClient, input: { organizationId: string; productIds: string[] }): Promise<Map<string, MediaPlacementItem[]>> {
   const placements = await getMediaPlacements(db, { organizationId: input.organizationId, ownerType: 'product', ownerIds: input.productIds })
+  return productPhotosFromPlacements(placements)
+}
+
+export function productPhotosFromPlacements(placements: Map<string, MediaPlacementItem[]>): Map<string, MediaPlacementItem[]> {
   return new Map([...placements].map(([productId, items]) => [productId, uniqueMediaAssets([
     ...items.filter(item => item.slot === 'image'),
     ...items.filter(item => item.slot === 'gallery'),

@@ -29,10 +29,10 @@ missing or ambiguous matches; another Chrome window is never substituted.
 
    ```python
    import rec                                   # REC_DIR=run python3 …
-   rec.open_window("https://krabiclaw.com/dashboard/<org>/integrations")
+   rec.open_window("https://blawby.com/dashboard/<org>/integrations")
    rec.start("connect")
    rec.click("Connect Google Ads")
-   rec.wait_url("https://krabiclaw.com")        # the owner finishes passkey / consent
+   rec.wait_url("https://blawby.com")        # the owner finishes passkey / consent
    rec.click("Save")
    rec.stop()
    ```

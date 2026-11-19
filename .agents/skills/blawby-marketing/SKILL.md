@@ -1,5 +1,5 @@
 ---
-name: krabiclaw-marketing
+name: blawby-marketing
 description: Make Blawby marketing and feature videos the owner-approved way, modeled on Airbnb's host feature tours. The script follows Airbnb's narration line for line, the voice is local Kokoro, and the real dashboard UI is rebuilt in HyperFrames from live captures. Use for marketing videos and feature media for blogs and help docs. For screen-recorded proof such as app-review or OAuth demos, use recording/.
 ---
 

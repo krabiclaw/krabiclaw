@@ -60,7 +60,7 @@ test.describe('OAuth discovery endpoints', () => {
     const cimdClientId = process.env.MCP_CIMD_CLIENT_URL!
     expect(cimdClientId, 'MCP_CIMD_CLIENT_URL must name a public HTTPS metadata document').toBeTruthy()
     const redirectUri = new URL('/oauth/test-callback', cimdClientId).toString()
-    const verifier = 'krabiclaw-public-cimd-e2e-verifier-0123456789'
+    const verifier = 'blawby-public-cimd-e2e-verifier-0123456789'
     const authorizeParams = {
       client_id: cimdClientId,
       redirect_uri: redirectUri,
@@ -251,7 +251,7 @@ test.describe('OAuth discovery endpoints', () => {
     expect(limitedResult.result._meta['mcp/www_authenticate']).toEqual([scopeChallenge])
 
     const clientHeaders = new Headers({ Authorization: `Bearer ${refreshedBody.access_token}` })
-    const client = new Client({ name: 'krabiclaw-scope-check', version: '1.0.0' }, {
+    const client = new Client({ name: 'blawby-scope-check', version: '1.0.0' }, {
       versionNegotiation: { mode: { pin: '2026-07-28' } },
     })
     try {

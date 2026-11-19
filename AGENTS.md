@@ -356,11 +356,11 @@ disk.
 ## Marketing execution
 
 For feature launches, blogs and social distribution, read
-`.agents/skills/krabiclaw-publishing/SKILL.md` before publishing. It covers
+`.agents/skills/blawby-publishing/SKILL.md` before publishing. It covers
 content selection, article writing, SEO research plans, and authorized distribution.
 
-For Blawby marketing videos, use `.agents/skills/krabiclaw-marketing/SKILL.md`.
-Product facts and voice are in `.agents/skills/krabiclaw-marketing/product-profile.md`.
+For Blawby marketing videos, use `.agents/skills/blawby-marketing/SKILL.md`.
+Product facts and voice are in `.agents/skills/blawby-marketing/product-profile.md`.
 
 The marketing skill uses the official HyperFrames skills. Install them with
 `npx skills add heygen-com/hyperframes --all`; they are not committed.

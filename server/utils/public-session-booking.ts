@@ -41,8 +41,8 @@ function availabilityRequest(input: AvailabilityInput, now: Date) {
 
 type AvailabilityRequest = ReturnType<typeof availabilityRequest>
 
-function slotRead(organizationId: string, products: BatchQuery, request: AvailabilityRequest, now: Date, scope: SlotRead['scope']): SlotRead {
-  return { organization: { query: '?', params: [organizationId] }, products, locationId: request.locationId, fromInstant: request.fromInstant, toInstant: request.toInstant, scope, now: now.toISOString() }
+function slotRead(organizationId: string | BatchQuery, products: BatchQuery, request: AvailabilityRequest, now: Date, scope: SlotRead['scope']): SlotRead {
+  return { organization: typeof organizationId === 'string' ? { query: '?', params: [organizationId] } : organizationId, products, locationId: request.locationId, fromInstant: request.fromInstant, toInstant: request.toInstant, scope, now: now.toISOString() }
 }
 
 /** The bookable times in the requested days, as a guest sees them. */
@@ -73,30 +73,41 @@ async function publicSessions(calendar: SlotCalendar, product: SlotProduct, requ
  * its times; publishing is where its readiness to sell was checked.
  */
 export async function readPublicProductAvailability(db: DbClient, organizationId: string, slug: string, env: CloudflareEnv, input: AvailabilityInput) {
+  const read = preparePublicProductAvailability({ query: '?', params: [organizationId] }, slug, input)
+  return read.read(env, await executeBatch(db, read.queries, { operation: 'Read public availability' }))
+}
+
+export function preparePublicProductAvailability(organization: BatchQuery, slug: string, input: AvailabilityInput) {
   const now = new Date()
   const request = availabilityRequest(input, now)
-  const read = slotRead(organizationId, { query: "SELECT id FROM products WHERE organization_id=? AND slug=? AND kind<>'stay'", params: [organizationId, slug] }, request, now, 'bookable')
-  const stayRead = publicStayCalendarRead(organizationId, {
-    query: "SELECT id FROM products WHERE organization_id=? AND slug=? AND kind='stay'",
-    params: [organizationId, slug],
+  const read = slotRead(organization, { query: `SELECT id FROM products WHERE organization_id=${organization.query} AND slug=? AND kind<>'stay'`, params: [...organization.params ?? [], slug] }, request, now, 'bookable')
+  const stayRead = publicStayCalendarRead(organization, {
+    query: `SELECT id FROM products WHERE organization_id=${organization.query} AND slug=? AND kind='stay'`,
+    params: [...organization.params ?? [], slug],
   }, { from: input.from, to: input.to }, now)
   const slots = slotReadQueries(read)
-  const [productResult, ...results] = await executeBatch(db, [{
+  const queries = [{
     query: `SELECT p.id, p.kind, p.name, p.slug, p.active, p.order_url,
         EXISTS (SELECT 1 FROM product_publications pub WHERE pub.organization_id=p.organization_id AND pub.product_id=p.id AND pub.published=1) AS published
-      FROM products p WHERE p.organization_id=? AND p.slug=?`,
-    params: [organizationId, slug],
-  }, ...slots, ...stayRead.queries], { operation: 'Read public availability' })
-  const product = productResult?.results[0] as { id: string; kind: string; name: string; slug: string; active: number; order_url: string | null; published: number } | undefined
-  if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
-  if (product.kind === 'stay') return { unit: 'nights' as const, ...stayRead.calendar(results.slice(slots.length)) }
-  if (!product.active || !product.published) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
-  const identity = { id: product.id, name: product.name, slug: product.slug }
-  if (product.order_url) return { unit: 'slot' as const, product: identity, timezone: null, sessions: [] }
-  const calendar = slotCalendars(env, read, results.slice(0, slots.length)).get(product.id)
-  if (!calendar) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
-  return publicSessions(calendar, identity, request, now)
+      FROM products p WHERE p.organization_id=${organization.query} AND p.slug=?`,
+    params: [...organization.params ?? [], slug],
+  }, ...slots, ...stayRead.queries]
+  return { queries, read: present }
+
+  async function present(env: CloudflareEnv, [productResult, ...results]: D1Result[]) {
+    const product = productResult?.results[0] as { id: string; kind: string; name: string; slug: string; active: number; order_url: string | null; published: number } | undefined
+    if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+    if (product.kind === 'stay') return { unit: 'nights' as const, ...stayRead.calendar(results.slice(slots.length)) }
+    if (!product.active || !product.published) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+    const identity = { id: product.id, name: product.name, slug: product.slug }
+    if (product.order_url) return { unit: 'slot' as const, product: identity, timezone: null, sessions: [] }
+    const calendar = slotCalendars(env, read, results.slice(0, slots.length)).get(product.id)
+    if (!calendar) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+    return publicSessions(calendar, identity, request, now)
+  }
 }
+
+export type PublicAvailabilityRead = { slug: string; plan: ReturnType<typeof preparePublicProductAvailability>; rows: D1Result[] }
 
 /**
  * The product page's first render: the same times the availability feed
