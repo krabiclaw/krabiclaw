@@ -439,8 +439,18 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
       if (state === 'processing' || state === 'verifying') return { state: 'processing' }
       throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
     }
-    await reconcilePaymentIntent(db, stripe, payment, intent, env, payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null)
+    // The webhook can commit while Stripe's response is in flight. Read the
+    // same claimed payment and hold before preparing any inventory write.
     payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+    if (payment.captured_amount > 0) {
+      const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : intent.latest_charge?.id
+      if (payment.stripe_payment_intent_id !== intent.id || !chargeId || payment.stripe_charge_id !== chargeId
+        || payment.captured_amount !== intent.amount_received || payment.currency !== intent.currency.toUpperCase()
+        || Boolean(payment.livemode) !== intent.livemode) throw new Error('Stored capture does not match Stripe')
+    } else {
+      await reconcilePaymentIntent(db, stripe, payment, intent, env, payment.checkout_hold ? JSON.parse(payment.checkout_hold) as CheckoutHold : null)
+      payment = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+    }
   }
   // The approval checkout began in the buyer's account; the business's site may have a different browser session.
   const snapshot = snapshotOf(payment)

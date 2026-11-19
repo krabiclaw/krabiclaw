@@ -1341,6 +1341,43 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
  } finally { await runtime.dispose() }
 })
 
+test('the checkout return reuses a booking the webhook saved while Stripe was responding', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv, events } = await boot()
+ try {
+  const env = stripeEnv(bootEnv)
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  const claim = await confirmable(db, 'webhook-wins', inMinutes(15))
+  const trace = new H3Event(new Request('http://payments.localhost/api/public/payments/webhook-wins/return'))
+  const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
+  let webhook: Promise<void> | undefined
+  const calls = fakeStripe(t, async (url, init) => {
+   if (!webhook && init?.method === 'GET' && url.pathname === '/v1/payment_intents/pi_webhook-wins') {
+    webhook = processPaymentEvent(db, stripe, { id: 'evt_webhook_wins', type: 'payment_intent.succeeded', account: 'acct_seller',
+     livemode: false, data: { object: { id: 'pi_webhook-wins', metadata: { krabiclaw_payment_id: 'webhook-wins' } } } } as unknown as Stripe.Event, env)
+    await webhook
+   }
+   return null
+  }, { 'webhook-wins': 'succeeded' })
+  const stripe = getStripe(env)
+  const receipt = await completePaymentReturn(requestDb, { ...env, DB: requestDb }, ORG, 'webhook-wins', claim, async () => 'guest')
+  assert.ok(webhook)
+  await webhook
+  assert.equal(receipt.state, 'paid')
+  if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  const result = await db.prepare(`SELECT b.status,p.captured_amount,p.claimed_user_id FROM bookings b
+    JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id
+    JOIN payments p ON p.subject_id=b.id AND p.organization_id=b.organization_id WHERE c.id=?`).bind(receipt.conversation_id).first()
+  assert.deepEqual(result, { status: 'confirmed', captured_amount: 10000, claimed_user_id: 'guest' })
+  assert.equal((await holdOf(db, 'webhook-wins'))?.status, 'converted')
+  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
+  assert.deepEqual(calls.refund, [])
+  assert.ok(events.take('payment.captured'))
+  assert.equal(events.take('payment.captured'), undefined)
+  const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 0, singleStatementRoundTrips: 3 })
+ } finally { await runtime.dispose() }
+})
+
 test('an authorization that lost its capacity is cancelled and never charged; capture failures are settled against the booking that exists', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv, events } = await boot()
  try {

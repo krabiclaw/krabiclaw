@@ -165,6 +165,7 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
     )
   }
   let conversion: Awaited<ReturnType<typeof saveCheckoutBooking>> | undefined
+  let concurrentCapture: Payment | undefined
   if (hold?.status === 'active' && hold.organization_exists && payment.refunded_amount === 0) {
     // Redirect methods can succeed without a separate authorization. Claim what was
     // purchased and record the verified charge together.
@@ -173,16 +174,26 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       bookingId = conversion.bookingId
     } catch (error) {
       if (!isStayNightConflict(error) && !bookingBatchWriteRefused(error) && !(error instanceof CapacityUnavailableError)) throw error
-      await execute(db, "UPDATE payment_checkout_holds SET status='released' WHERE id=? AND organization_id=? AND status='active'", [hold.id, payment.organization_id])
-      hold = await readCheckoutHold(db, payment)
+      const [, current] = await executeBatch(db, [
+        { query: "UPDATE payment_checkout_holds SET status='released' WHERE id=? AND organization_id=? AND status='active'",
+          params: [hold.id, payment.organization_id] },
+        { query: `SELECT p.*, (${checkoutHoldSql}) AS hold FROM payments p WHERE p.id=? AND p.organization_id=?`,
+          params: [payment.id, payment.organization_id] },
+      ], { operation: 'Resolve concurrent checkout settlement' })
+      const latest = current?.results[0] as (Payment & { hold: string | null }) | undefined
+      hold = latest?.hold ? JSON.parse(latest.hold) as CheckoutHold : null
       if (hold?.status !== 'converted' && hold?.status !== 'released') throw error
       bookingId = hold.converted_booking_id
+      if (latest && latest.captured_amount > 0) {
+        if (!matchesCapture(latest)) throw new Error('Stored capture does not match Stripe', { cause: error })
+        concurrentCapture = latest
+      }
     }
   }
-  const [write] = !conversion && captureQueries.length ? await executeBatch(db, captureQueries, { operation: 'Record payment capture' }) : []
+  const [write] = !conversion && !concurrentCapture && captureQueries.length ? await executeBatch(db, captureQueries, { operation: 'Record payment capture' }) : []
   const capture = conversion?.capture ?? write?.results[0] as CapturedPayment | undefined
   // Confirm and the Stripe webhook may observe the same capture.
-  const recorded = capture ?? (captureQueries.length ? await requirePayment(db, payment.organization_id, payment.id) : payment)
+  const recorded = capture ?? concurrentCapture ?? (captureQueries.length ? await requirePayment(db, payment.organization_id, payment.id) : payment)
   if (!matchesCapture(recorded)) throw new Error('Stored capture does not match Stripe')
   const keepPaymentOnly = hold && !hold.organization_exists && (hold.session_id === null || (hold.retained_for_servicing && bookingId))
   if (payment.subject_type === 'booking' && !keepPaymentOnly && !bookingId) {
