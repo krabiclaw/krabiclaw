@@ -57,7 +57,7 @@
                 <UCheckbox v-if="selection" :model-value="selectedRow(row.id)" :aria-label="`Include ${row.name}`" :disabled="editor.busy.value" @update:model-value="includeRow(row.id, Boolean($event))" />
                 <NuxtLink :to="row.to" class="flex min-w-0 flex-col hover:underline" :data-home="row.home?.product_id" :data-place="row.place ? `${row.place.kind}:${row.place.id}` : undefined">
                   <span class="line-clamp-2 text-sm font-medium text-highlighted">{{ row.name }}</span>
-                  <span class="text-xs text-muted" :class="row.home ? 'line-clamp-2 break-words' : 'hidden truncate sm:block'" :title="row.detail">{{ row.detail }}</span>
+                  <span v-if="row.place" class="hidden truncate text-xs text-muted sm:block" :title="row.place.detail">{{ row.place.detail }}</span>
                   <StayNightMinimum v-if="row.home" :nights="row.home.min_nights" is-default />
                 </NuxtLink>
               </div>
@@ -189,7 +189,7 @@ interface PlacesPayload { from: string; to: string; places: { place: Place; days
 interface GridBar { key: string; date: string; column: number; span: number; label: string; title: string; to: RouteLocationRaw; stayId: string | null; channel: StayChannel | null }
 /** One day on one row as the grid draws it: its label, whether it reads open, and what holds it. */
 interface GridCell { date: string; open: boolean; held: boolean; label: string; strike: boolean; minimumOverride?: number; mark: 'pending' | 'needs_review' | null; title: string }
-interface GridRow { id: string; name: string; detail: string; to: RouteLocationRaw; cells: GridCell[]; bars: GridBar[]; gaps: Map<number, { text: string; start: number; end: number }>; home?: Home; place?: Place; nights?: StayNight[]; days?: PlaceDay[] }
+interface GridRow { id: string; name: string; to: RouteLocationRaw; cells: GridCell[]; bars: GridBar[]; gaps: Map<number, { text: string; start: number; end: number }>; home?: Home; place?: Place; nights?: StayNight[]; days?: PlaceDay[] }
 
 // The two views: homes (nights at every home) and places (days at every restaurant location, experience and consultation).
 const props = defineProps<{ view: 'homes' | 'places' }>()
@@ -335,7 +335,7 @@ const homeRows = computed<GridRow[]>(() => {
         label: isBookedNight(night) ? '' : night.price_minor === null ? 'No price' : compactPrice.format(Number(minorAmountToMajor(night.price_minor, home.currency))),
         title: nightTitle(home, night, gaps.get(index)?.text),
       }))
-      return { id: home.product_id, name: home.internal_name, detail: addressOf(home), to: homeTo(home.product_id), cells, bars, gaps, home, nights }
+      return { id: home.product_id, name: home.internal_name, to: homeTo(home.product_id), cells, bars, gaps, home, nights }
     })
 })
 // A place's day: its reservations or booked sessions as a bar that opens the day; what is free, blocked or closed in the cell.
@@ -350,7 +350,7 @@ const placeRows = computed<GridRow[]>(() => (placesData.value?.places ?? [])
       return { date: day.date, open: !day.closed && day.held?.kind !== 'unscheduled', held: day.held !== null, strike: day.closed && !day.held, mark: null, label,
         title: `${place.name} · ${formatCalendarDate(day.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${day.held ? day.held.text : day.closed ? 'Blocked' : 'Available'}${day.free ? ` · ${day.free} free` : ''}${day.places_left ? ` · ${day.places_left} ${day.places_left === 1 ? 'place' : 'places'} left` : ''}` }
     })
-    return { id, name: place.name, detail: place.detail, to: { path: `/dashboard/${orgSlug}/calendar`, query: scope }, cells, bars, gaps: new Map(), place, days }
+    return { id, name: place.name, to: { path: `/dashboard/${orgSlug}/calendar`, query: scope }, cells, bars, gaps: new Map(), place, days }
   }))
 const rows = computed(() => homesView ? homeRows.value : placeRows.value)
 /**
