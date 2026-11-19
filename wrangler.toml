@@ -50,10 +50,6 @@ pattern = "*.blawby.com/*"
 zone_name = "blawby.com"
 
 [[routes]]
-pattern = "media.blawby.com/*"
-zone_name = "blawby.com"
-
-[[routes]]
 pattern = "https://*/*"
 zone_name = "blawby.com"
 

@@ -1,4 +1,4 @@
-// Serves R2 objects for the public media hosts.
+// Serves R2 objects for media.krabiclaw.com.
 // Must run before tenant-resolution (filename prefix "00." ensures alphabetical priority).
 // Handles range requests so video seeking works in browsers.
 
@@ -6,19 +6,19 @@ import { defineHandler } from 'nitro';
 import type { getHeader} from 'nitro/h3';
 import {  sendStream, setHeader, setResponseStatus } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { hostnameOf, isNonProductionHost } from '~/server/utils/tenant-hosts'
+import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 
-const MEDIA_HOSTS = new Set(['media.blawby.com', 'media.krabiclaw.com'])
+const MEDIA_HOST = 'media.krabiclaw.com'
 const WORKER_MEDIA_PREFIX = '/__media/'
 
-// Non-production environments have no separate media host, so
+// Non-production environments have no separate media.krabiclaw.com host, so
 // their canonical public media URLs use /__media on the app origin. The host
 // boundary is the authorization boundary here: staging and local hosts may
 // serve public media, while production tenant/platform
-// hosts use the dedicated media host.
+// hosts cannot use this path and continue through media.krabiclaw.com.
 function isWorkerMediaPathAllowed(event: Parameters<typeof getHeader>[0]): boolean {
   if (import.meta.dev) return true
-  const hostname = hostnameOf(event.req.headers.get('host') ?? '')
+  const hostname = ((event.req.headers.get('host')) || '').split(':')[0] ?? ''
   return isNonProductionHost(hostname)
 }
 
@@ -49,9 +49,9 @@ function mediaResponse(
 }
 
 export default defineHandler(async (event) => {
-  const host = hostnameOf(event.req.headers.get('host') ?? '')
+  const host = ((event.req.headers.get('host')) || '').split(':')[0]
   const url = event.url
-  const isMediaHost = MEDIA_HOSTS.has(host)
+  const isMediaHost = host === MEDIA_HOST
   const isWorkerMediaPath = url.pathname.startsWith(WORKER_MEDIA_PREFIX) && isWorkerMediaPathAllowed(event)
   if (!isMediaHost && !isWorkerMediaPath) return
   if (isWorkerMediaPath) isolateWorkerMediaResponse(event)
