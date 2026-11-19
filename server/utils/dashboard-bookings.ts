@@ -55,7 +55,7 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
   const changesStay = patchBody ? bookingPatchChangesStay(patchBody) : false
   const stayQueries = changesStay ? dashboardStayEditQueries({ query: BATCH_VIEWER.organization }, bookingId, patchBody?.check_in_date) : []
   const [memberResult, bookingResult, stayResult, homeResult] = await executeBatch(db, [membership, withViewer(membership, {
-    query: `SELECT b.unit, c.id AS conversation_id, b.status, b.respond_by, b.product_id,
+    query: `SELECT b.unit, c.id AS conversation_id, c.location_id AS conversation_location_id, b.status, b.respond_by, b.product_id,
         (${roleMatchesSql(BATCH_VIEWER.role!, assignedOperationsRoles)} AND ${assignedMemberSql('b', BATCH_VIEWER.user)}) AS assigned,
         ${listingGrantSql('b.organization_id', 'b.product_id', BATCH_VIEWER.member, 'details', BATCH_VIEWER.role)} AS granted,
         ${listingGrantSql('b.organization_id', 'b.product_id', BATCH_VIEWER.member, 'update', BATCH_VIEWER.role)} AS operates
@@ -68,8 +68,10 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
   const principal = memberAccessPrincipal(organization, { env, event })
   const workspace = await stayAccessFor(principal)
   const booking = bookingResult?.results[0] as Pick<BookedRecord, 'unit' | 'status' | 'respond_by' | 'product_id'>
-    & { conversation_id: string; assigned: number; granted: number; operates: number } | undefined
-  if (!booking || (!workspace.manage && !booking.assigned && !(action === 'update' ? booking.operates : booking.granted))) {
+    & { conversation_id: string; conversation_location_id: string | null; assigned: number; granted: number; operates: number } | undefined
+  const hasReadAccess = booking?.granted || booking?.assigned || workspace.manage
+  const hasUpdateAccess = booking?.operates || booking?.assigned || workspace.manage
+  if (!booking || (action === 'read' ? !hasReadAccess : !hasUpdateAccess || (readPatch && !changesStay && !hasReadAccess))) {
     throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   }
   const access = !workspace.manage && booking.operates
@@ -81,7 +83,10 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
 }
 
 export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug: string; bookingId: string }) {
-  const context = await dashboardBookingContext(event, 'read', undefined, record)
+  return loadDashboardBookingDetails(await dashboardBookingContext(event, 'read', undefined, record))
+}
+
+export async function loadDashboardBookingDetails(context: Awaited<ReturnType<typeof dashboardBookingContext>>) {
   const { access, db, organization, userId, bookingId, booking } = context
   if (booking.unit === 'slot') {
     return { booking: await loadStaffBookingDetails(context, bookingId), manage: access.manage }
