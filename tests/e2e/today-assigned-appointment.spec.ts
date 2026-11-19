@@ -319,7 +319,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await expect(page.getByTestId('conversation-create-maintenance')).toHaveCount(0)
     const report = await body<{ conversation_id: string }>(await clientContext.request.post('/api/public/contact', {
       headers: seededSiteHeaders('legal'),
-      data: { name: guestName, email: `today-repair-${Date.now()}@playwright.example`, subject: 'general', message: 'The lobby door at your office sticks and is hard to open.', location_id: office.id },
+      data: { name: guestName, email: `today-repair-${Date.now()}@playwright.example`, subject: 'general', message: 'The lobby door at your office sticks and is hard to open.', location_id: office.id, consent: true },
     }), 201)
     await page.goto(new URL(`${DASHBOARD}/messages/${report.conversation_id}`, baseURL!).toString())
     await waitForNuxtHydration(page)
