@@ -340,9 +340,9 @@ const VIEWS: Record<CalendarView, { label: string; icon: string }> = {
   places: { label: 'Places', icon: 'i-lucide-rows-4' },
 }
 const homesView = !props.personalScope && !props.sessionProduct && props.hasHomes
-const placesView = !props.personalScope && !props.sessionProduct && props.hasPlaces
+const placesView = computed(() => !props.personalScope && !props.sessionProduct && props.hasPlaces)
 // A business with homes opens on its multi-home grid, as Airbnb's and Hostaway's multi-calendars do; a view in the URL still wins.
-const view = ref<CalendarView>(route.query.view === 'list' || route.query.view === 'year' || (homesView && route.query.view === 'homes') || (placesView && route.query.view === 'places') ? route.query.view : homesView ? 'homes' : 'month')
+const view = ref<CalendarView>(route.query.view === 'list' || route.query.view === 'year' || (homesView && route.query.view === 'homes') || (placesView.value && route.query.view === 'places') ? route.query.view : homesView ? 'homes' : 'month')
 const gridView = computed(() => view.value === 'homes' || view.value === 'places')
 const searchLabel = computed(() => view.value === 'homes' ? 'Search homes' : view.value === 'places' ? 'Search places' : 'Search bookings')
 const routeMonth = typeof route.query.month === 'string' && /^\d{4}-\d{2}$/.test(route.query.month) ? route.query.month : null
@@ -353,7 +353,7 @@ const shownYear = ref(shownMonth.value.year)
 const monthKey = computed(() => monthKeyOf(shownMonth.value))
 
 const viewItems = computed(() => [
-  (Object.keys(VIEWS) as CalendarView[]).filter(key => (key !== 'homes' || homesView) && (key !== 'places' || placesView)).map(key => ({
+  (Object.keys(VIEWS) as CalendarView[]).filter(key => (key !== 'homes' || homesView) && (key !== 'places' || placesView.value)).map(key => ({
     label: VIEWS[key].label,
     icon: VIEWS[key].icon,
     type: 'checkbox' as const,

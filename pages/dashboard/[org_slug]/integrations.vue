@@ -76,7 +76,7 @@ const isSummaryResponse = (value: unknown): value is { settings: { integrations:
   isRecord(value) && isRecord(value.settings) && isRecord(value.settings.integrations)
   && Array.isArray(value.settings.integrations.google_maps) && Array.isArray(value.connections)
   && Array.isArray(value.connectionGroups) && Array.isArray(value.connectionFilters)
-const { data, error, refresh } = await useAsyncData(
+const { data, error, refresh } = await useLazyAsyncData(
   () => `dashboard-integrations:${String(route.params.org_slug)}`,
   () => dashboardApi('/api/dashboard/settings', { query: { connections: '1' }, validate: isSummaryResponse }),
 )

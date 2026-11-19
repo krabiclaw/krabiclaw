@@ -73,13 +73,13 @@ const monthName = formatCalendarDate(thisMonth.toString(), 'en', { month: 'long'
 
 // The year by month, in UTC as the money is recorded; this month is the card's total.
 // Upcoming is what Stripe still holds or has on its way; Paid is what it has sent, with what each payout carried.
-// Both load together before the page shows.
+// Start both reads together; Stripe payouts can arrive after the earnings summary.
 const [{ data: performance, error }, { data: payouts, error: payoutsError }] = await Promise.all([
   useAsyncData(
     () => `earnings-performance:${route.params.org_slug}:${thisMonthKey}`,
     () => api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: thisMonth.year, month: thisMonthKey }, validate: isEarningsPerformance }),
   ),
-  useAsyncData(() => `earnings-payouts:${route.params.org_slug}`, () => api<PayoutsView>('/api/dashboard/payments', { query: { view: 'payouts', with_items: '1' }, validate: isPayoutsView })),
+  useLazyAsyncData(() => `earnings-payouts:${route.params.org_slug}`, () => api<PayoutsView>('/api/dashboard/payments', { query: { view: 'payouts', with_items: '1' }, validate: isPayoutsView })),
 ])
 const money = (amount: number) => paymentMoney(amount, performance.value!.currency)
 const monthRow = (month: string) => performance.value?.months.find(row => row.month === month)

@@ -27,13 +27,19 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
   const isReservation = typeof to.params.record_id === 'string' && !to.params.booking_type
     && /^dashboard-org_slug-(?:bookings|messages-conversation_id-reservation)(?:-|$)/.test(String(to.name))
   if (import.meta.server) {
+    const context = useDashboardContext(scope)
+    const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
+      catalog: (orgSlug: string) => Promise<unknown>
+      today: (orgSlug: string) => Promise<unknown>
+    } | undefined
     if (/^\/dashboard\/[^/]+\/products\/?$/.test(to.path)) {
-      const provider = useRequestEvent()?.context.dashboardDocumentProvider as { catalog: (orgSlug: string) => Promise<unknown> } | undefined
-      const catalog = provider?.catalog(scope.orgSlug)
-      // The page reads the same promise and owns how a catalog failure is shown.
-      await Promise.allSettled([useDashboardContext(scope), catalog])
+      await Promise.allSettled([context, provider?.catalog(scope.orgSlug)])
+    } else if (to.name === 'dashboard-org_slug') {
+      await Promise.allSettled([context, provider?.today(scope.orgSlug)])
     } else if (isReservation) {
-      await Promise.all([useDashboardContext(scope), useDashboardReservation(scope, String(to.params.record_id))])
+      await Promise.all([context, useDashboardReservation(scope, String(to.params.record_id))])
+    } else {
+      await context
     }
     return
   }

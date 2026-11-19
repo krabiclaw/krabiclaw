@@ -468,8 +468,11 @@ async function loadPublicPageSource(
   );
 
   options.signal?.throwIfAborted();
+  const routePagePath = routeSourcePath(page)
+  // Site-wide menu and Reviews have a known route before the page batch runs.
+  const builtInRepresentations = (page === 'menu' || page === 'reviews') && !locationSlug && !blogSlug && !requestedDatasets.has('content')
   const experiences = readPublicExperiences(event, db, orgId, env)
-  const [batchResults, shellExperiences, canonical, sourceCollections] = await Promise.all([
+  const [batchResults, shellExperiences, canonical, sourceCollections, routeRepresentations] = await Promise.all([
     executeBatch(db, batchStmts),
     experiences,
     includeProducts
@@ -486,6 +489,12 @@ async function loadPublicPageSource(
           ]).then(collections => collections.flat())
         : listCollections(db, { organizationId: orgId })
       : [],
+    builtInRepresentations ? listPublicLocaleRepresentations(env, db, {
+      organizationId: orgId,
+      sourcePath: routePagePath ?? '/',
+      publishedLocaleRoute: Boolean(routePagePath),
+      sourceLocale: source,
+    }) : null,
   ])
   options.signal?.throwIfAborted();
 
@@ -513,7 +522,6 @@ async function loadPublicPageSource(
     idxQa >= 0
       ? (batchResults[idxQa] as { results: Record<string, unknown>[] })
       : { results: [] as Record<string, unknown>[] };
-  const routePagePath = routeSourcePath(page)
   // Which paths carry a tenant page document is declared once, per site.
   const site = resolvePublicSite({ themeId: organization.theme_id})
   const locationDocumentPath = locationRow && page === 'location'
@@ -563,7 +571,7 @@ async function loadPublicPageSource(
     contentPagePath ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions) : null,
     // A location or article route names its own representations; a page
     // document route reads them off the document once it has loaded.
-    representationResource || !contentPagePath ? readLocaleRepresentations() : null,
+    routeRepresentations ?? (representationResource || !contentPagePath ? readLocaleRepresentations() : null),
   ])
   // These complete built-in routes may display an optional CMS content overlay.
   // The route remains valid when that optional overlay has no translated page.
