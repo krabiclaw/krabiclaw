@@ -238,7 +238,8 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     // handler (confirmed empirically: request.params arrives as {}). It has
     // to travel outside the validated params object — a request header,
     // which the SDK doesn't touch — instead.
-    const organizationIdHeader = event.req.headers.get("x-krabiclaw-organization-id");
+    const organizationIdHeader = event.req.headers.get("x-blawby-organization-id")
+      ?? event.req.headers.get("x-krabiclaw-organization-id");
     const hasOrganizationIdParam = organizationIdHeader !== null;
     const organizationId = organizationIdHeader?.trim() || null;
     const organizationCtx = organizationId ? await getVisibleOrganizationContext(event, organizationId) : null;
