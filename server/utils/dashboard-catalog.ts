@@ -3,7 +3,7 @@ import { d1JsonArray, queryAll } from '~/server/db'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { getDashboardMemberContext, listDashboardLocations } from '~/server/utils/dashboard-context'
-import { roleAllows, assertRoleAllows, isOrganizationWideRole } from '~/server/utils/member-access'
+import { ASSIGNED_SERVICE_SQL, roleAllows, assertRoleAllows, isOrganizationWideRole } from '~/server/utils/member-access'
 import { listCollections, listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { groupProductsByCollection } from '~/utils/product-presentation'
@@ -47,22 +47,27 @@ export async function loadDashboardCatalog(event: H3Event) {
   if (!manages) await assertRoleAllows({ ...organization, permissions: { products: ['assigned'] } })
   const can_create = await roleAllows({ ...organization, permissions: { products: ['create'] } })
   const scope = { organizationId: organization.id, assignedUserId: manages ? undefined : organization.userId }
-  const [products, collections, locations] = await Promise.all([
-    listOrganizationProducts(db, scope),
+  const query = getQuery(event)
+  const [identities, collections, locations] = await Promise.all([
+    queryAll<{ id: string; kind: Product['kind']; has_location: number; at_location: number; collection_ids: string }>(db, `
+      SELECT p.id, p.kind,
+        EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id) AS has_location,
+        EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ?) AS at_location,
+        (SELECT json_group_array(cp.collection_id) FROM collection_products cp WHERE cp.organization_id = p.organization_id AND cp.product_id = p.id) AS collection_ids
+      FROM products p WHERE p.organization_id = ?${scope.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`,
+    [typeof query.location_id === 'string' ? query.location_id : null, scope.organizationId, ...(scope.assignedUserId ? [scope.assignedUserId] : [])]),
     listCollections(db, scope),
     listDashboardLocations(db, organization.id, scope.assignedUserId, true),
   ])
-  const query = getQuery(event)
   const kind = kinds.find(item => item.value === query.kind)?.value ?? 'all'
   const location = locations.find(item => item.id === query.location_id)
   if (query.location_id !== undefined && !location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-  const scopedProducts = location ? products.filter(product => product.locations.some(binding => binding.location_id === location.id)) : products
+  const products = identities.map(product => ({ ...product, collection_ids: JSON.parse(product.collection_ids) as string[] }))
+  const scopedProducts = location ? products.filter(product => product.at_location) : products
   const scopedCollections = location ? collections.filter(section => section.location_id === null || section.location_id === location.id) : collections
-  const groups = groupProductsByCollection(products, collections)
-  const menu = scopedCollections.filter(section => {
-    const items = groups.find(group => group.id === section.id)?.products ?? []
-    return !items.length || items.some(product => product.kind === 'dish')
-  })
+  const occupiedSections = new Set(products.flatMap(product => product.collection_ids))
+  const dishSections = new Set(products.filter(product => product.kind === 'dish').flatMap(product => product.collection_ids))
+  const menu = scopedCollections.filter(section => !occupiedSections.has(section.id) || dishSections.has(section.id))
   const offers = (value: string) => value === 'menu'
     ? menu.length > 0 || scopedProducts.some(product => product.kind === 'dish')
     : scopedProducts.some(product => product.kind === value)
@@ -93,18 +98,20 @@ export async function loadDashboardCatalog(event: H3Event) {
   if (query.view === 'menu' || query.view === 'section') {
     const locationId = location?.id
     const sections = menu.filter(section => section.location_id === null || section.location_id === locationId)
+    const sectionIds = new Set(sections.map(section => section.id))
     const dishes = products.filter(product => product.kind === 'dish' && (locationId
-      ? product.locations.some(binding => binding.location_id === locationId)
-      : !product.locations.length || product.collections.some(membership => sections.some(section => section.id === membership.collection_id))))
+      ? product.at_location
+      : !product.has_location || product.collection_ids.some(id => sectionIds.has(id))))
     screen.title = location ? `${location.title} menu` : 'Menu'
     screen.empty_title = 'No dishes'
     if (query.view === 'section') {
       const section = sections.find(entry => entry.id === query.section_id)
       if (!section) throw new HTTPError({ statusCode: 404, message: 'Section not found' })
       screen.title = section.name
-      const visible = new Set(dishes.map(dish => dish.id))
-      screen.rows = (groups.find(group => group.id === section.id)?.products ?? [])
-        .filter(dish => visible.has(dish.id)).map(dish => item(dish, locationId))
+      const sectionProducts = await listOrganizationProducts(db, { ...scope,
+        productIds: dishes.filter(dish => dish.collection_ids.includes(section.id)).map(dish => dish.id),
+      })
+      screen.rows = (groupProductsByCollection(sectionProducts, [section])[0]?.products ?? []).map(dish => item(dish, locationId))
       if (wide && section.location_id === (locationId ?? null)) {
         const edit = (native: string, label: string, summary?: string): CatalogRow => ({
           id: native, native, label, summary, query: { section_id: section.id },
@@ -121,6 +128,9 @@ export async function loadDashboardCatalog(event: H3Event) {
         )
       }
     } else {
+      const unsectioned = await listOrganizationProducts(db, { ...scope,
+        productIds: dishes.filter(dish => !dish.collection_ids.some(id => sectionIds.has(id))).map(dish => dish.id),
+      })
       screen.rows = [
         ...(wide && can_create ? [{ id: 'add-section', native: 'add-section', label: 'Add section', query: locationId ? { location_id: locationId } : {} }] : []),
         ...(wide && sections.filter(section => section.location_id === (locationId ?? null)).length > 1
@@ -129,7 +139,7 @@ export async function loadDashboardCatalog(event: H3Event) {
           id: section.id, label: section.name, image: mediaStillUrl(section.image), native: 'section',
           query: { section_id: section.id, ...(section.location_id ? { location_id: section.location_id } : {}) },
         })),
-        ...dishes.filter(dish => !dish.collections.some(membership => sections.some(section => section.id === membership.collection_id))).map(dish => item(dish, locationId)),
+        ...unsectioned.map(dish => item(dish, locationId)),
       ]
     }
   } else {
@@ -138,7 +148,7 @@ export async function loadDashboardCatalog(event: H3Event) {
     })
     if ((kind === 'all' || kind === 'menu') && offers('menu')) {
       const hasSharedMenu = menu.some(section => section.location_id === null)
-        || products.some(product => product.kind === 'dish' && !product.locations.length)
+        || products.some(product => product.kind === 'dish' && !product.has_location)
       const menuLocations = location ? [location] : [...(hasSharedMenu || !locations.length ? [null] : []), ...locations]
       screen.rows.push(...menuLocations.map((place): CatalogRow => {
         const count = menu.filter(section => section.location_id === null || section.location_id === place?.id).length
@@ -151,7 +161,10 @@ export async function loadDashboardCatalog(event: H3Event) {
         }
       }))
     }
-    screen.rows.push(...scopedProducts.filter(product => product.kind !== 'dish' && (kind === 'all' || kind === product.kind)).map(product => item(product, location?.id)))
+    const offerings = await listOrganizationProducts(db, { ...scope,
+      productIds: scopedProducts.filter(product => product.kind !== 'dish' && (kind === 'all' || kind === product.kind)).map(product => product.id),
+    })
+    screen.rows.push(...offerings.map(product => item(product, location?.id)))
   }
   const offeringRows = screen.rows.filter(row => row.native === 'offering' || row.native === 'stay')
   const images = await readMediaPlacements(db, { organizationId: organization.id, ownerType: 'product', ownerIds: offeringRows.map(row => row.id), slot: 'image' })
