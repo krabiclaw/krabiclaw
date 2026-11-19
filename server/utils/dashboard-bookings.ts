@@ -44,9 +44,9 @@ function bookingPatchChangesStay(body: Record<string, unknown>) {
   return Object.keys(body).some(field => field !== 'version' && field !== 'private_notes')
 }
 
-export async function dashboardBookingContext(event: H3Event, action: 'read' | 'update' = 'read', readPatch?: true) {
-  const { env, db, session, userId, membership, organizationFrom } = await dashboardMemberQuery(event)
-  const bookingId = getRouterParam(event, 'booking_id')
+export async function dashboardBookingContext(event: H3Event, action: 'read' | 'update' = 'read', readPatch?: true, record?: { orgSlug: string; bookingId: string }) {
+  const { env, db, session, userId, membership, organizationFrom } = await dashboardMemberQuery(event, record?.orgSlug)
+  const bookingId = record?.bookingId ?? getRouterParam(event, 'booking_id')
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
   const patch = readPatch ? await readRequiredBody<Record<string, unknown>>(event).then(
     body => ({ body }), (error: unknown) => ({ error }),
@@ -80,8 +80,8 @@ export async function dashboardBookingContext(event: H3Event, action: 'read' | '
   return { db, env, session, userId, organization, principal, access, bookingId, booking, patchBody, stayEdit }
 }
 
-export async function dashboardBookingDetails(event: H3Event) {
-  const context = await dashboardBookingContext(event)
+export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug: string; bookingId: string }) {
+  const context = await dashboardBookingContext(event, 'read', undefined, record)
   const { access, db, organization, userId, bookingId, booking } = context
   if (booking.unit === 'slot') {
     return { booking: await loadStaffBookingDetails(context, bookingId), manage: access.manage }

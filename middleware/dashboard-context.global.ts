@@ -20,14 +20,23 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
       return navigateTo({ path: `/dashboard/${preferenceMatch[1]}/website/preferences/${preferenceMatch[2]}${preferenceMatch[3] ?? ''}`, query: to.query, hash: to.hash })
     }
   }
-  if (import.meta.server || !to.path.startsWith('/dashboard/')) return
+  if (!to.path.startsWith('/dashboard/')) return
   const scope = useDashboardRouteScope(to).value
   if (!scope) return
+
+  const isReservation = typeof to.params.record_id === 'string' && !to.params.booking_type
+    && /^dashboard-org_slug-(?:bookings|messages-conversation_id-reservation)(?:-|$)/.test(String(to.name))
+  if (import.meta.server) {
+    if (isReservation) {
+      await Promise.all([useDashboardContext(scope), useDashboardReservation(scope, String(to.params.record_id))])
+    }
+    return
+  }
 
   const context = useDashboardContext(scope)
   // Entering an organization fetches its context afresh rather than showing
   // what an earlier visit loaded; moving within it keeps what is held.
   const entering = useDashboardRouteScope(from).value?.orgSlug !== scope.orgSlug
-  if (entering && context.status.value !== 'pending') await context.refresh()
+  if (entering && !useNuxtApp().isHydrating && context.status.value !== 'pending') await context.refresh()
   else await context
 })

@@ -1040,8 +1040,18 @@ async function deletePayment(paymentId: string) {
 async function changeStay(input: { check_in_date: string; check_out_date: string; adults: number; children: number }) {
   const value = detail.value
   if (!value) throw new Error('The stay is not loaded')
-  await dashboardApi(`${dashboardBookingPath(value.booking_id)}/move`, { method: 'POST', validate: isNightBooking, body: { ...input, version: value.version } })
-  await refreshDetails()
+  const revision = accessChangeRevision
+  const { booking: saved } = await dashboardApi(`${dashboardBookingPath(value.booking_id)}/move`, {
+    method: 'POST', validate: isNightBooking, body: { ...input, version: value.version },
+  })
+  const current = managedStay.value
+  if (accessChangeRevision !== revision || !current || current.booking.booking_id !== saved.booking_id) {
+    throw new Error('Reservation access changed while saving.')
+  }
+  if (current.booking.version <= saved.version) {
+    data.value = { ...current, booking: { ...current.booking, ...saved } }
+    realtime.savedReservation.value = saved
+  }
 }
 
 async function cancelStay() {

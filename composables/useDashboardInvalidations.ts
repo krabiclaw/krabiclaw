@@ -1,10 +1,14 @@
-import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
+import type { StayDetail } from '~/server/domain/stays'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref, type ShallowRef } from 'vue'
 import { isDashboardInvalidation, type DashboardInvalidation } from '~/shared/dashboard-invalidations'
 import type { ConversationPage } from '~/shared/messages-contract'
 
 export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'failed'
 
+type SavedReservation = Omit<StayDetail, 'id'> & { booking_id: string; unit: 'nights' }
+
 export interface DashboardInvalidationConnection {
+  savedReservation: ShallowRef<SavedReservation | null>
   status: Ref<DashboardInvalidationStatus>
   event: Ref<DashboardInvalidation | null>
   /** Last successful reconnect in the current workspace or account scope; reads made before it re-read once. The first open does not count. */
@@ -19,6 +23,7 @@ export interface DashboardInvalidationConnection {
 export interface HeldRead {
   key: string
   value?: unknown
+  pending?: Promise<unknown>
   expiresAt?: number
   /** The events that make the read stale; `value` is what it holds, if anything yet. */
   dropsOn: (event: DashboardInvalidation, value: unknown) => boolean
@@ -41,6 +46,8 @@ function heldReads(status: Readonly<Ref<DashboardInvalidationStatus>>, reads: Ma
   const screen = (key: string) => key.slice(0, key.indexOf(':'))
   return {
     get: (key: string) => live(reads.get(key))?.value,
+    pending: (key: string) => reads.get(key)?.pending,
+    current: (read: HeldRead) => reads.get(read.key) === read,
     take(key: string) {
       const read = live(reads.get(key))
       reads.delete(key)
@@ -76,12 +83,13 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
   const reads = new Map<string, HeldRead>()
   const status = ref<DashboardInvalidationStatus>('closed')
   const held = heldReads(status, reads)
+  const savedReservation = shallowRef<SavedReservation | null>(null)
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
   // with a plain 200. Realtime runs under
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status, event: shallowRef(null), reconnectEpoch: ref(0), accessEnded: ref(0), conversationReads, held, connect: () => {} }
+    return { status, event: shallowRef(null), reconnectEpoch: ref(0), accessEnded: ref(0), savedReservation, conversationReads, held, connect: () => {} }
   }
 
   const event = shallowRef<DashboardInvalidation | null>(null)
@@ -238,12 +246,13 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     if (!stopped && path.value) connect()
   }
 
-  watch(path, resetConnection, { flush: 'sync' })
+  watch(path, () => { savedReservation.value = null; resetConnection() }, { flush: 'sync' })
   watch(status, value => {
     if (value !== 'open') reads.clear()
   }, { flush: 'sync' })
   watch(reader, (next, previous) => {
     reads.clear()
+    savedReservation.value = null
     // Learning the identity of the session already used in the handshake does not change it.
     if (previous !== undefined && next !== undefined && next !== previous) resetConnection()
   }, { flush: 'sync' })
@@ -266,7 +275,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, reconnectEpoch, accessEnded, conversationReads, held, connect }
+  return { status, event, reconnectEpoch, accessEnded, savedReservation, conversationReads, held, connect }
 }
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>, sessionPending: Readonly<Ref<boolean>>): DashboardInvalidationConnection {

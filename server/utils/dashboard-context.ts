@@ -1,3 +1,4 @@
+import { oncePerRequest } from '~/server/utils/request-scope'
 import { timeRequestPhase } from '~/server/utils/request-metrics'
 import { HTTPError } from 'nitro'
 import { getQuery } from 'nitro/h3';
@@ -229,7 +230,7 @@ async function dashboardSessionContext(event: H3Event) {
     throw new HTTPError({ statusCode: 503, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
   }
 
-  const session = await timeRequestPhase(event, 'auth_session', () => getAuthSession(event, env))
+  const session = await oncePerRequest(event, 'dashboard-session', () => timeRequestPhase(event, 'auth_session', () => getAuthSession(event, env)))
   if (!session?.user?.id) {
     throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
   }
@@ -250,9 +251,8 @@ function dashboardOrganizationFrom(row: unknown): DashboardOrganizationRow {
   return { ...joinedMembership({ organization_id, member_id, user_id, role }), id: organization_id, ...organization }
 }
 
-export async function dashboardMemberQuery(event: H3Event) {
+export async function dashboardMemberQuery(event: H3Event, slug = dashboardOrgQueryParam(event)) {
   const context = await dashboardSessionContext(event)
-  const slug = dashboardOrgQueryParam(event)
   if (!slug) throw dashboardOrganizationRequired()
   return { ...context, membership: membershipBySlugQuery(slug, context.userId), organizationFrom: dashboardOrganizationFrom }
 }
