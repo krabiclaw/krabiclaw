@@ -253,8 +253,20 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect([upcoming.title, upcoming.cards.map(card => [card.id, card.headline, card.action.title, card.to])]).toEqual(['You have 1 upcoming consultation',
       [[`booking:${bookingId}`, `${guestFirstName}’s consultation`, 'Say hello to your client', conversationPath]]])
     await memberPage.setViewportSize({ width: 1440, height: 900 })
-    await memberPage.goto(DASHBOARD)
+    const todayReads: string[] = []
+    const watchTodayRead = (request: import('@playwright/test').Request) => {
+      const path = new URL(request.url()).pathname
+      if (path === '/api/dashboard/context' || path === '/api/dashboard/today') todayReads.push(path)
+    }
+    memberPage.on('request', watchTodayRead)
+    const todayDocument = await memberPage.goto(DASHBOARD)
+    expect(todayDocument?.status()).toBe(200)
+    expect(todayDocument?.headers()['cache-control']).toContain('no-store')
+    expect(await todayDocument?.text()).toContain('Nothing needs you today')
+    await waitForNuxtHydration(memberPage)
     await expect(memberPage.getByTestId('today-title')).toHaveText('Nothing needs you today')
+    expect(todayReads).toEqual([])
+    memberPage.off('request', watchTodayRead)
     await memberPage.goto(bookingPath)
     await waitForNuxtHydration(memberPage)
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
