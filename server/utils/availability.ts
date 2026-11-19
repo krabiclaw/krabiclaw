@@ -970,15 +970,19 @@ type StoredConfig = StoredBookingConfig & { product_kind: string; product_on_sal
 type Placement = { product_id: string; location_id: string; active: number; published: number }
 
 /** The statements of one slot read, in the order `slotFacts` reads them. */
-export function slotReadQueries(read: SlotRead): BatchQuery[] {
+export function slotReadQueries(read: Omit<SlotRead, 'fromInstant' | 'toInstant'> & {
+  fromInstant: string | BatchQuery; toInstant: string | BatchQuery
+}): BatchQuery[] {
   const org = read.organization, products = read.products
   const members = {
     query: `SELECT assigned_member_id FROM product_booking_configs WHERE organization_id=${org.query} AND product_id IN (${products.query}) AND scheduling_mode='provider' UNION SELECT ?`,
     params: [...org.params!, ...products.params!, read.prepared?.config.scheduling_mode === 'provider' ? read.prepared.config.assigned_member_id : null],
   }
-  const from = Date.parse(read.fromInstant), to = Date.parse(read.toInstant)
+  const from = typeof read.fromInstant === 'string' ? { query: '?', params: [read.fromInstant] } : read.fromInstant
+  const to = typeof read.toInstant === 'string' ? { query: '?', params: [read.toInstant] } : read.toInstant
   // A provider's commitment that overlaps any slot in the window: slots start inside it and last at most a day.
-  const reach = { from: new Date(from - 86_400_000).toISOString(), to: new Date(to + 86_400_000).toISOString() }
+  const reachFrom = `strftime('%Y-%m-%dT%H:%M:%fZ', ${from.query}, '-1 day')`
+  const reachTo = `strftime('%Y-%m-%dT%H:%M:%fZ', ${to.query}, '+1 day')`
   // A moved weekly or hours session keeps the occurrence key of the time it came from.
   const keyDate = `CASE WHEN s.source_occurrence_key LIKE 'hours:%' THEN substr(s.source_occurrence_key,-24,10) ELSE substr(s.source_occurrence_key,-16,10) END`
   const consuming = `FROM bookings b WHERE b.organization_id=s.organization_id AND b.product_session_id=s.id AND ${CAPACITY_CONSUMING_SQL}`
@@ -995,9 +999,9 @@ export function slotReadQueries(read: SlotRead): BatchQuery[] {
   }, {
     query: `SELECT l.id, l.title, l.timezone, l.status, l.opening_hours, l.special_hours FROM business_locations l
       WHERE l.organization_id=${org.query} AND (l.id IN (SELECT location_id FROM product_locations WHERE organization_id=l.organization_id AND product_id IN (${products.query}))
-        OR l.id IN (SELECT location_id FROM product_sessions WHERE organization_id=l.organization_id AND product_id IN (${products.query}) AND starts_at>=? AND starts_at<?)
+        OR l.id IN (SELECT location_id FROM product_sessions WHERE organization_id=l.organization_id AND product_id IN (${products.query}) AND starts_at>=${from.query} AND starts_at<${to.query})
         OR l.id IS ?)`,
-    params: [...org.params!, ...products.params!, ...products.params!, read.fromInstant, read.toInstant, typeof read.locationId === 'string' ? read.locationId : null],
+    params: [...org.params!, ...products.params!, ...products.params!, ...from.params ?? [], ...to.params ?? [], typeof read.locationId === 'string' ? read.locationId : null],
   }, {
     query: `SELECT id, organization_id, product_id, location_id, timezone, weekday, start_time, capacity FROM product_availability_rules
       WHERE organization_id=${org.query} AND product_id IN (${products.query}) ORDER BY weekday, start_time, id`,
@@ -1013,16 +1017,16 @@ export function slotReadQueries(read: SlotRead): BatchQuery[] {
     query: `SELECT s.*, COALESCE((SELECT SUM(b.party_size) ${consuming}), 0) AS booked, (SELECT COUNT(*) ${consuming}) AS bookings,
         ${historySql('s')} AS has_history
       FROM product_sessions s WHERE s.organization_id=${org.query} AND s.product_id IN (${products.query})
-        AND ((s.starts_at>=? AND s.starts_at<?) OR (s.source_occurrence_key IS NOT NULL AND ${keyDate}>=? AND ${keyDate}<=?))
+        AND ((s.starts_at>=${from.query} AND s.starts_at<${to.query}) OR (s.source_occurrence_key IS NOT NULL AND ${keyDate}>=substr(${reachFrom},1,10) AND ${keyDate}<=substr(${reachTo},1,10)))
       ORDER BY s.starts_at, s.id`,
-    params: [...org.params!, ...products.params!, read.fromInstant, read.toInstant, reach.from.slice(0, 10), reach.to.slice(0, 10)],
+    params: [...org.params!, ...products.params!, ...from.params ?? [], ...to.params ?? [], ...from.params ?? [], ...to.params ?? []],
   }, {
     query: `SELECT config.assigned_member_id AS member_id, occupied.id AS session_id, occupied.starts_at, occupied.ends_at FROM bookings b
         JOIN product_sessions occupied ON occupied.id=b.product_session_id AND occupied.organization_id=b.organization_id
         JOIN product_booking_configs config ON config.product_id=b.product_id AND config.organization_id=b.organization_id AND config.scheduling_mode='provider'
       WHERE b.organization_id=${org.query} AND config.assigned_member_id IN (${members.query}) AND b.status IN ('pending','confirmed')
-        AND occupied.starts_at<? AND occupied.ends_at>?`,
-    params: [...org.params!, ...members.params!, reach.to, reach.from],
+        AND occupied.starts_at<${reachTo} AND occupied.ends_at>${reachFrom}`,
+    params: [...org.params!, ...members.params!, ...to.params ?? [], ...from.params ?? []],
   }]
 }
 
@@ -1374,10 +1378,15 @@ function readSavedBookingOpening(db: DbClient, input: SessionSelector) {
   return queryFirst<SavedBookingOpening>(db, query, params)
 }
 
+export function bookingOpeningInstant(sessionId: string, saved?: SavedBookingOpening): string | null {
+  const starts = saved?.starts_at ?? projectedIdPattern.exec(sessionId)?.[1]
+  return starts && Number.isFinite(Date.parse(starts)) ? starts : null
+}
+
 /** The offered time a session id names, read through the slot reader at that instant. */
 async function openingAt(db: DbClient, env: CloudflareEnv | null, input: SessionSelector, saved: SavedBookingOpening | undefined, now: string, scope: SlotReadScope) {
-  const starts = saved?.starts_at ?? projectedIdPattern.exec(input.sessionId)?.[1]
-  if (!starts || !Number.isFinite(Date.parse(starts))) return null
+  const starts = bookingOpeningInstant(input.sessionId, saved)
+  if (!starts) return null
   const calendar = await readSlotCalendar(db, env, {
     ...input, now, scope, locationId: input.locationId === undefined ? saved?.location_id : input.locationId,
     fromInstant: starts, toInstant: new Date(Date.parse(starts) + 1).toISOString(),

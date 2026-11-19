@@ -1,6 +1,6 @@
 import {transferBookingGuestSeat} from '~/server/domain/conversation-participants'
 import {HTTPError} from 'nitro'
-import {execute,executeBatch,queryAll,queryFirst,type DbClient} from '~/server/db'
+import {execute,executeBatch,queryAll,queryFirst,type BatchQuery,type DbClient} from '~/server/db'
 import {CURRENT_GUEST_SQL} from '~/server/domain/conversations'
 import {loadOwnerPictures} from '~/server/notifications/hero'
 import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityKind,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
@@ -105,12 +105,18 @@ export async function buyerPaymentActivityPath(db:DbClient,userId:string,payment
 }
 /** The linked app booking takes precedence over a checkout for the same conversation. */
 export async function buyerRequestActivityPath(db: DbClient, input: { organizationId: string; conversationId: string; userId?: string }): Promise<string | null> {
-  const params = [input.conversationId, input.organizationId]
+  const { query, params } = buyerRequestActivityQuery(input)
+  return buyerRequestActivityFromRows(await queryAll(db, query, params))
+}
+
+export function buyerRequestActivityQuery(input: { organizationId: string | BatchQuery; conversationId: string; userId?: string }): BatchQuery {
+  const organization = typeof input.organizationId === 'string' ? { query: '?', params: [input.organizationId] } : input.organizationId
+  const params = [input.conversationId, ...organization.params ?? []]
   if (input.userId !== undefined) params.push(input.userId)
-  const rows = await queryAll<{ kind: AccountActivityKind; id: string }>(db, `
+  return { query: `
     WITH owned AS (
       SELECT c.id, c.organization_id, c.user_id, c.booking_id FROM conversations c
-      WHERE c.id = ? AND c.organization_id = ? AND c.kind = 'booking' AND ${CURRENT_GUEST_SQL('c')}
+      WHERE c.id = ? AND c.organization_id = ${organization.query} AND c.kind = 'booking' AND ${CURRENT_GUEST_SQL('c')}
         ${input.userId === undefined ? '' : 'AND c.user_id = ?'}
     ), visit AS (
       SELECT CASE WHEN b.product_session_id IS NULL THEN 'stay' ELSE 'booking' END AS kind, c.id
@@ -131,9 +137,12 @@ export async function buyerRequestActivityPath(db: DbClient, input: { organizati
       AND NOT EXISTS (SELECT 1 FROM conversations other WHERE other.booking_id = b.id AND other.kind = 'booking'
         AND (other.organization_id <> b.organization_id OR other.user_id IS NOT b.user_id))
     LEFT JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking'
-  `, params)
+  `, params }
+}
+
+export function buyerRequestActivityFromRows(rows: unknown[]): string | null {
   if (rows.length > 1) return '/dashboard/account/activity'
-  const activity = rows[0]
+  const activity = rows[0] as { kind: AccountActivityKind; id: string } | undefined
   if (!activity) return null
   return accountActivityPath(activity.kind, activity.id)
 }

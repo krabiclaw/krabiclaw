@@ -3195,8 +3195,8 @@ export async function readPublicStayHome(db: DbClient, organizationId: string, p
   return publicStayHomeFrom(rows!, prices!)
 }
 
-export function publicStayHomeQueries(organizationId: string, productId: string | BatchQuery) {
-  return stayHomeQueries({ query: '?', params: [organizationId] }, productId, { sql: PUBLIC_STAY_SQL, params: [] })
+export function publicStayHomeQueries(organizationId: string | BatchQuery, productId: string | BatchQuery) {
+  return stayHomeQueries(typeof organizationId === 'string' ? { query: '?', params: [organizationId] } : organizationId, productId, { sql: PUBLIC_STAY_SQL, params: [] })
 }
 
 export function publicStayHomeFrom(rows: D1Result, prices: D1Result) {
@@ -3254,7 +3254,7 @@ export async function readPublicStayCalendar(db: DbClient, organizationId: strin
   return read.calendar(await executeBatch(db, read.queries, { operation: 'Read public stay calendar' }))
 }
 
-export function publicStayCalendarRead(organizationId: string, product: BatchQuery, input: { from: unknown; to: unknown }, now: Date) {
+export function publicStayCalendarRead(organizationId: string | BatchQuery, product: BatchQuery, input: { from: unknown; to: unknown }, now: Date) {
   const utcToday = now.toISOString().slice(0, 10)
   // Read the requested nights inside every possible home-local horizon. Once the
   // home supplies its time zone, trim the result to that home's exact horizon.
@@ -3265,7 +3265,7 @@ export function publicStayCalendarRead(organizationId: string, product: BatchQue
   const start = from && from > earliest ? from : earliest
   const departure = to && to < latest ? to : latest
   const queries = from && to && from < to && start <= departure
-    ? homeNightsQueries({ query: '?', params: [organizationId] }, product, start, addDays(departure, 1), false)
+    ? homeNightsQueries(typeof organizationId === 'string' ? { query: '?', params: [organizationId] } : organizationId, product, start, addDays(departure, 1), false)
     : []
   return {
     queries: [...publicStayHomeQueries(organizationId, product), ...queries],

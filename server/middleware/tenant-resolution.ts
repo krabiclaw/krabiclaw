@@ -49,7 +49,15 @@ import { parseDate } from '@internationalized/date'
 import { prepareDashboardEarningsDocument } from '~/server/utils/dashboard-earnings'
 import { PUBLIC_CONFIG_COLUMNS, type PublicConfigRow } from '~/server/utils/organization-config'
 import { publicTenantRedirectQuery, type PublicTenantRedirect } from '~/server/utils/public-redirects'
-import { preparePublicShellRows, type PublicDocumentShell } from '~/server/utils/public-shell-query'
+import { preparePublicTimedQuote, type PublicTimedQuoteRead } from '~/server/domain/product-bookings'
+import { preparePublicProductAvailability, type PublicAvailabilityRead } from '~/server/utils/public-session-booking'
+import { preparePaymentHandoff } from '~/server/domain/payments/intent'
+import { prepareGuestBookingReceipt, type GuestReceiptRead } from '~/server/utils/guest-booking-receipt'
+import { readBearerToken } from '~/server/utils/reservation-cancel-token'
+import { splitLocalePrefix } from '~/utils/tenant-locale-path'
+import { platformLocale } from '~/shared/platform-locales'
+import { publicLocalizationsQuery, type StoredPublicLocalizationRow } from '~/server/utils/public-localization'
+import { preparePublicShellRows, publicDocumentCollectionKind, type PublicDocumentShell } from '~/server/utils/public-shell-query'
 
 interface TenantRow extends Omit<PublicBase['organization'], 'theme_id' | 'name'>, Omit<PublicConfigRow, 'default_currency'> {
   id: string;
@@ -113,7 +121,7 @@ const TENANT_SELECT_SQL = `SELECT ${publicBaseColumns('o')},
 
 function tenantSelectFor(event: H3Event) {
   const path = normalizedPath(event.url.pathname)
-  if (!['GET', 'HEAD'].includes(event.method) || !/^\/(?:[A-Za-z-]+\/)?(?:menu|reviews)$/.test(path)) {
+  if (!['GET', 'HEAD'].includes(event.method) || !/^\/(?:[A-Za-z-]+\/)?(?:menu|reviews|reservations|pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(path)) {
     return { query: TENANT_SELECT_SQL, params: [] }
   }
   const redirect = publicTenantRedirectQuery({ sql: 'o.id' }, path)
@@ -124,29 +132,93 @@ function tenantSelectFor(event: H3Event) {
 async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain: string, selection: string, parameters: string[]) {
   const read = tenantSelectFor(event)
   const host = { query: `${read.query}, ${canonicalDomain} AS canonical_domain ${selection} LIMIT 1`, params: [...read.params, ...parameters] }
-  const path = normalizedPath(event.url.pathname)
-  const includeMenu = path === '/menu'
-  const includeReviews = path === '/reviews'
-  if (event.method !== 'GET' || (!includeMenu && !includeReviews)
-    || event.url.searchParams.has(PREVIEW_TOKEN_QUERY) || getCookie(event, PREVIEW_COOKIE_NAME)) {
+  if (event.method !== 'GET' || event.url.searchParams.has(PREVIEW_TOKEN_QUERY) || getCookie(event, PREVIEW_COOKIE_NAME)) {
     return queryFirst<TenantRow>(db, host.query, host.params)
   }
 
   const authorized = { query: `SELECT o.id ${selection}
     AND o.status = 'active' AND o.onboarding_status = 'active' LIMIT 1`, params: parameters }
+  const tenantScope = { query: `(${authorized.query})`, params: authorized.params }
+  const path = normalizedPath(event.url.pathname)
+  const paymentId = /^\/api\/public\/payments\/([a-f0-9-]+)$/.exec(path)?.[1]
+  const claim = getQuery(event).claim
+  if (paymentId && typeof claim === 'string') {
+    const plan = await preparePaymentHandoff(tenantScope, paymentId, claim)
+    const [hostRows, paymentRows] = await executeBatch(db, [host, plan], { operation: 'Read checkout handoff' })
+    const tenant = hostRows?.results[0] as TenantRow | undefined
+    if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
+      event.context.paymentHandoff = { paymentId, plan, row: paymentRows?.results[0] }
+    }
+    return tenant ?? null
+  }
+  const receiptPath = /^\/api\/public\/booking-requests\/((?:[a-zA-Z0-9_:-]|%3[aA])+)$/.exec(path)?.[1]
+  const token = receiptPath && readBearerToken(event.req.headers.get('authorization'))
+  if (receiptPath && token) {
+    const requestId = decodeURIComponent(receiptPath)
+    const queryLocale = getQuery(event).locale
+    const locale = typeof queryLocale === 'string' ? queryLocale : undefined
+    const plan = await prepareGuestBookingReceipt(tenantScope, requestId, token, locale)
+    const [hostRows, ...rows] = await executeBatch(db, [host, ...plan.queries], { operation: 'Read guest booking receipt' })
+    const tenant = hostRows?.results[0] as TenantRow | undefined
+    if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
+      event.context.guestReceipt = { requestId, locale, plan, rows } satisfies GuestReceiptRead
+    }
+    return tenant ?? null
+  }
+
+  const availabilitySlug = /^\/api\/public\/products\/([a-zA-Z0-9_-]+)\/availability$/.exec(path)?.[1]
+  if (availabilitySlug) {
+    const plan = preparePublicProductAvailability(tenantScope, availabilitySlug, getQuery(event))
+    const [hostRows, ...rows] = await executeBatch(db, [host, ...plan.queries], { operation: 'Read public availability' })
+    const tenant = hostRows?.results[0] as TenantRow | undefined
+    if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
+      event.context.publicAvailability = { slug: availabilitySlug, plan, rows } satisfies PublicAvailabilityRead
+    }
+    return tenant ?? null
+  }
+
+  const quoteSlug = /^\/api\/public\/products\/([a-zA-Z0-9_-]+)\/quote$/.exec(path)?.[1]
+  if (quoteSlug) {
+    const plan = preparePublicTimedQuote(tenantScope, { ...getQuery(event), slug: quoteSlug })
+    const [hostRows, ...rows] = await executeBatch(db, [host, ...plan.queries], { operation: 'Read booking quote terms' })
+    const tenant = hostRows?.results[0] as TenantRow | undefined
+    if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
+      event.context.timedQuote = { slug: quoteSlug, plan, rows } satisfies PublicTimedQuoteRead
+    }
+    return tenant ?? null
+  }
+
+  const routing = splitLocalePrefix(path)
+  const requestedLocale = routing.localeSegment && platformLocale(routing.localeSegment)?.locale
+  const sourcePath = requestedLocale ? routing.sourcePath : path
+  const collectionKind = publicDocumentCollectionKind(sourcePath)
+  const includeReviews = sourcePath === '/reviews'
+  const privateCheckout = /^\/(?:pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(sourcePath)
+  if (!collectionKind && !includeReviews && !privateCheckout) {
+    return queryFirst<TenantRow>(db, host.query, host.params)
+  }
+
   const organization = { sql: '(SELECT id FROM viewer)' }
   const locale = { sql: `(SELECT locale FROM organization_locales WHERE organization_id = ${organization.sql} AND is_source = 1)` }
-  const plan = preparePublicShellRows(organization, locale, { includeMenu, includeReviews, previewMenu: false })
-  const [hostRows, ...results] = await executeBatch(db, [host, ...plan.queries.map(query => withViewer(authorized, query))], {
-    operation: includeMenu ? 'Read the public Menu document' : 'Read the public Reviews document',
+  const plan = preparePublicShellRows(organization, requestedLocale || locale, { collectionKind, includeReviews, previewMenu: false })
+  const localizations = requestedLocale ? [publicLocalizationsQuery(organization, requestedLocale)] : []
+  const [hostRows, ...results] = await executeBatch(db, [
+    host, ...[...plan.queries, ...localizations].map(query => withViewer(authorized, query)),
+  ], {
+    operation: 'Read the public tenant document',
   })
   const tenant = hostRows?.results[0] as TenantRow | undefined
   if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
     const source = JSON.parse(tenant.source_locale_rows) as { locale: string }[]
     if (source.length === 1) {
       event.context.publicDocumentShell = {
-        organizationId: tenant.id, locale: source[0]!.locale, includeMenu, includeReviews, plan, results,
+        organizationId: tenant.id, locale: requestedLocale || source[0]!.locale, collectionKind, includeReviews, plan,
+        results: results.slice(0, plan.queries.length),
       } satisfies PublicDocumentShell
+      if (requestedLocale) event.context.publicDocumentLocalizations = {
+        organizationId: tenant.id, locale: requestedLocale,
+        rows: results[plan.queries.length]!.results as StoredPublicLocalizationRow[],
+      }
     }
   }
   return tenant ?? null
@@ -237,7 +309,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     : null
   const earningsMonths = new Set([new Date().toISOString().slice(0, 7)])
   if (panel === '/earnings/performance' && typeof query.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(query.month)) earningsMonths.add(query.month)
-  const earnings = /^\/earnings(?:\/|$)/.test(panel) ? prepareDashboardEarningsDocument(membership, earningsMonths) : null
+  const earnings = /^\/earnings(?:\/|$)/.test(panel) ? prepareDashboardEarningsDocument(membership, earningsMonths, /^\/earnings\/payouts(?:\/|$)/.test(panel)) : null
   const queries = [
     host, membership,
     ...workspace.queries.map(query => withViewer(membership, query)),

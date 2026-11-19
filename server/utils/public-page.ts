@@ -37,7 +37,7 @@ import {
 import { recordRequestPhase } from "~/server/utils/request-metrics";
 import { isNonProductionHost } from "~/server/utils/tenant-hosts";
 import { loadPublicBase } from "~/server/utils/public-base";
-import { buildPublicShellPayload, publicProductMediaQuery, readPublicShellRows } from "~/server/utils/public-shell-query";
+import { buildPublicShellPayload, publicDocumentCollectionKind, publicProductMediaQuery, readPublicShellRows } from "~/server/utils/public-shell-query";
 import { publicLocationSql } from "~/server/utils/public-locations";
 import { isPublicMenuProduct, isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
@@ -49,6 +49,8 @@ import { siteRendersPageDocumentAt } from '~/shared/tenant-page-paths'
 import { publicTenantLocaleNames, readPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
 import {
   loadExactPublicLocalizations,
+  indexStoredPublicLocalizations,
+  preloadedPublicLocalizations,
   projectExactLocalizedCollection,
   projectExactLocalizedResource,
   projectLocalizedMediaAlt,
@@ -318,7 +320,8 @@ async function loadPublicPageSource(
   const localizedLocale = language.source ? null : language.locale
   let publicLocalizations: ExactPublicLocalization[] = []
   if (localizedLocale) {
-    publicLocalizations = await loadExactPublicLocalizations(env, db, orgId, localizedLocale)
+    const stored = preloadedPublicLocalizations(event, orgId, localizedLocale)
+    publicLocalizations = stored ? indexStoredPublicLocalizations(stored) : await loadExactPublicLocalizations(env, db, orgId, localizedLocale)
   }
 
   const localizedLocationId = localizedLocale && locationSlug
@@ -376,8 +379,9 @@ async function loadPublicPageSource(
   const productKind = page === 'experiences' ? 'experience' : page === 'menu' ? 'dish'
     : page === 'stays' ? 'stay' : page === 'reservations' ? 'table' : undefined
 
-  const sharedMenu = menuCards && !locationSlug
-  if (includeProducts && !sharedMenu) {
+  const sharedCollection = !locationSlug && (menuCards || (page === 'reservations' && includeProducts))
+    ? publicDocumentCollectionKind(`/${page}`) : undefined
+  if (includeProducts && !sharedCollection) {
     const media = publicProductMediaQuery(orgId, productKind, menuCards)
     idxProductMedia = push(media.query, media.params ?? [])
   }
@@ -443,23 +447,23 @@ async function loadPublicPageSource(
   const routePagePath = routeSourcePath(page)
   // Site-wide menu and Reviews have a known route before the page batch runs.
   const builtInRepresentations = (page === 'menu' || page === 'reviews') && !locationSlug && !blogSlug && !requestedDatasets.has('content')
-  const dishes = menuCards && !sharedMenu ? prepareOrganizationDishRead(orgId, !previewMenu) : null
+  const dishes = menuCards && !sharedCollection ? prepareOrganizationDishRead(orgId, !previewMenu) : null
   const dishStart = batchStmts.length
   if (dishes) batchStmts.push(...dishes.queries)
   const menuCollections = dishes && !locationId ? prepareCollectionList({ organizationId: orgId }) : null
   const collectionStart = batchStmts.length
   if (menuCollections) batchStmts.push(...menuCollections.queries)
-  const shellRead = readPublicShellRows(event, db, organization, language.locale, previewRestaurant, needsGlobalReviews || undefined, sharedMenu)
-  const [batchResults, { results: shellResults, indexes: shellIndexes, menu: menuCardsRead, experiences: shellExperiences }, canonical, sourceCollections, routeRepresentations] = await Promise.all([
+  const shellRead = readPublicShellRows(event, db, organization, language.locale, previewRestaurant, needsGlobalReviews || undefined, sharedCollection)
+  const [batchResults, { results: shellResults, indexes: shellIndexes, collection: collectionRead, experiences: shellExperiences }, canonical, sourceCollections, routeRepresentations] = await Promise.all([
     batchStmts.length ? executeBatch(db, batchStmts, { operation: dishes ? 'Read location menu cards' : 'Read public page data' }) : [],
     shellRead,
-    includeProducts && !dishes && !sharedMenu
+    includeProducts && !dishes && !sharedCollection
       ? (productKind === 'experience'
           ? shellRead.then(rows => rows.experiences)
           : listOrganizationProducts(db, { organizationId: orgId, kind: productKind, publishedOnly: !previewMenu, env }))
         .then(products => products.map(publicProduct))
       : [],
-    includeProducts && !menuCollections && !sharedMenu
+    includeProducts && !menuCollections && !sharedCollection
       ? locationId
         ? Promise.all([
             listCollections(db, { organizationId: orgId, locationId: null }),
@@ -510,7 +514,10 @@ async function loadPublicPageSource(
     ? locationDocumentPath
     : page ? site.pageDocuments.recipes[page] ?? null
     : null
+  const publishedPaths = shellResults[shellIndexes.pageLinks!]?.results as { path: string }[] | undefined
   const contentPagePath = requestedDatasets.has('content') ? documentPath : null
+  const missingReservedPage = !isPreviewAuthorized && contentPagePath === '/reservations'
+    && publishedPaths && !publishedPaths.some(entry => entry.path === contentPagePath)
   const tenantPageOptions = {
     locale,
     preview: isPreviewAuthorized,
@@ -548,7 +555,7 @@ async function loadPublicPageSource(
   })
   const sourceShell = buildPublicShellPayload(organization, shellResults, shellIndexes, shellExperiences, { localizations: localizedLocale ? publicLocalizations : undefined })
   const [tenantPage, ownRepresentations] = await Promise.all([
-    contentPagePath ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions) : null,
+    contentPagePath && !missingReservedPage ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions) : null,
     // A location or article route names its own representations; a page
     // document route reads them off the document once it has loaded.
     routeRepresentations ?? (representationResource || !contentPagePath ? readLocaleRepresentations() : null),
@@ -602,11 +609,11 @@ async function loadPublicPageSource(
   })()
 
   let products: PublicProduct[] = []
-  let collections: Collection[] = menuCardsRead?.collections ?? (menuCollections ? menuCollections.read(batchResults.slice(collectionStart)) : sourceCollections)
+  let collections: Collection[] = collectionRead?.collections ?? (menuCollections ? menuCollections.read(batchResults.slice(collectionStart)) : sourceCollections)
   if (includeProducts) {
     const locationCapabilityRows = (shellResults[shellIndexes.locations] as { results: Record<string, unknown>[] })?.results ?? []
     const activeLocationIds = new Set(locationCapabilityRows.map(location => String(location.id)))
-    const productMediaRows = (menuCardsRead?.media ?? batchResults[idxProductMedia]?.results ?? []) as ProductMediaRow[]
+    const productMediaRows = (collectionRead?.media ?? batchResults[idxProductMedia]?.results ?? []) as ProductMediaRow[]
     const mediaByProduct = new Map<string, ProductMediaRow[]>()
     for (const row of productMediaRows) {
       const rows = mediaByProduct.get(row.product_id) ?? []
@@ -617,7 +624,7 @@ async function loadPublicPageSource(
     // reassemble variants, prices and collections from its own SQL — the
     // catalog has one reader and a projection that disagreed with it is
     // exactly the drift this replaces.
-    const selectedProducts = menuCardsRead?.products.map(publicProduct)
+    const selectedProducts = collectionRead?.products.map(publicProduct)
       ?? (dishes ? dishes.read(batchResults.slice(dishStart, collectionStart)).map(publicProduct) : canonical)
     products = selectedProducts.filter(product => product.locations.some(location => (location.published || previewMenu)
       && activeLocationIds.has(location.location_id) && (!locationSlug || location.location_id === locationId))

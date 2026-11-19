@@ -225,8 +225,15 @@ export function readPublicOrganizationLanguage(
   locale: string,
   source: OrganizationLocaleRecord,
 ) {
-  return oncePerRequest(event, `public-language:${organizationId}:${locale}`, () =>
-    assertPublicOrganizationLanguage(db, organizationId, locale, source))
+  return oncePerRequest(event, `public-language:${organizationId}:${locale}`, async () => {
+    const published = publicTenantLocaleNames(event, organizationId)
+    if (!published) return assertPublicOrganizationLanguage(db, organizationId, locale, source)
+    const catalog = platformLocale(assertExactCanonicalLocale(locale))
+    if (!catalog || (locale !== source.locale && !published.includes(locale))) {
+      throw new HTTPError({ statusCode: 404, statusMessage: 'Localized route was not found' })
+    }
+    return { locale, source: locale === source.locale, status: 'published' as const, platform_messages: { ...catalog.messages } }
+  })
 }
 
 function mapLocalization(row: ResourceLocalizationRow): ResourceLocalizationRecord {

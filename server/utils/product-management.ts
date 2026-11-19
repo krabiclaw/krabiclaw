@@ -536,10 +536,10 @@ export function prepareOrganizationDishRead(organizationId: string | { sql: stri
   return preparePublicProductSelection(organizationId, 'dish', publishedOnly)
 }
 
-function preparePublicProductSelection(organizationId: string | { sql: string }, kind: 'dish' | 'experience', publishedOnly: boolean) {
+export function preparePublicProductSelection(organizationId: string | { sql: string }, kind: 'dish' | 'experience' | 'table', publishedOnly: boolean) {
   const { selection, params } = organizationProductSelection({ organizationId, kind, publishedOnly })
   const relationships = productHydrationQueries(organizationId, { query: `SELECT p.id ${selection}`, params }).slice(0, 7)
-  // Dishes and experiences cannot carry stay settings.
+  // These products cannot carry stay settings.
   const queries = [{ query: `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id`, params }, ...relationships]
   return {
     queries, ids: { query: `SELECT p.id ${selection} AND (p.order_url IS NULL OR p.order_url = '')`, params },

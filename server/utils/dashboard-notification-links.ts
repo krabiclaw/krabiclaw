@@ -67,8 +67,12 @@ export function composeBuyerActivityUrl(env: DashboardNotificationLinkEnv, kind:
 /** Omit account management for unowned/imported records; never guess a buyer or visit. */
 export async function buildBuyerRequestActivityUrl(env: DashboardNotificationLinkEnv, db: DbClient, opts: { organizationId: string; threadId: string }): Promise<string | null> {
   const path = await buyerRequestActivityPath(db, { organizationId: opts.organizationId, conversationId: opts.threadId })
-  if (path === accountActivityPath('booking', opts.threadId)) return composeBuyerActivityUrl(env, 'booking', opts.threadId)
-  if (path === accountActivityPath('stay', opts.threadId)) return composeBuyerActivityUrl(env, 'stay', opts.threadId)
+  return buyerRequestActivityUrl(env, path, opts.threadId)
+}
+
+export function buyerRequestActivityUrl(env: DashboardNotificationLinkEnv, path: string | null, threadId: string): string | null {
+  if (path === accountActivityPath('booking', threadId)) return composeBuyerActivityUrl(env, 'booking', threadId)
+  if (path === accountActivityPath('stay', threadId)) return composeBuyerActivityUrl(env, 'stay', threadId)
   return isAccountActivityPath(path) ? new URL(path, platformOrigin(env)).href : null
 }
 

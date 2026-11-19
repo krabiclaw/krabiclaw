@@ -35,18 +35,18 @@ export async function readDashboardPayoutsDocument(event: H3Event, orgSlug: stri
   return timeRequestPhase(event, 'stripe_payouts', () => readStripePayouts(env, organization.id, payout.account, after))
 }
 
-export function prepareDashboardEarningsDocument(membership: BatchQuery, months: ReadonlySet<string>) {
+export function prepareDashboardEarningsDocument(membership: BatchQuery, months: ReadonlySet<string>, includePayouts: boolean) {
   const readsPayments = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ payments: ['read'] }))
   const readsPayouts = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ payments: ['payouts'] }))
   const organization = { sql: `CASE WHEN ${BATCH_VIEWER.organizationWide} = 1 AND ${readsPayments} THEN ${BATCH_VIEWER.organization} END` }
-  const payout = stripeConnectedAccountQuery({
+  const payout = includePayouts ? stripeConnectedAccountQuery({
     sql: `CASE WHEN ${readsPayouts} THEN ${organization.sql} END`,
-  })
+  }) : null
   const reads = [...months].map(month => {
     return { month, ...preparePaymentPerformance(organization, Number(month.slice(0, 4)), month, { sql: readsPayouts }) }
   })
   return {
-    queries: [...reads.flatMap(plan => plan.queries), payout].map(query => withViewer(membership, query)),
+    queries: [...reads.flatMap(plan => plan.queries), ...(payout ? [payout] : [])].map(query => withViewer(membership, query)),
     apply(event: H3Event, rows: D1Result[], organization: { slug: string; id: string }) {
       let offset = 0
       const periods = new Map(reads.map(plan => {
@@ -54,7 +54,7 @@ export function prepareDashboardEarningsDocument(membership: BatchQuery, months:
         offset += plan.queries.length
         return [plan.month, plan.read(values, organization.id)]
       }))
-      event.context.dashboardPayoutAccount = { organizationId: organization.id, account: stripeConnectedAccountFromRow(rows[offset]?.results[0]) }
+      if (payout) event.context.dashboardPayoutAccount = { organizationId: organization.id, account: stripeConnectedAccountFromRow(rows[offset]?.results[0]) }
       event.context.dashboardEarnings = { slug: organization.slug, periods }
     },
   }

@@ -1,7 +1,7 @@
 import { stripeMetadataId } from './stripe-metadata'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
-import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -28,9 +28,19 @@ export function approvedStayBooking(snapshot: Record<string, unknown>): Approved
 
 /** What a guest paid on the site for one booking, net of refunds; null when it was not paid online. */
 export async function paidOnline(db: DbClient, organizationId: string, bookingId: string): Promise<{ amount: number; currency: CurrencyCode } | null> {
-  const rows = await queryAll<{ amount: number; currency: string }>(db, "SELECT SUM(captured_amount - refunded_amount) AS amount, currency FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>0 GROUP BY currency", [organizationId, bookingId])
+  const { query, params } = paidOnlineQuery({ query: '?', params: [organizationId] }, { query: '?', params: [bookingId] })
+  return paidOnlineFromRows(await queryAll(db, query, params))
+}
+
+export function paidOnlineQuery(organization: BatchQuery, booking: BatchQuery): BatchQuery {
+  return { query: `SELECT SUM(captured_amount - refunded_amount) AS amount, currency FROM payments
+    WHERE organization_id=${organization.query} AND subject_type='booking' AND subject_id=${booking.query} AND captured_amount>0 GROUP BY currency`,
+    params: [...organization.params ?? [], ...booking.params ?? []] }
+}
+
+export function paidOnlineFromRows(rows: unknown[]): { amount: number; currency: CurrencyCode } | null {
   if (rows.length > 1) throw new Error('Payments for one booking are in more than one currency')
-  const row = rows[0]
+  const row = rows[0] as { amount: number; currency: string } | undefined
   if (!row) return null
   if (!isCurrencyCode(row.currency)) throw new Error('Paid payment has an unsupported currency')
   return { amount: row.amount, currency: row.currency }

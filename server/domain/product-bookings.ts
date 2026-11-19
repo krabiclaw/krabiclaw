@@ -4,7 +4,7 @@ import { publishEvent } from '~/server/events'
 import { bookingReviewDueAt } from '~/server/utils/review-requests'
 import { publishConversationEvent, scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
-import { bookingSessionFrom, CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, savedBookingOpeningQuery, sessionAllocationPredicate, type SavedBookingOpening } from '~/server/utils/availability'
+import { bookingOpeningInstant, bookingSessionFrom, bookableSessions, slotCalendars, slotReadQueries, CapacityUnavailableError, claimSessionCapacity, paidQuantity, partyPaysOnline, partySizeRefusal, savedBookingOpeningQuery, type ResolvedBookingSession, type SavedBookingOpening } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
@@ -31,7 +31,8 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
 import { checkoutAttemptQuery, createPaymentCheckout, type CheckoutAttempt } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
-import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { prepareOrganizationPlan } from '~/server/utils/billing-access'
+import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { isRecord } from '~/server/utils/type-guards'
 import { createStay, createStayRequest, publicStayHomeFrom, publicStayHomeQueries, publishStayRequest, quoteStayAvailability, stayAccessFor, stayCheckoutPolicy, stayCreationHomeQuery, stayQuoteNightQueries, type StayCreationHome } from '~/server/domain/stays'
 import { LODGING_BOOKING_POLICY_COLUMNS, lodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
@@ -132,9 +133,16 @@ async function timedBookingTerms(db: DbClient, env: CloudflareEnv, input: {
   organizationId: string; productId: string; sessionId: string; requestedVariantId: string
   partySize: number; currency: string; actorId: string; now: string
 }, facts: ReturnType<typeof timedBookingFrom>) {
+  const resolved = await bookingSessionFrom(db, { ...input, env }, facts.opening)
+  return timedBookingPriceTerms(input, facts, resolved)
+}
+
+function timedBookingPriceTerms<T extends Pick<ResolvedBookingSession, 'session' | 'config'>>(
+  input: { requestedVariantId: string; partySize: number; currency: string; now: string },
+  { variants, prices }: ReturnType<typeof timedBookingFrom>,
+  resolved: T,
+) {
   const { requestedVariantId, partySize } = input
-  const { opening, variants, prices } = facts
-  const resolved = await bookingSessionFrom(db, { ...input, env }, opening)
   if (!variants.length) return { failure: creationResult({ error: 'This product has no bookable option' }, { status: 409 }) }
   if (!requestedVariantId && variants.length > 1) return { failure: creationResult({ error: 'Choose an option before booking' }, { status: 400 }) }
   const variant = requestedVariantId ? variants.find(candidate => candidate.id === requestedVariantId) : variants[0]
@@ -155,36 +163,77 @@ function throwQuoteFailure(failure: ReturnType<typeof creationResult>): never {
   throw new HTTPError({ statusCode: failure.status, message: error, data })
 }
 
-/** Read the same terms a timed booking will use, without claiming inventory. */
-export async function quoteTimedBooking(db: DbClient, env: CloudflareEnv, input: {
-  organizationId: string; slug: string; product_session_id?: unknown; product_variant_id?: unknown; party_size?: unknown
-}) {
+type TimedQuoteInput = { slug: string; product_session_id?: unknown; product_variant_id?: unknown; party_size?: unknown }
+
+/** Price the exact same read-only slot snapshot that supplies availability. The write still guards the claim. */
+export function preparePublicTimedQuote(organization: BatchQuery, input: TimedQuoteInput) {
   const selection = readTimedSelection(input)
-  if (selection.failure) throwQuoteFailure(selection.failure)
-  const offeringQuery = bookingOfferingQuery(bookingParameter(input.organizationId), input)
-  const [offering, organization] = await Promise.all([
-    queryFirst<BookingOffering>(db, offeringQuery.query, offeringQuery.params),
-    queryFirst<{ default_currency: string }>(db, "SELECT default_currency FROM organization WHERE id=? AND status='active'", [input.organizationId]),
-  ])
-  if (!offering || offering.unit !== 'slot' || offering.on_sale !== 1 || !organization) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
-  if (offering.order_url) throw new HTTPError({ statusCode: 409, message: 'Book this product on its configured external website.', data: { external_url: offering.order_url } })
-  const now = new Date().toISOString()
-  const facts = await executeBatch(db, timedBookingQueries(bookingParameter(input.organizationId), bookingParameter(offering.id), selection), { operation: 'Read booking quote terms' })
-  const terms = await timedBookingTerms(db, env, { ...selection, organizationId: input.organizationId, productId: offering.id, currency: organization.default_currency, actorId: 'system', now }, timedBookingFrom(facts))
-  if (terms.failure) throwQuoteFailure(terms.failure)
-  const { resolved, config, variant, price, requiresPayment, policy } = terms
-  const allocation = await sessionAllocationPredicate(db, { env, organizationId: input.organizationId, productId: offering.id, sessionId: resolved.session.id, partySize: selection.partySize, now, resolved, preview: true })
-  if (!await queryFirst(db, `SELECT 1 WHERE ${allocation.query}`, allocation.params)) {
-    throw new HTTPError({ statusCode: 409, message: 'This time no longer has capacity for your party', data: { code: 'capacity_unavailable' } })
+  const offering = bookingOfferingQuery(organization, { slug: input.slug })
+  const now = new Date()
+  const billing = prepareOrganizationPlan({ sql: '(SELECT organization_id FROM viewer)' }, now)
+  const viewer: BatchQuery = {
+    query: `SELECT o.id AS organization_id, o.default_currency, p.* FROM organization o CROSS JOIN (${offering.query}) p
+      WHERE o.id = ${organization.query} AND o.status = 'active'`,
+    params: [...offering.params ?? [], ...organization.params ?? []],
   }
-  if (requiresPayment && !await hasOrganizationEntitlement(env, input.organizationId, 'payments')) {
-    throw new HTTPError({ statusCode: 409, message: 'Payments entitlement is required to collect online payment', data: { code: 'payment_required' } })
+  const org = { query: '(SELECT organization_id FROM viewer)', params: [] }
+  const product = { query: "(SELECT id FROM viewer WHERE unit = 'slot')", params: [] }
+  const queries: BatchQuery[] = [viewer]
+  if (!selection.failure) {
+    const terms = timedBookingQueries(org, product, selection)
+    const opening = terms[0]!
+    const starts = { query: `COALESCE((SELECT starts_at FROM (${opening.query})), ?)`,
+      params: [...opening.params ?? [], bookingOpeningInstant(selection.sessionId)] }
+    queries.push(...[billing.query, ...terms, ...slotReadQueries({
+      organization: org, products: { query: `SELECT ${product.query}`, params: [] },
+      fromInstant: starts,
+      toInstant: { query: `strftime('%Y-%m-%dT%H:%M:%fZ', ${starts.query}, '+0.001 seconds')`, params: starts.params },
+      now: now.toISOString(), scope: 'bookable',
+    })].map(query => withViewer(viewer, query)))
   }
-  const { id, location_id, starts_at, ends_at, timezone } = resolved.session
-  return { unit: 'slot' as const, product_id: offering.id, product_variant_id: variant.id, product_session_id: id, party_size: selection.partySize,
-    location_id, starts_at, ends_at, timezone, currency: price.currency, tax_behavior: price.tax_behavior,
-    total_minor: requiresPayment ? price.unit_amount * paidQuantity(config, selection.partySize) : 0, payment_required: requiresPayment, policy }
+  return { queries, read }
+
+  async function read(env: CloudflareEnv, organizationId: string, [offeringRows, subscription, ...rows]: D1Result[]) {
+    const offering = offeringRows?.results[0] as (BookingOffering & { organization_id: string; default_currency: string }) | undefined
+    if (!offering || offering.organization_id !== organizationId) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
+    if (offering.kind === 'stay') return { unit: 'nights' as const, productId: offering.id }
+    if (selection.failure) throwQuoteFailure(selection.failure)
+    if (offering.unit !== 'slot' || offering.on_sale !== 1) throw new HTTPError({ statusCode: 404, message: 'Product not found' })
+    if (offering.order_url) throw new HTTPError({ statusCode: 409, message: 'Book this product on its configured external website.', data: { external_url: offering.order_url } })
+    const facts = timedBookingFrom(rows.slice(0, 3))
+    const starts = bookingOpeningInstant(selection.sessionId, facts.opening)
+    if (!starts) throw new HTTPError({ statusCode: 404, message: 'That session is not open for booking' })
+    const time = now.toISOString()
+    const calendar = slotCalendars(env, { fromInstant: starts, toInstant: new Date(Date.parse(starts) + 1).toISOString(),
+      locationId: facts.opening?.location_id, scope: 'bookable', now: time }, rows.slice(3)).get(offering.id)
+    if (!calendar) throw new HTTPError({ statusCode: 404, message: 'This product does not take bookings' })
+    const opening = bookableSessions(calendar.schedule, (await calendar.places()).sessions, time)
+      .find(session => session.id === selection.sessionId)
+    if (!opening) throw new HTTPError({ statusCode: 409, message: 'That session is no longer offered. Choose an available time.' })
+    const terms = timedBookingPriceTerms({ ...selection, currency: offering.default_currency, now: time }, facts, { config: calendar.schedule.config, session: opening })
+    if (terms.failure) throwQuoteFailure(terms.failure)
+    if (opening.remaining !== null && opening.remaining < selection.partySize) {
+      throw new HTTPError({ statusCode: 409, message: 'This time no longer has capacity for your party', data: { code: 'capacity_unavailable' } })
+    }
+    if (terms.requiresPayment && getPlanEntitlements(billing.read(subscription!, organizationId)).payments !== true) {
+      throw new HTTPError({ statusCode: 409, message: 'Payments entitlement is required to collect online payment', data: { code: 'payment_required' } })
+    }
+    const { id, location_id, starts_at, ends_at, timezone } = opening
+    const { config, variant, price, requiresPayment, policy } = terms
+    return { unit: 'slot' as const, product_id: offering.id, product_variant_id: variant.id, product_session_id: id, party_size: selection.partySize,
+      location_id, starts_at, ends_at, timezone, currency: price.currency, tax_behavior: price.tax_behavior,
+      total_minor: requiresPayment ? price.unit_amount * paidQuantity(config, selection.partySize) : 0, payment_required: requiresPayment, policy }
+  }
 }
+
+export async function quoteTimedBooking(db: DbClient, env: CloudflareEnv, input: TimedQuoteInput & { organizationId: string }) {
+  const plan = preparePublicTimedQuote(bookingParameter(input.organizationId), input)
+  const quote = await plan.read(env, input.organizationId, await executeBatch(db, plan.queries, { operation: 'Read booking quote terms' }))
+  if (quote.unit !== 'slot') throw new HTTPError({ statusCode: 404, message: 'Product not found' })
+  return quote
+}
+
+export type PublicTimedQuoteRead = { slug: string; plan: ReturnType<typeof preparePublicTimedQuote>; rows: D1Result[] }
 
 /** Creation delivery is shared by ordinary claims and authenticated Checkout conversion. */
 export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClient, organizationId: string, requestId: string) {

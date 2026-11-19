@@ -1,4 +1,3 @@
-import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { publicCacheRevision } from '~/server/utils/edge-cache'
 import { HTTPError } from 'nitro';
 import { oncePerRequest } from '~/server/utils/request-scope'
@@ -22,6 +21,8 @@ import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
   indexStoredPublicLocalizations,
   projectExactLocalizedResource,
+  preloadedPublicLocalizations,
+  publicLocalizationsQuery,
   type StoredPublicLocalizationRow,
 } from '~/server/utils/public-localization'
 
@@ -103,12 +104,12 @@ export async function loadPublicShellSource(
     // Only a legal practice books consultations; a venue's site has no schedule page.
     isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) ? getOptionalPublicConsultationSettings(db, organization.id) : null,
     organization.has_compliance === 0 ? null : getPublicCompliance(db, organization.id),
-    locale && locale !== sourceLocale ? queryAll<StoredPublicLocalizationRow>(db, `
-      SELECT resource_type, resource_id, locale, values_json, route_path
-       FROM ${RESOURCE_LOCALIZATIONS_SQL}
-       WHERE organization_id = ? AND locale = ?
-         AND resource_type IN ('organization', 'business_location')
-    `, [organization.id, locale]) : [],
+    locale && locale !== sourceLocale ? resolvedLanguage.then(async () => {
+      const stored = preloadedPublicLocalizations(event, organization.id, locale)
+      if (stored) return stored.filter(row => row.resource_type === 'organization' || row.resource_type === 'business_location')
+      const { query, params } = publicLocalizationsQuery(organization.id, locale, true)
+      return queryAll<StoredPublicLocalizationRow>(db, query, params)
+    }) : [],
   ])
   options.signal?.throwIfAborted()
 

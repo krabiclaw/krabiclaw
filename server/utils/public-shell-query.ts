@@ -7,7 +7,7 @@ import { projectPublicLocation } from '~/shared/location-sharing'
 import { publicLocationPrivacySql, publicReviewLocationProtectedSql } from '~/server/utils/public-location-privacy'
 import { projectExactLocalizedCollection, type ExactPublicLocalization } from '~/server/utils/public-localization'
 import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSection, type PublicShellPayload, type PublicSiteSection } from '~/utils/public-resource-contracts'
-import { prepareCollectionList, prepareOrganizationDishRead, preparePublicExperiences, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
+import { prepareCollectionList, preparePublicProductSelection, preparePublicExperiences, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import type { Product } from '~/server/types/products'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { productSurfaceOf } from '~/utils/product-presentation'
@@ -184,16 +184,16 @@ export function readPublicShellRows(
   locale: string,
   previewMenu: boolean,
   includeReviews = splitLocalePrefix(event.url.pathname).sourcePath.replace(/\/$/, '') === '/reviews',
-  includeMenu = splitLocalePrefix(event.url.pathname).sourcePath.replace(/\/$/, '') === '/menu',
+  collectionKind = publicDocumentCollectionKind(splitLocalePrefix(event.url.pathname).sourcePath.replace(/\/$/, '')),
 ) {
   const organizationId = organization.id
-  return oncePerRequest(event, `public-shell-rows:${organizationId}:${locale}:${previewMenu}:${includeReviews}:${includeMenu}`, async () => {
+  return oncePerRequest(event, `public-shell-rows:${organizationId}:${locale}:${previewMenu}:${includeReviews}:${collectionKind}`, async () => {
     const preloaded = event.context.publicDocumentShell as PublicDocumentShell | undefined
     if (!previewMenu && preloaded?.organizationId === organizationId && preloaded.locale === locale
-      && preloaded.includeReviews === includeReviews && preloaded.includeMenu === includeMenu) {
+      && preloaded.includeReviews === includeReviews && preloaded.collectionKind === collectionKind) {
       return preloaded.plan.read(db, cloudflareEnv(event), organization, preloaded.results)
     }
-    const plan = preparePublicShellRows(organizationId, locale, { previewMenu, includeReviews, includeMenu })
+    const plan = preparePublicShellRows(organizationId, locale, { previewMenu, includeReviews, collectionKind })
     return plan.read(db, cloudflareEnv(event), organization, await executeBatch(db, plan.queries, {
       operation: includeReviews ? 'Read public shell and reviews' : 'Read public shell',
     }))
@@ -204,14 +204,14 @@ export interface PublicDocumentShell {
   organizationId: string
   locale: string
   includeReviews: boolean
-  includeMenu: boolean
+  collectionKind: PublicDocumentCollectionKind | undefined
   plan: ReturnType<typeof preparePublicShellRows>
   results: D1Result[]
 }
 
 export function preparePublicShellRows(
   organizationId: PublicSqlScope, locale: PublicSqlScope,
-  { previewMenu, includeReviews, includeMenu }: { previewMenu: boolean; includeReviews: boolean; includeMenu: boolean },
+  { previewMenu, includeReviews, collectionKind }: { previewMenu: boolean; includeReviews: boolean; collectionKind?: PublicDocumentCollectionKind },
 ) {
   const queries: BatchQuery[] = []
   const indexes = appendPublicShellQueries(queries, organizationId, previewMenu)
@@ -227,17 +227,17 @@ export function preparePublicShellRows(
      ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 50`,
     params: typeof organizationId === 'string' ? [organizationId] : [],
   }) - 1
-  const menu = includeMenu ? preparePublicMenuCardRows(organizationId, previewMenu) : null
+  const collection = collectionKind ? preparePublicCollectionRows(organizationId, collectionKind, previewMenu) : null
   const experiences = preparePublicExperiences(organizationId)
   const shellLength = queries.length
-  const experienceStart = shellLength + (menu?.queries.length ?? 0)
+  const experienceStart = shellLength + (collection?.queries.length ?? 0)
   return {
-    queries: [...queries, ...menu?.queries ?? [], ...experiences.queries],
+    queries: [...queries, ...collection?.queries ?? [], ...experiences.queries],
     async read(db: DbClient, env: CloudflareEnv, organization: PublicBase['organization'], results: D1Result[]) {
       return {
         indexes,
         results: results.slice(0, shellLength),
-        menu: menu?.read(results.slice(shellLength, experienceStart)),
+        collection: collection?.read(results.slice(shellLength, experienceStart)),
         experiences: await experiences.read(results.slice(experienceStart), db, env, organization.id, organization.default_currency),
       }
     },
@@ -257,14 +257,21 @@ export function publicProductMediaQuery(organizationId: PublicSqlScope, kind: st
   }
 }
 
-function preparePublicMenuCardRows(organizationId: PublicSqlScope, preview: boolean) {
-  const dishes = prepareOrganizationDishRead(organizationId, !preview)
+type PublicDocumentCollectionKind = 'dish' | 'table'
+
+export function publicDocumentCollectionKind(path: string): PublicDocumentCollectionKind | undefined {
+  if (path === '/menu') return 'dish'
+  if (path === '/reservations') return 'table'
+}
+
+function preparePublicCollectionRows(organizationId: PublicSqlScope, kind: PublicDocumentCollectionKind, previewMenu: boolean) {
+  const products = preparePublicProductSelection(organizationId, kind, kind !== 'dish' || !previewMenu)
   const sections = prepareCollectionList({ organizationId })
   return {
-    queries: [publicProductMediaQuery(organizationId, 'dish', true), ...dishes.queries, ...sections.queries],
+    queries: [publicProductMediaQuery(organizationId, kind, kind === 'dish'), ...products.queries, ...sections.queries],
     read([media, ...rows]: D1Result[]) {
-      return { media: media!.results, products: dishes.read(rows.slice(0, dishes.queries.length)),
-        collections: sections.read(rows.slice(dishes.queries.length)) }
+      return { media: media!.results, products: products.read(rows.slice(0, products.queries.length)),
+        collections: sections.read(rows.slice(products.queries.length)) }
     },
   }
 }
