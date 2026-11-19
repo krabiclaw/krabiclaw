@@ -1,6 +1,6 @@
 import { jsonResponse } from "~/server/utils/api-response";
 import { finalizeRequestMetrics } from "~/server/utils/request-metrics";
-import { requireBlogAccess } from "~/server/utils/blog-access";
+import { requireWebsiteAccess } from "~/server/utils/tenant-pages-api";
 import { parseBlogLifecycleInput, updateBlogLifecycle } from "~/server/utils/content/publishing";
 import { httpErrorDetails } from "~/server/utils/http-error";
 
@@ -19,7 +19,7 @@ export default defineHandler(async (event) => {
   }
 
   try {
-    const { db, session } = await requireBlogAccess(event, organizationId);
+    const { db, session } = await requireWebsiteAccess(event, organizationId);
     const input = parseBlogLifecycleInput(await readBody(event) as unknown);
     const lifecycle = await updateBlogLifecycle(db, postId, input, organizationId, session.user.id);
 

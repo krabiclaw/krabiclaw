@@ -18,8 +18,8 @@ import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { parseLocationPayload } from '~/server/utils/location-payload'
 import { getProduct, hydrateProductMedia, listCollections, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
-import { requireBlogAccess } from '~/server/utils/blog-access'
-import { getBlogPost, prepareBlogList } from '~/server/utils/content/publishing'
+import { requireWebsiteAccess } from '~/server/utils/tenant-pages-api'
+import { prepareBlogList } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
 import { catalogLabel, catalogSummary, presentationForProduct } from '~/utils/product-presentation'
@@ -203,7 +203,7 @@ export async function loadDashboardBlogPosts(
   organizationId: string,
   input: { status?: string | null; collection?: string | null; limit?: number; cursor?: string },
 ) {
-  const { db } = await requireBlogAccess(event, organizationId)
+  const { db } = await requireWebsiteAccess(event, organizationId)
   const collection = input.collection ?? null
   if (collection !== null && !isArticleCollection(collection)) throw new HTTPError({ statusCode: 400, statusMessage: 'collection must be blog or docs' })
   const resource = { resource: `blog-posts:${organizationId}:${input.status ?? ''}:${collection ?? ''}` }
@@ -211,17 +211,6 @@ export async function loadDashboardBlogPosts(
     ...(input.limit === undefined ? {} : { limit: input.limit }), ...(input.cursor ? { cursor: input.cursor } : {}),
   }, resource), collection)
   return list.read(await executeBatch(db, list.queries, { operation: 'Read blog index' }), resource)
-}
-
-export async function loadDashboardBlogPost(
-  event: H3Event,
-  organizationId: string,
-  postId: string,
-) {
-  const { env, db } = await requireBlogAccess(event, organizationId)
-  const post = await getBlogPost(db, postId, organizationId, env)
-  if (!post) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
-  return { post }
 }
 
 export async function loadDashboardProduct(

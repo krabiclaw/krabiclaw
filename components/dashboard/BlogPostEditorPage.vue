@@ -65,7 +65,7 @@ watchEffect(() => {
 const { data: postResource, error: postError } = await useAsyncData(
   `dashboard-blog-post:${organizationId}:${postId}`,
   () => isNew ? Promise.resolve(null) : dashboardFetch<{ post: BlogPost }>(
-    `/api/editor/organizations/${organizationId}/blog/${postId}`,
+    `/api/editor/organizations/${organizationId}/blog/${encodeURIComponent(postId)}`,
     { orgSlug },
     { validate: isBlogPostResponse },
   ),

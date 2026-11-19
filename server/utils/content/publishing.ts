@@ -4,17 +4,19 @@ import { HTTPError } from 'nitro';
 
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import {
-  attachContentBlockMedia,
+  contentBlockMediaQuery,
+  contentBlocksQuery,
+  contentBlocksWithMedia,
   createContentDocumentWithBlocks,
   formatBlockOutline,
   prepareContentDocumentDeletion,
   getContentBlocksForDocument,
   getContentDocumentById,
-  listBlocksForDocument,
   updateContentDocument,
   type ContentDocumentChanges,
   renderContentBlocksToMarkdown,
   type ContentBlockInput,
+  type ContentBlockRow,
   type ContentDocumentRow,
   documentOfRootSql,
 } from '~/server/utils/content/documents'
@@ -30,8 +32,7 @@ import { normalizeBlogSlug } from '~/utils/blog-editor'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
 import { hasPublicLocationPages, resolvePublicSite } from '~/utils/site-routing'
-import { getConfig } from '~/server/utils/organization-config'
-import { resolveSitePalette } from '~/shared/site-palette'
+import { parseSitePalette, resolveSitePalette } from '~/shared/site-palette'
 import { buildSingleMediaPlacementQueries, hydrateMediaPlacementRefs, insertInitialMediaPlacements } from '~/server/utils/media-asset-manager'
 import { COVER_SELECT, attachCoverMedia, coverJoinSql } from '~/server/utils/content/cover'
 import { attachPageQa } from '~/server/utils/location-qa'
@@ -40,14 +41,14 @@ import { getMediaPlacements } from '~/server/utils/media-placement'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { findAuthUsersByIds, type CloudflareEnv } from '~/server/utils/auth'
 import { assertPublicOrganizationLanguage } from '~/server/utils/localization'
-import { findOrganizationById } from '~/server/utils/member-access'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
-import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
-import { ARTICLE_CATEGORY_SELECT, articleCategoryJoinSql, articleCategoryMembershipQuery, attachArticleCategory, localizeArticleCategories } from '~/server/utils/content/article-categories'
+import { publicTenantVisibilitySql } from '~/server/utils/public-base'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
+import { ARTICLE_CATEGORY_SELECT, articleCategoriesQuery, articleCategoryJoinSql, articleCategoryMembershipQuery, attachArticleCategory, localizeArticleCategories } from '~/server/utils/content/article-categories'
 import { renderContentBlocksForLlm } from '~/server/utils/platform-llm'
 
 const BLOG_TITLE_MAX = 200
@@ -132,21 +133,26 @@ function notFound(message: string): never {
 // Lets every blog/doc tool accept either the row id or its public slug, so a
 // model (or person) holding only a public URL doesn't need a separate
 // list-then-match step before it can get/update/publish/delete a post or doc.
-async function resolvePlatformContentId(
-  db: DbClient,
-  kind: 'article',
-  identifier: string,
-  notFoundMessage: string,
-  organizationId: string,
-): Promise<string> {
-  const byId = await queryFirst<{ id: string }>(db, `SELECT id FROM content_documents WHERE kind = ? AND row_role = 'root' AND organization_id = ? AND id = ? LIMIT 1`, [kind, organizationId, identifier])
-  const bySlug = await queryFirst<{ id: string }>(db, `SELECT id FROM content_documents WHERE kind = ? AND row_role = 'root' AND organization_id = ? AND slug = ? LIMIT 1`, [kind, organizationId, identifier])
-  if (byId && bySlug && byId.id !== bySlug.id) {
-    badRequest('Ambiguous platform content identifier; use the row id.')
+function articleIdentityQuery(identifier: string, organization: string | { sql: string }): BatchQuery {
+  const org = typeof organization === 'string' ? '?' : organization.sql
+  const params = typeof organization === 'string' ? [organization, identifier] : [identifier]
+  const scope = `kind = 'article' AND row_role = 'root' AND organization_id = ${org}`
+  return {
+    query: `SELECT (SELECT id FROM content_documents WHERE ${scope} AND id = ? LIMIT 1) AS by_id,
+      (SELECT id FROM content_documents WHERE ${scope} AND slug = ? LIMIT 1) AS by_slug`,
+    params: [...params, ...params],
   }
-  const row = byId ?? bySlug
-  if (!row) notFound(notFoundMessage)
-  return row.id
+}
+
+type ArticleIdentity = { by_id: string | null; by_slug: string | null }
+function articleId(row: ArticleIdentity) {
+  if (row.by_id && row.by_slug && row.by_id !== row.by_slug) badRequest('Ambiguous platform content identifier; use the row id.')
+  return row.by_id ?? row.by_slug ?? notFound('Post not found')
+}
+
+async function resolvePlatformContentId(db: DbClient, identifier: string, organizationId: string) {
+  const { query, params } = articleIdentityQuery(identifier, organizationId)
+  return articleId((await queryFirst<ArticleIdentity>(db, query, params))!)
 }
 
 function randomSlugSuffix(): string {
@@ -188,7 +194,8 @@ export async function loadOrganizationSite(db: DbClient, organizationId: string)
   return { ...organization, site, isPlatform: site.slug === 'platform' }
 }
 
-type NormalizedEditorBlock = ContentBlockInput & { id: string; placement_media: Array<{ asset_id: string; slot: string }> }
+type BlockPlacement = { asset_id: string; slot: string }
+type NormalizedEditorBlock = ContentBlockInput & { id: string; media: BlockPlacement[] }
 
 export async function assertLocationGridSupported(db: DbClient, organizationId: string, blocks: readonly { type: string }[]) {
   if (blocks.some(block => block?.type === 'location_grid') && !hasPublicLocationPages((await loadOrganizationSite(db, organizationId)).vertical)) {
@@ -200,6 +207,7 @@ async function normalizeEditorContentBlocks(
   db: D1Database,
   blocks: Array<ContentBlockInput & { id?: string }>,
   scope: { organizationId: string },
+  existing?: ReadonlyMap<string, readonly BlockPlacement[]>,
 ): Promise<NormalizedEditorBlock[]> {
   await assertLocationGridSupported(db, scope.organizationId, blocks)
   return await Promise.all(blocks.map(async (block): Promise<NormalizedEditorBlock> => {
@@ -213,17 +221,18 @@ async function normalizeEditorContentBlocks(
       if (!assetId) badRequest(`content_blocks media[${index}].asset_id is required`)
       return { asset_id: assetId, slot: typeof item.slot === 'string' && item.slot.trim() ? item.slot.trim() : block.type === 'gallery' ? 'gallery' : 'media' }
     })
-    await hydrateMediaPlacementRefs(db, {
-      ...scope,
-      refs: placementMedia,
-      allowedKinds: ['image', 'video'],
-      fieldName: `content_blocks.${id}.media`,
-    })
+    const previous = existing?.get(id) ?? []
+    if (placementMedia.length !== previous.length || placementMedia.some((item, index) =>
+      item.asset_id !== previous[index]?.asset_id || item.slot !== previous[index]?.slot)) {
+      await hydrateMediaPlacementRefs(db, {
+        ...scope, refs: placementMedia, allowedKinds: ['image', 'video'], fieldName: `content_blocks.${id}.media`,
+      })
+    }
     // An image block with no image is nothing: it used to be written anyway,
     // and a post that took fifteen such blocks came back fifteen times from
     // the cover join.
     if (block.type === 'image' && !placementMedia.length) badRequest('Image blocks require one media asset')
-    return { ...block, id, data: { ...block.data }, media: placementMedia, placement_media: placementMedia }
+    return { ...block, id, data: { ...block.data }, media: placementMedia }
   }))
 }
 
@@ -232,28 +241,29 @@ async function contentBlockPlacementQueries(
   blocks: NormalizedEditorBlock[],
   scope: { organizationId: string },
   now?: string,
+  existing?: ReadonlyMap<string, readonly BlockPlacement[]>,
 ) {
   if (!blocks.length) return []
-  const existingRows = await queryAll<{ id: string }>(db, `
-    SELECT id FROM content_blocks WHERE id IN (SELECT value FROM json_each(?))
-  `, [d1JsonStringSet(blocks.map(block => block.id))])
-  const existingIds = new Set(existingRows.map(row => row.id))
-  const existingPlacements = await getMediaPlacements(db, {
-    organizationId: scope.organizationId,
-    ownerType: 'content_block',
-    ownerIds: blocks.map(block => block.id),
-  })
+  const placements = existing ?? await readExistingPlacements()
+  async function readExistingPlacements() {
+    const ids = blocks.map(block => block.id)
+    const [saved, media] = await Promise.all([
+      queryAll<{ id: string }>(db, `SELECT id FROM content_blocks WHERE id IN (SELECT value FROM json_each(?))`, [d1JsonStringSet(ids)]),
+      getMediaPlacements(db, { organizationId: scope.organizationId, ownerType: 'content_block', ownerIds: ids }),
+    ])
+    return new Map(saved.map(({ id }) => [id, media.get(id) ?? []]))
+  }
   const queries: BatchQuery[] = []
   for (const block of blocks) {
     const bySlot = new Map<string, Array<{ asset_id: string }>>()
-    for (const item of block.placement_media) {
+    for (const item of block.media) {
       const items = bySlot.get(item.slot) ?? []
       items.push({ asset_id: item.asset_id })
       bySlot.set(item.slot, items)
     }
-    if (existingIds.has(block.id)) {
+    if (placements.has(block.id)) {
       const currentBySlot = new Map<string, string[]>()
-      for (const item of existingPlacements.get(block.id) ?? []) {
+      for (const item of placements.get(block.id) ?? []) {
         const ids = currentBySlot.get(item.slot) ?? []
         ids.push(item.asset_id)
         currentBySlot.set(item.slot, ids)
@@ -356,19 +366,29 @@ async function contentReviewUrls(
   }
 }
 
-async function resolveTenantContext(db: DbClient, organizationId: string, env?: CloudflareEnv): Promise<ContentReviewContext | undefined> {
-  if (!organizationId) return undefined
+const ARTICLE_SITE_COLUMNS = `o.slug AS editor_slug, o.subdomain AS editor_subdomain, o.name AS editor_name,
+  o.theme_id AS editor_theme, json_extract(o.settings_json, '$.config.palette') AS editor_palette,
+  CASE WHEN ${publicTenantVisibilitySql('o', false)} THEN
+    (SELECT d.domain FROM organization_domains d WHERE d.organization_id = o.id AND d.role = 'canonical' AND d.status = 'active')
+  END AS editor_domain`
+
+type ArticleSite = { editor_slug: string; editor_subdomain: string | null; editor_name: string; editor_theme: string | null; editor_palette: string | null; editor_domain: string | null }
+
+function articleSiteContext(site: ArticleSite, env?: CloudflareEnv): ContentReviewContext | undefined {
   if (!env) throw new Error('CloudflareEnv is required to resolve tenant organization context')
-  // The dashboard addresses a site by its subdomain, not by `organization.slug`.
-  const tenant = await queryFirst<{ subdomain: string | null }>(
-    db,
-    'SELECT subdomain FROM organization WHERE id = ? LIMIT 1',
-    [organizationId],
-  )
-  if (!tenant?.subdomain) return undefined
-  const organization = await findOrganizationById(env, organizationId)
-  if (!organization) return undefined
-  return { orgSlug: organization.slug, publicOrigin: await resolvePublicTenantOrigin(db, env, organizationId) }
+  if (!site.editor_subdomain) return undefined
+  return { orgSlug: site.editor_slug, publicOrigin: site.editor_domain ? tenantOrganizationOrigin({
+    platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+    freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+    subdomain: site.editor_subdomain,
+    canonicalDomain: site.editor_domain,
+  }) || null : null }
+}
+
+async function resolveTenantContext(db: DbClient, organizationId: string, env?: CloudflareEnv) {
+  const site = await queryFirst<ArticleSite>(db, `SELECT ${ARTICLE_SITE_COLUMNS} FROM organization o WHERE o.id = ?`, [organizationId])
+  if (!site) return undefined
+  return articleSiteContext(site, env)
 }
 
 function validateBlogCommon(input: Partial<PlatformBlogCreateInput>, operation: 'create' | 'update') {
@@ -538,56 +558,66 @@ export async function listBlogPosts(
   return { posts, page_info: mcpPageInfo(window, page.length, rows.length > window.limit, resource) }
 }
 
+const articleDocumentId = { sql: '(SELECT COALESCE(by_id, by_slug) FROM article_ref WHERE by_id IS NULL OR by_slug IS NULL OR by_id = by_slug)' }
+
+export function blogPostCategoriesQuery(identifier: string, organization: { sql: string }): BatchQuery {
+  const article = articleIdentityQuery(identifier, organization)
+  const categories = articleCategoriesQuery(organization, {
+    sql: `(SELECT COALESCE(json_extract(p.metadata_json, '$.collection'), 'blog') FROM content_documents p WHERE p.id = ${articleDocumentId.sql})`,
+  })
+  return { query: `WITH article_ref AS (${article.query}) ${categories.query}`, params: article.params }
+}
+
+export function prepareBlogPost(identifier: string, organization: string | { sql: string }) {
+  const identity = articleIdentityQuery(identifier, organization)
+  const documentId = articleDocumentId
+  const queries = [
+    identity,
+    ...[
+      { query: `SELECT p.id, p.title, p.slug, p.summary AS excerpt, (p.metadata_json ->> '$.collection') AS collection,
+        ${ARTICLE_CATEGORY_SELECT}, p.status, p.visibility, p.first_published_at, p.seo_keywords, p.sort_order, ${COVER_SELECT},
+        p.organization_id, p.kind, p.row_role, p.root_id, p.locale, p.published_at, p.created_at, p.updated_at, ${ARTICLE_SITE_COLUMNS}
+        FROM content_documents p JOIN organization o ON o.id = p.organization_id
+        ${coverJoinSql('p')} ${articleCategoryJoinSql('p')}
+        WHERE p.id = ${documentId.sql}` },
+      contentBlocksQuery(documentId),
+      contentBlockMediaQuery(documentId),
+    ].map(statement => ({ query: `WITH article_ref AS (${identity.query}) ${statement.query}`, params: identity.params })),
+  ]
+  return { queries, read, snapshot: readBlogSnapshot }
+
+  async function read(rows: D1Result[], env?: CloudflareEnv) {
+    const { article, document, rawBlocks, blocks } = readBlogSnapshot(rows)
+    const { organization_id, kind: _kind, row_role: _rowRole, root_id: _rootId, locale: _locale, editor_slug, editor_subdomain,
+      editor_name, editor_theme, editor_palette, editor_domain, ...post } = article
+    const context = articleSiteContext({ editor_slug, editor_subdomain, editor_name, editor_theme, editor_palette, editor_domain }, env)
+    const surface = resolvePublicSite({ themeId: editor_theme }).slug
+    return {
+      ...await contentReviewUrls(attachArticleCategory(attachCoverMedia(attachPublished(post, Boolean(post.published_at)))),
+        typeof post.slug === 'string' && post.slug ? tenantBlogPostPath(post.slug, articleCollectionOf(post.collection)) : null, String(organization_id), context, env),
+      body: renderContentBlocksToMarkdown(rawBlocks),
+      content_document: { document, blocks },
+      editor_surface: surface,
+      editor_colors: surface === 'platform' ? null : resolveSitePalette(editor_palette == null ? undefined : parseSitePalette(JSON.parse(editor_palette))).light,
+      editor_organization_name: editor_name,
+    }
+  }
+}
+
+function readBlogSnapshot([found, articles, blocks, placements]: D1Result[]) {
+  const id = articleId(found!.results[0] as ArticleIdentity)
+  const article = articles!.results[0] as ApiRecord & ArticleSite | undefined
+  if (!article) return notFound('Post not found')
+  const { organization_id, kind, row_role, root_id, locale, created_at, updated_at } = article
+  const document = { id, organization_id, kind, row_role, root_id, locale, created_at, updated_at } as ContentDocumentRow
+  const rawBlocks = blocks!.results as ContentBlockRow[]
+  return { article, document, rawBlocks,
+    blocks: contentBlocksWithMedia(rawBlocks.map(formatBlockOutline), placements!.results as Parameters<typeof contentBlocksWithMedia>[1]) }
+}
+
 export async function getBlogPost(db: DbClient, postIdOrSlug: string, organizationId: string, env?: CloudflareEnv) {
-  const postId = await resolvePlatformContentId(db, 'article', postIdOrSlug, 'Post not found', organizationId)
-  const post = await queryFirst<ApiRecord | null>(
-    db,
-    `SELECT
-       p.id, p.title, p.slug, p.summary AS excerpt, (p.metadata_json ->> '$.collection') AS collection, ${ARTICLE_CATEGORY_SELECT}, p.status, p.visibility,
-       p.first_published_at,
-       p.seo_keywords, p.sort_order,
-       ${COVER_SELECT},
-       p.organization_id, p.kind, p.row_role, p.root_id, p.locale,
-       p.published_at, p.created_at, p.updated_at
-     FROM content_documents p
-     ${coverJoinSql('p')}
-     ${articleCategoryJoinSql('p')}
-     WHERE p.kind = 'article' AND p.row_role = 'root' AND p.id = ?`,
-    [postId],
-  )
-  if (!post) notFound('Post not found')
-  // The row above IS the article's content document, and the blocks are read
-  // once for both shapes the response needs: the outline the editor renders
-  // and the raw rows the markdown body is built from. This used to re-read the
-  // document and then the blocks a second time.
-  const { organization_id, kind, row_role, root_id, locale, ...postFields } = post
-  const document = {
-    id: String(post.id), organization_id: String(organization_id),
-    kind: String(kind), row_role: String(row_role),
-    root_id: root_id === null || root_id === undefined ? null : String(root_id),
-    locale: String(locale), created_at: String(post.created_at), updated_at: String(post.updated_at),
-  } as ContentDocumentRow
-  const rawBlocks = await listBlocksForDocument(db, document.id)
-  const contentDocument = {
-    document,
-    blocks: await attachContentBlockMedia(db, document.id, rawBlocks.map(formatBlockOutline)),
-  }
-  const slug = typeof postFields.slug === 'string' ? postFields.slug : ''
-  const [context, organization] = await Promise.all([resolveTenantContext(db, organizationId, env), loadOrganizationSite(db, organizationId)])
-  const publicPath = slug ? tenantBlogPostPath(slug, articleCollectionOf(postFields.collection)) : null
-  // The canvas wears the site's light palette, so a draft reads as it will publish.
-  const siteSurface = organization.site.slug
-  const editorColors = siteSurface !== 'platform'
-    ? resolveSitePalette((await getConfig(db, organizationId)).palette).light
-    : null
-  return {
-    ...await contentReviewUrls(attachArticleCategory(attachCoverMedia(attachPublished(postFields, Boolean(postFields.published_at)))), publicPath, organizationId, context, env),
-    body: renderContentBlocksToMarkdown(rawBlocks),
-    content_document: contentDocument,
-    editor_surface: organization.site.slug,
-    editor_colors: editorColors,
-    editor_organization_name: organization.name,
-  }
+  const editor = prepareBlogPost(postIdOrSlug, organizationId)
+  return editor.read(await executeBatch(db, editor.queries, { operation: 'Read an article and its editor' }), env)
 }
 
 async function getPublicOrganizationBlogPost(db: DbClient, organizationId: string, collection: ArticleCollection, slug: string, env: CloudflareEnv, previewAuthorized = false) {
@@ -806,7 +836,7 @@ export async function updateBlogLifecycle(
 ): Promise<PlatformBlogLifecycleState> {
   if (actorId !== null && (typeof actorId !== 'string' || !actorId.trim())) badRequest('actorId must identify the authenticated actor or explicitly be null')
   if (!input.updated_at?.trim()) badRequest('updated_at is required')
-  const sourceId = await resolvePlatformContentId(db, 'article', postIdOrSlug, 'Post not found', organizationId)
+  const sourceId = await resolvePlatformContentId(db, postIdOrSlug, organizationId)
   const source = await queryFirst<{ id: string; status: string; published_at: string | null; updated_at: string }>(db,
     "SELECT id, status, published_at, updated_at FROM content_documents WHERE id = ? AND row_role = 'root' AND kind = 'article'", [sourceId])
   if (!source) notFound('Post not found')
@@ -836,19 +866,18 @@ export async function updateBlogLifecycle(
 
 export async function updateBlogPost(
   db: D1Database, postIdOrSlug: string, input: PlatformBlogUpdateInput,
-  organizationId: string, actorId: string | null, env?: CloudflareEnv,
+  organizationId: string, actorId: string | null, env?: CloudflareEnv, snapshot?: ReturnType<typeof readBlogSnapshot>,
 ) {
   if (actorId !== null && (typeof actorId !== 'string' || !actorId.trim())) badRequest('actorId must identify the authenticated actor or explicitly be null')
   if (!BLOG_UPDATE_MUTATION_FIELDS.some(field => input[field] !== undefined)) badRequest('At least one blog mutation field is required')
-  const postId = await resolvePlatformContentId(db, 'article', postIdOrSlug, 'Post not found', organizationId)
   validateBlogCommon(input, 'update')
-  const current = await queryFirst<{ organization_id: string; collection: string | null; slug: string; updated_at: string;
-    title: string | null; summary: string | null; seo_keywords: string | null; visibility: string; category_id: string | null }>(db, `
-    SELECT organization_id, metadata_json ->> '$.collection' AS collection, slug, updated_at,
-      title, summary, seo_keywords, visibility,
-      (SELECT category_id FROM article_category_articles WHERE article_id = content_documents.id) AS category_id
-    FROM content_documents WHERE id = ? AND kind = 'article' AND row_role = 'root'`, [postId])
-  if (!current) notFound('Post not found')
+  if (!snapshot) {
+    const plan = prepareBlogPost(postIdOrSlug, organizationId)
+    snapshot = plan.snapshot(await executeBatch(db, plan.queries, { operation: 'Read the article being saved' }))
+  }
+  const { article: current, document, rawBlocks, blocks } = snapshot
+  const postId = document.id
+  if (document.organization_id !== organizationId || (postId !== postIdOrSlug && current.slug !== postIdOrSlug)) notFound('Post not found')
   if (input.slug !== undefined && input.slug !== current.slug) badRequest('An article keeps its saved slug')
   if (input.content_blocks !== undefined && !input.updated_at) badRequest('updated_at is required with content_blocks')
   if (input.updated_at !== undefined && input.updated_at !== current.updated_at) {
@@ -860,16 +889,16 @@ export async function updateBlogPost(
   if (effectiveCollection !== articleCollectionOf(current.collection) && input.category_id === undefined) {
     badRequest(`Moving an article to ${effectiveCollection} needs a category_id from ${effectiveCollection}`)
   }
-  const categoryMembership = input.category_id === undefined ? [] : [await articleCategoryMembershipQuery(db, { organizationId, articleId: postId, collection: effectiveCollection, categoryId: input.category_id })]
+  const categoryMembership = input.category_id === undefined || input.category_id === current.category_id ? [] : [await articleCategoryMembershipQuery(db, { organizationId, articleId: postId, collection: effectiveCollection, categoryId: input.category_id })]
   const placementScope = { organizationId }
-  const normalizedBlocks = input.content_blocks === undefined ? undefined : await normalizeEditorContentBlocks(db, input.content_blocks, placementScope)
+  const media = new Map(blocks.map(block => [block.id, block.media]))
+  const normalizedBlocks = input.content_blocks === undefined ? undefined : await normalizeEditorContentBlocks(db, input.content_blocks, placementScope, media)
   const now = new Date().toISOString()
-  const placementQueries = normalizedBlocks === undefined ? [] : await contentBlockPlacementQueries(db, normalizedBlocks, placementScope, now)
+  const placementQueries = normalizedBlocks === undefined ? [] : await contentBlockPlacementQueries(db, normalizedBlocks, placementScope, now, media)
   let blocksChanged = false
   if (normalizedBlocks !== undefined) {
-    const existingBlocks = await listBlocksForDocument(db, postId)
     const [existingHash, requestedHash] = await Promise.all([
-      creationRequestHash(existingBlocks.map(block => ({ id: block.id, source_block_id: block.source_block_id,
+      creationRequestHash(rawBlocks.map(block => ({ id: block.id, source_block_id: block.source_block_id,
         parent_block_id: block.parent_block_id, type: block.type, level: block.level, data: JSON.parse(block.data_json) }))),
       creationRequestHash(normalizedBlocks.map(block => ({ id: block.id, source_block_id: block.source_block_id ?? null,
         parent_block_id: block.parent_block_id ?? null, type: block.type, level: block.level ?? null, data: block.data }))),
@@ -886,7 +915,7 @@ export async function updateBlogPost(
   for (const field of ['seo_keywords', 'visibility'] as const) {
     if (input[field] !== undefined && input[field] !== current[field]) { changes[field] = input[field]; changedFields.push(field) }
   }
-  if (input.excerpt !== undefined && input.excerpt !== current.summary) { changes.summary = input.excerpt; changedFields.push('excerpt') }
+  if (input.excerpt !== undefined && input.excerpt !== current.excerpt) { changes.summary = input.excerpt; changedFields.push('excerpt') }
   if (effectiveCollection !== articleCollectionOf(current.collection)) { metadata.collection = effectiveCollection; changedFields.push('collection') }
   if (input.category_id !== undefined && input.category_id !== current.category_id) changedFields.push('category_id')
   if (blocksChanged) changedFields.push('content_blocks')
@@ -894,8 +923,8 @@ export async function updateBlogPost(
   try {
     if (changed) {
       changes.updated_by = actorId
-      await updateContentDocument(db, postId, {
-        updated_at: input.updated_at ?? current.updated_at, blocks: blocksChanged ? normalizedBlocks : undefined, changes,
+      await updateContentDocument(db, document, {
+        updated_at: input.updated_at ?? document.updated_at, blocks: blocksChanged ? normalizedBlocks : undefined, changes,
         additionalQueriesAfter: [...placementQueries,
           ...(changedFields.includes('category_id') ? categoryMembership : []),
           organizationEventQuery({ organizationId, actorId, eventType: 'article.updated', entityType: 'article', entityId: postId,
@@ -904,7 +933,7 @@ export async function updateBlogPost(
       })
     }
     const post = await getBlogPost(db, postId, organizationId, env)
-    if (!changed && post.updated_at !== current.updated_at) {
+    if (!changed && post.updated_at !== document.updated_at) {
       throw new HTTPError({ statusCode: 409, statusMessage: 'Content document was updated by another writer' })
     }
     // Title and excerpt are drawn on the card, and the blocks hold its leading
@@ -921,7 +950,7 @@ export async function updateBlogPost(
 }
 
 export async function deleteBlogPost(db: D1Database, postIdOrSlug: string, organizationId: string) {
-  const postId = await resolvePlatformContentId(db, 'article', postIdOrSlug, 'Post not found', organizationId)
+  const postId = await resolvePlatformContentId(db, postIdOrSlug, organizationId)
   const document = await getContentDocumentById(db, postId)
   if (!document) notFound('Document not found')
   await executeBatch(db, prepareContentDocumentDeletion({ documentId: document.id,

@@ -9,12 +9,12 @@ import { createPreviewToken, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/ser
 import { roleMatchesSql, workspaceManagementRoles } from '~/utils/organization-access'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
-const managedOrganization = {
+export const websiteEditorOrganization = {
   sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, workspaceManagementRoles)} THEN ${BATCH_VIEWER.organization} END`,
 }
 
 export function prepareTenantPageEditor(variantId: string) {
-  const plan = prepareTenantPageEditorSnapshot(variantId, managedOrganization, true)
+  const plan = prepareTenantPageEditorSnapshot(variantId, websiteEditorOrganization, true)
   return {
     queries: plan.queries,
     async read(rows: D1Result[], organization: DashboardOrganizationRow, env: CloudflareEnv) {
@@ -39,7 +39,7 @@ export function prepareTenantPageEditor(variantId: string) {
   }
 }
 
-export async function requireTenantPageWriteAccess(event: H3Event, organizationId: string, statements: BatchQuery[] = []) {
+export async function requireWebsiteAccess(event: H3Event, organizationId: string, statements: BatchQuery[] = []) {
   const env = cloudflareEnv(event)
   const db = env.DB
   if (!db) throw new HTTPError({ statusCode: 503, message: 'Database unavailable' })
@@ -55,20 +55,20 @@ export async function requireTenantPageWriteAccess(event: H3Event, organizationI
   const organization = dashboardOrganizationFrom(viewer!.results[0])
   if (organization.userId !== session.user.id) throw new Error('Page editor membership does not match the Better Auth session')
   if (!isOrganizationWideRole(organization.role)) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
-  return { env, db, organization, userId: session.user.id, rows }
+  return { env, db, session, organization, userId: session.user.id, rows }
 }
 
 export async function readTenantPageEditor(event: H3Event, organizationId: string, variantId: string) {
   const plan = prepareTenantPageEditor(variantId)
-  const { rows, organization, env } = await requireTenantPageWriteAccess(event, organizationId, plan.queries)
+  const { rows, organization, env } = await requireWebsiteAccess(event, organizationId, plan.queries)
   const result = await plan.read(rows, organization, env)
   if (!result) throw new HTTPError({ statusCode: 404, message: 'Tenant page variant not found' })
   return result
 }
 
 export async function readTenantPageUpdate(event: H3Event, organizationId: string, variantId: string) {
-  const plan = prepareTenantPageEditorSnapshot(variantId, managedOrganization)
-  const context = await requireTenantPageWriteAccess(event, organizationId, plan.queries)
+  const plan = prepareTenantPageEditorSnapshot(variantId, websiteEditorOrganization)
+  const context = await requireWebsiteAccess(event, organizationId, plan.queries)
   const snapshot = plan.read(context.rows)
   if (!snapshot) throw new HTTPError({ statusCode: 404, message: 'Tenant page variant not found' })
   return { ...context, snapshot }

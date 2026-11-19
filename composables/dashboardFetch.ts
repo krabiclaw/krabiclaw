@@ -1,3 +1,4 @@
+import { websiteBlogPost } from '~/utils/dashboard-document'
 import type { FetchOptions } from 'ofetch'
 import type { MaybeRefOrGetter } from 'vue'
 import { $fetch } from 'ofetch'
@@ -91,7 +92,8 @@ export async function dashboardFetch<T>(
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
     || (request === '/api/dashboard/payments' && (options.query?.view === 'performance' || options.query?.view === 'payouts'))
     || (request === '/api/dashboard/settings' && (options.query?.connections === '1' || options.query?.view === 'website'))
-    || /^\/api\/editor\/organizations\/[^/]+\/(?:reviews|blog\/posts|posts|qa|pages\/[^/]+)$/.test(request)
+    || /^\/api\/editor\/organizations\/[^/]+\/(?:reviews|blog\/[^/]+|posts|qa|pages\/[^/]+)$/.test(request)
+      && (!request.endsWith('/blog/categories') || Boolean(websiteBlogPost(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
     || request === '/api/dashboard/integrations/google-calendar'
   )) {
     const provider = useRequestEvent()?.context.dashboardDocumentProvider as {

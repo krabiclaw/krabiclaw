@@ -7,7 +7,12 @@ export function websitePageVariant(panel: string) {
   return segment ? decodeURIComponent(segment) : null
 }
 
+export function websiteBlogPost(panel: string) {
+  const segment = /^\/website\/blog\/([^/]+)(?:\/|$)/.exec(panel)?.[1]
+  return segment && segment !== 'categories' ? decodeURIComponent(segment) : null
+}
+
 export function rendersWebsiteDocument(panel: string, query: Record<string, unknown>) {
-  return Boolean(websitePageVariant(panel)) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
+  return Boolean(websitePageVariant(panel) || websiteBlogPost(panel)) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
     && (!/^\/website\/(?:posts|qa)\/?$/.test(panel) || query.location_id === undefined)
 }

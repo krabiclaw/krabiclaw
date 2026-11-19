@@ -36,16 +36,18 @@ import { readPublicSourceLocale, sourceLocaleQuery } from '~/server/utils/locali
 import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { calendarCoverageQuery } from '~/server/domain/member-scheduling'
 import { calendarConnectionQuery, calendarSettingsFromRows, readCalendarSettingsDocument } from '~/server/utils/google-calendar'
-import { prepareTenantPageEditor } from '~/server/utils/tenant-pages-api'
+import { prepareTenantPageEditor, websiteEditorOrganization } from '~/server/utils/tenant-pages-api'
 import { prepareConnectionSummary, prepareWebsiteSettings } from '~/server/utils/organization-settings'
 import { prepareOrganizationReviews } from '~/server/utils/organization-reviews'
 import { preparePublicLocationDocument } from '~/server/utils/public-route'
 import { isDocumentOnlyPublicPath } from '~/shared/public-locale-routes'
-import { prepareBlogList } from '~/server/utils/content/publishing'
+import { blogPostCategoriesQuery, prepareBlogList, prepareBlogPost } from '~/server/utils/content/publishing'
+import { articleCategoriesQuery, readArticleCategories } from '~/server/utils/content/article-categories'
+import { isArticleCollection } from '~/utils/article-collections'
 import { preparePostList } from '~/server/utils/post-management'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { qaListQuery, qaPageScopesQuery } from '~/server/utils/location-qa'
-import { rendersWebsiteDocument, websitePageVariant } from '~/utils/dashboard-document'
+import { rendersWebsiteDocument, websiteBlogPost, websitePageVariant } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -362,6 +364,11 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   const websiteList = prepareWebsitePanel(managedOrg, websitePanel, query)
   const variantId = websitePageVariant(panel)
   const websiteEditor = variantId && variantId !== 'new' ? prepareTenantPageEditor(variantId) : null
+  const articleId = websiteBlogPost(panel)
+  const article = articleId && articleId !== 'new' ? prepareBlogPost(articleId, websiteEditorOrganization) : null
+  const categories = articleId === 'new'
+    ? articleCategoriesQuery(websiteEditorOrganization, isArticleCollection(query.collection) ? query.collection : 'blog')
+    : articleId && /\/category\/?$/.test(panel) ? blogPostCategoriesQuery(articleId, websiteEditorOrganization) : null
   const catalogRead = { products: ['read'] } as const
   const catalogRoles = [...rolesAllowing({ products: ['read'] }), ...rolesAllowing({ products: ['assigned'] })]
   const catalog = panel === '/products' && query.view !== 'menu' && query.view !== 'section'
@@ -405,6 +412,8 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(website?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(websiteList?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(websiteEditor?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(article?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(categories ? [withViewer(membership, categories)] : []),
   ]
   return { queries, present }
 
@@ -432,12 +441,22 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     }
     if (earnings && panelRows[2]?.results.length) earnings.apply(event, panelRows, organization)
     if (website && (viewer as { organization_wide: number }).organization_wide === 1) {
-      event.context.dashboardWebsite = {
-        settings: website.read(panelRows.slice(0, website.queries.length)),
-        content: websiteEditor
-          ? { endpoint: `pages/${encodeURIComponent(variantId!)}`, value: await websiteEditor.read(panelRows.slice(website.queries.length), organization, env) }
-          : websiteList?.read(panelRows.slice(website.queries.length), organization.id),
+      const content = new Map<string, unknown>()
+      let offset = website.queries.length
+      if (websiteList) {
+        const list = websiteList.read(panelRows.slice(offset, offset + websiteList.queries.length), organization.id)
+        content.set(list.endpoint, list.value)
+        offset += websiteList.queries.length
       }
+      if (websiteEditor) {
+        content.set(`pages/${encodeURIComponent(variantId!)}`, await websiteEditor.read(panelRows.slice(offset), organization, env))
+      }
+      if (article) {
+        content.set(`blog/${encodeURIComponent(articleId!)}`, { post: await article.read(panelRows.slice(offset), env) })
+        offset += article.queries.length
+      }
+      if (categories) content.set('blog/categories', { categories: readArticleCategories(panelRows[offset]!.results) })
+      event.context.dashboardWebsite = { settings: website.read(panelRows.slice(0, website.queries.length)), content }
     }
     setResponseHeader(event, 'cache-control', 'private, no-store')
     await setDashboardSocketScope(event, env, { slug, organizationId: organization.id, sessionId: session.session.id, userId })

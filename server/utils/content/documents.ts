@@ -539,19 +539,22 @@ export function formatBlockOutline(block: ContentBlockRow) {
   }
 }
 
-export async function attachContentBlockMedia(db: DbClient, documentId: string, blocks: ReturnType<typeof formatBlockOutline>[]) {
-  const media = await queryAll<ContentBlockMedia & { owner_id: string }>(
-    db,
-    `SELECT mp.owner_id, mp.asset_id, mp.slot, mp.sort_order,
-            ma.alt_text,
-            ma.public_url, ma.thumbnail_url, ma.kind, ma.width, ma.height
-       FROM media_placements mp
-       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.status = 'active'
-       JOIN content_blocks cb ON cb.id = mp.owner_id
-      WHERE cb.document_id = ? AND mp.owner_type = 'content_block' AND mp.status = 'active'
+export function contentBlockMediaQuery(document: string | { sql: string }): BatchQuery {
+  return {
+    query: `SELECT mp.owner_id, mp.asset_id, mp.slot, mp.sort_order, ma.alt_text,
+        ma.public_url, ma.thumbnail_url, ma.kind, ma.width, ma.height
+      FROM content_blocks cb JOIN content_documents d ON d.id = cb.document_id
+      JOIN media_placements mp ON mp.owner_id = cb.id AND mp.organization_id = d.organization_id
+        AND mp.owner_type = 'content_block' AND mp.status = 'active'
+      JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
+      WHERE cb.document_id = ${typeof document === 'string' ? '?' : document.sql}
       ORDER BY cb.position, mp.slot, mp.sort_order`,
-    [documentId],
-  ) ?? []
+    params: typeof document === 'string' ? [document] : [],
+  }
+}
+
+type ContentBlockPlacementRow = ContentBlockMedia & { owner_id: string }
+export function contentBlocksWithMedia(blocks: ReturnType<typeof formatBlockOutline>[], media: ContentBlockPlacementRow[]) {
   const byBlock = new Map<string, ContentBlockMedia[]>()
   for (const item of media) {
     const items = byBlock.get(item.owner_id) ?? []
@@ -560,6 +563,11 @@ export async function attachContentBlockMedia(db: DbClient, documentId: string, 
     byBlock.set(item.owner_id, items)
   }
   return blocks.map(block => ({ ...block, media: byBlock.get(block.id) ?? [] }))
+}
+
+async function attachContentBlockMedia(db: DbClient, id: string, blocks: ReturnType<typeof formatBlockOutline>[]) {
+  const { query, params } = contentBlockMediaQuery(id)
+  return contentBlocksWithMedia(blocks, await queryAll<ContentBlockPlacementRow>(db, query, params))
 }
 
 export async function getContentOutline(db: DbClient, documentId: string) {

@@ -176,7 +176,8 @@ watch(() => props.initialPost, (loaded) => {
     loadError.value = getErrorMessage(error, 'Failed to load article.')
   }
 }, { immediate: true })
-const { data: categories, error: categoriesError, refresh: refreshCategories } = await useArticleCategories(props.organizationId, () => form.collection)
+const readsCategories = computed(() => newArticle || section.value === 'category')
+const { data: categories, error: categoriesError, refresh: refreshCategories } = await useArticleCategories(props.organizationId, () => form.collection, readsCategories)
 // Category management opens its existing owner in another tab, leaving this
 // unsaved canvas intact. Returning reads any category created there.
 if (newArticle) useEventListener(import.meta.client ? window : undefined, 'focus', () => refreshCategories())
@@ -191,7 +192,7 @@ const categoryOptions = computed(() => {
   return all.map(category => ({ label: trail(category.id).join(' › '), value: category.id }))
 })
 watch(categories, (loaded) => {
-  if (!unconfirmedCreation.value && loaded && form.category_id && !loaded.some(category => category.id === form.category_id)) form.category_id = ''
+  if (readsCategories.value && !unconfirmedCreation.value && loaded && form.category_id && !loaded.some(category => category.id === form.category_id)) form.category_id = ''
 })
 // The canvas wears the site's light palette. Dashboard controls read Nuxt UI
 // tokens, so they are bridged to it while the canvas is active.
@@ -206,7 +207,7 @@ const editorCanvasStyle = computed(() => {
 })
 const resolvedExcerpt = computed(() => generatedExcerpt(blocks.value))
 const settingsActions = computed(() => [
-  { label: `Category · ${categories.value?.find(category => category.id === form.category_id)?.name ?? 'Not set'}`, icon: 'i-lucide-folder', to: `${postPath.value}/category` },
+  { label: `Category · ${post.value?.category?.name ?? 'Not set'}`, icon: 'i-lucide-folder', to: `${postPath.value}/category` },
   { label: 'Excerpt', icon: 'i-lucide-text', to: `${postPath.value}/excerpt` },
   { label: `Visibility · ${post.value?.status === 'published' ? form.visibility === 'listed' ? 'Published' : 'Unlisted' : 'Draft'}`, icon: 'i-lucide-eye', to: `${postPath.value}/publishing` },
 ])

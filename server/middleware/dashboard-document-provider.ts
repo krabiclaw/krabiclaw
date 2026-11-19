@@ -19,7 +19,7 @@ export default defineHandler(event => {
     read: (orgSlug: string, resource: string, query: Record<string, unknown>) => {
       const key = JSON.stringify(Object.entries(query).sort(([left], [right]) => left.localeCompare(right)))
       return oncePerRequest(event, `dashboard-document:${orgSlug}:${resource}:${key}`, async () => {
-        const website = event.context.dashboardWebsite as { settings: unknown; content?: { endpoint: string; value: unknown } } | undefined
+        const website = event.context.dashboardWebsite as { settings: unknown; content: Map<string, unknown> } | undefined
         switch (resource) {
           case '/api/dashboard/agenda':
             return readDashboardAgenda(event, query, orgSlug)
@@ -45,11 +45,10 @@ export default defineHandler(event => {
           default:
             if (resource.startsWith('/api/editor/')) {
               const { organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
-              const content = website?.content
-              if (!content?.value || resource !== `/api/editor/organizations/${organization.id}/${content.endpoint}`) {
-                throw new HTTPError({ statusCode: 404, message: 'Website content was not read for this document' })
-              }
-              return content.value
+              const prefix = `/api/editor/organizations/${organization.id}/`
+              const content = resource.startsWith(prefix) ? website?.content.get(resource.slice(prefix.length)) : null
+              if (!content) throw new HTTPError({ statusCode: 404, message: 'Website content was not read for this document' })
+              return content
             }
             throw new HTTPError({ statusCode: 500, message: 'Dashboard document resource is unavailable' })
         }
