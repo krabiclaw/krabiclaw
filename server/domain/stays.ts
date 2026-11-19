@@ -6,7 +6,7 @@ import { bookChannelConversationGuest, reconcileGuestListingParticipants } from 
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
 import { CURRENT_GUEST_SQL, messageQueries, readGuestConversation } from '~/server/domain/conversations'
-import { readTurnoverHomes, TURNOVER_HOME_FROM, turnoverHomeColumns, turnoverTaskQueries, type TurnoverHome } from '~/server/domain/tasks'
+import { mergedHomeTurnovers, readTurnoverHomes, TURNOVER_HOME_FROM, turnoverHomeColumns, turnoverTaskQueries, type TurnoverHome } from '~/server/domain/tasks'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { validateFormAnswers } from '~/server/domain/form-questions'
@@ -2105,6 +2105,7 @@ export async function mergeStayHomeQueries(db: DbClient, access: StayAccess, sou
   if (source.timezone !== target.timezone) fail(409, 'HOME_TIMEZONE_MISMATCH', 'The homes must use the same time zone before merging.', 'product_id')
   const claims = await queryAll<{ booking_id: string; date: string }>(db, 'SELECT booking_id, date FROM stay_nights WHERE organization_id = ? AND product_id = ? ORDER BY booking_id, date', [org, sourceId])
   const json = JSON.stringify(claims)
+  const turnover = await mergedHomeTurnovers(db, org, sourceId, target.product_id, homeToday(target.timezone, new Date(now)), now)
   const selected = 'SELECT id FROM bookings WHERE organization_id = ? AND product_id = ?'
   return [
     assertBookingBatchWrite({
@@ -2158,6 +2159,7 @@ export async function mergeStayHomeQueries(db: DbClient, access: StayAccess, sou
         SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.booking_id') FROM json_each(?)`,
       params: [org, target.product_id, json],
     },
+    turnover,
     { query: 'UPDATE product_publications SET published = 0, updated_at = ? WHERE organization_id = ? AND product_id = ?', params: [now, org, sourceId] },
     { query: 'UPDATE products SET active = 0, updated_at = ? WHERE organization_id = ? AND id = ?', params: [now, org, sourceId] },
     ...reconcileGuestListingParticipants(org, { query: 'c.location_id = ?', params: [target.location_id] }),

@@ -187,6 +187,34 @@ export function readTurnoverHomes(db: DbClient, change: TurnoverChange): Promise
     WHERE c.organization_id = ?`, [JSON.stringify(anchors), change.organizationId])
 }
 
+function turnoverTimes(home: TurnoverHome, checkout: string, next: string | null) {
+  const startsAt = home.check_out_time === null ? null : localDateTimeToInstant(checkout, home.check_out_time, home.timezone, 'compatible').toISOString()
+  const arrival = next === null || home.check_in_time === null ? null : localDateTimeToInstant(next, home.check_in_time, home.timezone, 'compatible').toISOString()
+  return { startsAt, dueAt: arrival !== null && startsAt !== null && arrival < startsAt ? startsAt : arrival }
+}
+
+/** After a home merge, every open turnover uses the surviving home's hours and combined bookings. */
+export async function mergedHomeTurnovers(db: DbClient, organizationId: string, sourceId: string, targetId: string, today: string, now: string): Promise<BatchQuery> {
+  const homes = await readTurnoverHomes(db, {
+    organizationId, before: { product_id: sourceId, check_in_date: today }, after: { product_id: targetId, check_in_date: today },
+  })
+  const target = homes.find(home => home.product_id === targetId)
+  if (!target) throw new Error(`Home ${targetId} has no stay settings`)
+  const stays = homes.flatMap(home => (JSON.parse(home.turnover_neighbours) as StoredStay[]).map(stayWindowOf))
+  const times = stays.map(stay => {
+    const { startsAt, dueAt } = turnoverTimes(target, stay.check_out_date, nextTurnoverArrival(stay, stays)?.check_in_date ?? null)
+    return { id: stay.id, starts_at: startsAt, due_at: dueAt }
+  })
+  return {
+    query: `UPDATE tasks SET starts_at = json_extract(window.value, '$.starts_at'),
+        due_at = json_extract(window.value, '$.due_at'), updated_at = ?, version = tasks.version + 1
+      FROM json_each(?) window WHERE tasks.organization_id = ? AND tasks.product_id = ? AND tasks.kind = 'turnover'
+        AND tasks.status = 'open' AND tasks.subject_id = json_extract(window.value, '$.id')
+        AND (tasks.starts_at IS NOT json_extract(window.value, '$.starts_at') OR tasks.due_at IS NOT json_extract(window.value, '$.due_at'))`,
+    params: [now, JSON.stringify(times), organizationId, targetId],
+  }
+}
+
 /**
  * The turnover tasks one stay write changes: the stay's own (opened when it is
  * confirmed and checks out today or later, moved with it, cancelled with it),
@@ -218,9 +246,7 @@ export function turnoverTaskQueries(input: TurnoverChange & { after: StayWindow;
     }
   }
   for (const { stay, home, next } of windows.values()) {
-    const startsAt = home.check_out_time === null ? null : localDateTimeToInstant(stay.check_out_date, home.check_out_time, home.timezone, 'compatible').toISOString()
-    const arrival = next === null || home.check_in_time === null ? null : localDateTimeToInstant(next, home.check_in_time, home.timezone, 'compatible').toISOString()
-    const dueAt = arrival !== null && startsAt !== null && arrival < startsAt ? startsAt : arrival
+    const { startsAt, dueAt } = turnoverTimes(home, stay.check_out_date, next)
     const key = `turnover:${stay.id}`
     queries.push({
       query: `UPDATE tasks SET product_id = ?, location_id = ?, timezone = ?, starts_at = ?, due_at = ?,
