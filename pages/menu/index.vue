@@ -1,20 +1,18 @@
 <template>
-  <ProductCollectionPage :products="goods" :collections="collections" :locations="productLocations" :currency="currency" :presentation="presentation" :vertical="vertical" :title="`${brandName} Menu`" :brand-name="brandName" />
+  <ProductCollectionPage :products="products" :collections="collections" :locations="productLocations" :currency="currency" :presentation="presentation" :vertical="vertical" :title="`${brandName} Menu`" :brand-name="brandName" />
 </template>
 
 <script setup lang="ts">
 import ProductCollectionPage from '~/components/products/ProductCollectionPage.vue'
+import { isPublicMenuProduct } from '~/utils/public-resource-contracts'
 import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface } from '~/utils/product-presentation'
 
 definePageMeta({ layout: 'tenant' })
 const { social_image: organizationSocialImage } = useTenantOrganization().organization
-const { products, collections, locations, config, organization, sections } = await usePublicPageData({ lazy: false })
+const { products, collections, locations, config, organization, sections } = await usePublicPageData({ datasets: ['menu_cards'], validateProduct: isPublicMenuProduct })
 // A section with nothing on it is not a page; the navigation hides it by the same flag.
 if (sections.value?.menu === false) throw createError({ statusCode: 404 })
-// What the merchant sells over the counter. Anything a guest books a seat on
-// is an Experience and has its own surface, so it is not listed twice.
-const goods = computed(() => products.value.filter(product => product.kind === 'dish'))
 const vertical = String(organization.value?.vertical ?? '')
 const presentation = presentationForSurface(vertical, 'menu')
 if (presentation.locationCollectionSegment !== 'menu') throw createError({ statusCode: 404 })

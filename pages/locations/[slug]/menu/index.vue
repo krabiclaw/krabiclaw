@@ -1,17 +1,15 @@
 <template>
-  <ProductCollectionPage :products="goods" :collections="collections" :locations="productLocations" :location-id="locationId" :currency="currency" :presentation="presentation" :vertical="vertical" :title="`${locationTitle} Menu`" :brand-name="brandName" />
+  <ProductCollectionPage :products="products" :collections="collections" :locations="productLocations" :location-id="locationId" :currency="currency" :presentation="presentation" :vertical="vertical" :title="`${locationTitle} Menu`" :brand-name="brandName" />
 </template>
 
 <script setup lang="ts">
 import ProductCollectionPage from '~/components/products/ProductCollectionPage.vue'
+import { isPublicMenuProduct } from '~/utils/public-resource-contracts'
 import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface } from '~/utils/product-presentation'
 
 definePageMeta({ layout: 'tenant' })
-const { products, collections, locations, location, config, organization } = await usePublicPageData({ lazy: false })
-// What the merchant sells over the counter. Anything a guest books a seat on
-// is an Experience and has its own surface, so it is not listed twice.
-const goods = computed(() => products.value.filter(product => product.kind === 'dish'))
+const { products, collections, locations, location, config, organization } = await usePublicPageData({ datasets: ['location', 'menu_cards'], validateProduct: isPublicMenuProduct })
 const currentLocation = location.value
 if (!currentLocation) throw createError({ statusCode: 404 })
 // A section with nothing on it is not a page; the navigation hides it by the same flag.

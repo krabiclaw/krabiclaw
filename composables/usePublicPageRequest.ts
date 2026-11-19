@@ -13,6 +13,7 @@ export type PublicPageDataset =
   | 'content'
   | 'location'
   | 'products'
+  | 'menu_cards'
   | 'reviews'
   | 'photos'
   | 'qa'

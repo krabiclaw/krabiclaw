@@ -48,8 +48,9 @@ const throwPublicPageError = (error: unknown): never => {
   throw createError({ statusCode, statusMessage, fatal: import.meta.client, cause: error })
 }
 
-export const usePublicPageData = async (options: {
+export const usePublicPageData = async <T = Product>(options: {
   datasets?: readonly PublicPageDataset[]
+  validateProduct?: (value: unknown) => value is T
   server?: boolean
   lazy?: boolean
   routeOwned?: boolean
@@ -69,11 +70,11 @@ export const usePublicPageData = async (options: {
     && options.server === false
     && options.lazy === true;
 
-  const asyncData = useAsyncData<PublicPagePayload>(
+  const asyncData = useAsyncData<PublicPagePayload<T>>(
           key,
           (_nuxtApp, { signal }) => {
             const currentParams = requestedParams.value
-            return loadPublicResourcePayload<PublicPagePayload>({
+            return loadPublicResourcePayload<PublicPagePayload<T>>({
               organizationId,
               resourceKind: 'page',
               url: url.value,
@@ -85,8 +86,10 @@ export const usePublicPageData = async (options: {
                 blogSlug: currentParams.blogSlug ?? undefined,
                 locale: currentParams.locale ?? undefined,
               },
-              validate: (value): value is PublicPagePayload =>
-                isPublicPagePayload(value, currentParams.page ?? 'home'),
+              validate: (value): value is PublicPagePayload<T> =>
+                options.validateProduct
+                  ? isPublicPagePayload(value, currentParams.page ?? 'home', options.validateProduct)
+                  : isPublicPagePayload(value, currentParams.page ?? 'home'),
               failureMessage: 'Public page failed',
               signal,
               requestEvent,
@@ -122,31 +125,6 @@ export const usePublicPageData = async (options: {
   }))
   const products = computed(() => data.value?.products ?? []);
   const collections = computed(() => data.value?.collections ?? []);
-  /**
-   * Products grouped by the collections they belong to, in the merchant's
-   * order. A product in two collections appears in both — that is what
-   * membership means — and one in none appears in neither, rather than being
-   * swept into a bucket nobody created.
-   */
-  const productsByCollection = computed(() => {
-    const positions = new Map<string, Map<string, number>>();
-    for (const product of products.value) {
-      for (const membership of product.collections) {
-        const forCollection = positions.get(membership.collection_id) ?? new Map<string, number>();
-        forCollection.set(product.id, membership.sort_order);
-        positions.set(membership.collection_id, forCollection);
-      }
-    }
-    return collections.value.reduce<Record<string, Product[]>>((groups, collection) => {
-      const forCollection = positions.get(collection.id);
-      if (!forCollection) return groups;
-      groups[collection.name] = products.value
-        .filter(product => forCollection.has(product.id))
-        .sort((left, right) => (forCollection.get(left.id)! - forCollection.get(right.id)!) || left.name.localeCompare(right.name));
-      return groups;
-    }, {});
-  });
-
   // ── Single location (for /locations/[slug]/* pages) ───────
   const location = computed(() => {
     if (!requestedParams.value.location) return null;
@@ -261,7 +239,6 @@ export const usePublicPageData = async (options: {
     getHero,
     contentMap,
     products,
-    productsByCollection,
     collections,
     error,
     locale_representations,

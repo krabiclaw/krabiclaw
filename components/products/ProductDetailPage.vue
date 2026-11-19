@@ -693,7 +693,7 @@ const enquiryPath = computed(() => `${localePath('/contact')}?about=${encodeURIC
 const compareAtLabel = computed(() => {
   const price = offer.value
   if (!price || price.compare_at_unit_amount === null) return null
-  return formatProductMoney({ ...price, unit_amount: price.compare_at_unit_amount, compare_at_unit_amount: null })
+  return formatProductMoney({ currency: price.currency, unit_amount: price.compare_at_unit_amount })
 })
 
 /**
