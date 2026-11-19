@@ -62,10 +62,11 @@ const { fontPreset, paletteStyle } = usePublicSiteBrand()
 // ── Universal Shell State ─────────────────────────────────────
 const shell = useOrganizationShellState()
 if (import.meta.server) {
-  const request = usePublicPageRequest().value
-  if (!request.location && request.page === 'menu') {
+  const sourcePath = (activeLocale.value !== 'en' && route.path.startsWith(`/${activeLocale.value}/`)
+    ? route.path.slice(activeLocale.value.length + 1) : route.path).replace(/\/$/, '')
+  if (sourcePath === '/menu') {
     await Promise.all([shell.ready, usePublicPageData({ datasets: ['menu_cards'], validateProduct: isPublicMenuProduct })])
-  } else if (!request.location && request.page === 'reviews') {
+  } else if (sourcePath === '/reviews') {
     await Promise.all([shell.ready, usePublicPageData()])
   } else {
     await shell.ready

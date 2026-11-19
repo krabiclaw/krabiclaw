@@ -40,7 +40,7 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
     } else if (/^\/dashboard\/[^/]+\/earnings(?:\/performance)?\/?$/.test(to.path)) {
       const current = new Date().toISOString().slice(0, 7)
       const selected = typeof to.query.month === 'string' && /^\d{4}-\d{2}$/.test(to.query.month) ? to.query.month : current
-      const months = new Set(to.path.endsWith('/performance') ? [current, selected] : [current])
+      const months = new Set(/\/performance\/?$/.test(to.path) ? [current, selected] : [current])
       await Promise.allSettled([context, ...Array.from(months, month =>
         provider?.read(scope.orgSlug, '/api/dashboard/payments', { view: 'performance', year: Number(month.slice(0, 4)), month }))])
     } else if (/^\/dashboard\/[^/]+\/integrations(?:\/google-calendar)?\/?$/.test(to.path)) {
