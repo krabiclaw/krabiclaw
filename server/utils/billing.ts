@@ -6,9 +6,10 @@ import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
-import { BASIC_HOMES, BILLING_METER_KEYS, BILLING_METERS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
+import { BASIC_HOMES, BILLING_METER_KEYS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
+import { stripeMeterTransition, reportStripeMeterUsage } from '~/server/utils/stripe-meter-usage'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { planSubscriptionItem, readStripeCatalog, recurringPriceAmount, selectMeteredPrices } from '~/server/utils/stripe-catalog'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
@@ -197,10 +198,11 @@ export async function reportBillingUsage(env: CloudflareEnv, db: DbClient, organ
     if (subscription.stripeCustomerId !== organization.customer) throw new Error(`Subscription ${subscription.id} does not belong to its organization's Stripe customer`)
     const stripe = getStripe(env)
     const homes = await countActiveHomes(db, organizationId)
-    await stripe.billing.meterEvents.create({
-      event_name: BILLING_METERS.homes.eventName,
-      payload: { stripe_customer_id: subscription.stripeCustomerId, value: String(homes) },
-    })
+    const contract = env.STRIPE_BILLING_METER_MIGRATION === 'true' && subscription.stripeSubscriptionId
+      ? await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId)
+      : undefined
+    if (contract && contract.customer !== subscription.stripeCustomerId) throw new Error('The Stripe subscription belongs to a different customer')
+    await reportStripeMeterUsage(stripe, 'homes', subscription.stripeCustomerId, homes, stripeMeterTransition(contract))
   } catch (cause) {
     if (!context?.committed) throw cause
     const reason = cause instanceof Error ? cause.message : String(cause)
