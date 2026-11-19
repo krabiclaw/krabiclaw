@@ -162,7 +162,7 @@ dead_letter_queue = "blawby-airbnb-sync-dlq"
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
-bucket_name = "krabiclaw-media"
+bucket_name = "blawby-media"
 remote = false
 
 [[kv_namespaces]]
@@ -246,7 +246,7 @@ queue = "blawby-airbnb-sync-local"
 
 [[env.dev.r2_buckets]]
 binding = "MEDIA_BUCKET"
-bucket_name = "krabiclaw-media"
+bucket_name = "blawby-media"
 remote = false
 
 [[env.dev.kv_namespaces]]
@@ -463,7 +463,7 @@ max_concurrency = 1
 
 [[env.e2e.r2_buckets]]
 binding = "MEDIA_BUCKET"
-bucket_name = "krabiclaw-media"
+bucket_name = "blawby-media"
 remote = false
 
 [[env.e2e.kv_namespaces]]
