@@ -52,6 +52,20 @@ test.describe('Plan and billing', () => {
     await loginAs(page.request, baseURL!)
   })
 
+  test('a cold Google Calendar connection renders one panel at desktop and drawer widths', async ({ page }) => {
+    const tenant = seededTenant('restaurant')
+    for (const width of WIDTHS) {
+      await page.setViewportSize({ width, height: 1200 })
+      const response = await page.goto(`/dashboard/${tenant.slug}/integrations/google-calendar`)
+      expect(response?.status()).toBe(200)
+      expect(await response?.text()).toContain('id="dashboard-panel-google-calendar"')
+      await waitForNuxtHydration(page)
+      const panel = page.locator('#dashboard-panel-google-calendar')
+      await expect(panel).toHaveCount(1)
+      await expect(panel.getByRole('heading', { name: 'Google Calendar sync', exact: true })).toBeVisible()
+    }
+  })
+
   test('a Growth owner upgrades to Business in one step', async ({ page, baseURL }) => {
     test.setTimeout(120_000)
     const studio = seededTenant('experience')
