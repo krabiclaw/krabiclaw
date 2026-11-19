@@ -221,6 +221,23 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const persisted = await body<{ booking: { status: string; assigned_member_id: string } }>(
       await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)
     expect(persisted.booking).toMatchObject({ status: 'confirmed', assigned_member_id: actor.id })
+
+    await page.reload()
+    await waitForNuxtHydration(page)
+    const privateNote = 'Share the consultation checklist with the attorney'
+    const privateNoteLink = ownerDetail.getByRole('link', { name: /Private note/ })
+    await privateNoteLink.click()
+    const noteEditor = page.locator('#dashboard-panel-booking-private-note')
+    await noteEditor.getByRole('textbox', { name: 'Private note' }).fill(privateNote)
+    const saved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/dashboard/bookings/${bookingId}`)
+    await noteEditor.getByRole('button', { name: 'Save', exact: true }).click()
+    const noteResponse = await saved
+    expect(noteResponse.status()).toBe(200)
+    expect(await noteResponse.json()).toEqual({ booking: { booking_id: bookingId, private_notes: privateNote, version: expect.any(Number) } })
+    await expect(privateNoteLink.getByText(privateNote, { exact: true })).toBeVisible()
+    expect(await body(await page.request.get(`/api/dashboard/bookings/${bookingId}`, { params: { org: SLUG } }), 200)).toMatchObject({
+      booking: { booking_id: bookingId, private_notes: privateNote, status: 'confirmed' },
+    })
     // Confirming the consultation answers the request: nothing is left on Today, and the consultation is the member's Upcoming.
     const after = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect([after.title, after.cards]).toEqual(['Nothing needs you today', []])
