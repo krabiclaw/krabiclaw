@@ -429,7 +429,7 @@ export default defineNuxtConfig({
     ...Object.fromEntries([...new Set(Object.values(DOCS_CATEGORY_ART).map(({ file }) => file))]
       .flatMap(file => ['', '-og'].map(suffix => [
         `/platform/docs/categories/${file.replace(/^blawby-/, 'krabiclaw-')}${suffix}.png`,
-        { redirect: { to: `/platform/docs/categories/${file}${suffix}.png`, statusCode: 301 } },
+        { redirect: { to: `/platform/docs/categories/${file}${suffix}.png`, status: 301 } },
       ]))),
     // Versioned static assets — immutable forever
     '/assets/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
