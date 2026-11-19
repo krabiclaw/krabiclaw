@@ -81,8 +81,9 @@ const kind = computed({
   set: (value: string) => void navigateTo({ path: level.path.value, query: { ...route.query, kind: value === 'all' ? undefined : value } }),
 })
 const { data: catalog, error: catalogError } = await useAsyncData(
-  () => `dashboard-catalog:${organizationId}:${kind.value}`,
+  () => `dashboard-catalog:${organizationId}:${kind.value}${level.mode.value === 'yield' ? ':hidden' : ''}`,
   async () => {
+    if (level.mode.value === 'yield') return null
     if (import.meta.server) {
       const scope = useDashboardRouteScope().value
       if (!scope) throw createError({ statusCode: 400, statusMessage: 'Catalog organization is required' })

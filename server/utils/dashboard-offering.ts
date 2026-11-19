@@ -4,7 +4,7 @@ import type { requireProductAccess } from '~/server/utils/location-access'
 import { prepareDashboardLocations } from '~/server/utils/dashboard-context'
 import { prepareCollectionList } from '~/server/utils/product-management'
 import { isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { memberSchedulingList } from '~/server/domain/member-scheduling'
+import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { PRODUCT_KIND_LABELS, productDetailFields } from '~/shared/product-details'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, selectPrice } from '~/shared/prices'
@@ -29,9 +29,15 @@ export async function presentDashboardOffering(
   const locationPlan = prepareDashboardLocations(organization.id, manages ? undefined : userId, true)
   const collectionPlan = prepareCollectionList({ organizationId: organization.id,
     assignedUserId: manages ? undefined : userId, collectionIds: product.collections.map(row => row.collection_id) })
-  const rows = await executeBatch(db, [...locationPlan.queries, ...collectionPlan.queries], { operation: 'Read offering navigation' })
+  const readMembers = await roleAllows({ ...principal, permissions: { members: ['read'] } })
+  const rows = await executeBatch(db, [...locationPlan.queries, ...collectionPlan.queries, {
+    query: `SELECT ${MEMBER_NAME_SQL} AS name FROM member m JOIN user u ON u.id = m.userId
+      LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId
+      WHERE m.organizationId = ? AND m.id = ? AND (? = 1 OR m.userId = ?)`,
+    params: [organization.id, product.booking?.assigned_member_id ?? null, Number(readMembers), userId],
+  }], { operation: 'Read offering navigation' })
   const { locations } = locationPlan.read(rows.slice(0, locationPlan.queries.length))
-  const collections = collectionPlan.read(rows.slice(locationPlan.queries.length))
+  const collections = collectionPlan.read(rows.slice(locationPlan.queries.length, -1))
   const location = locationId ? locations.find(place => place.id === locationId && product.locations.some(binding => binding.location_id === place.id)) ?? missing('Offering not found at this location') : null
   const service = product.kind === 'service'
   const dish = product.kind === 'dish'
@@ -60,7 +66,6 @@ export async function presentDashboardOffering(
   const text = (value: unknown) => Array.isArray(value) ? value.join('\n') : typeof value === 'string' ? value : ''
   const selection = { currency, location_id: location?.id ?? null }
   const chosenPrice = (variant: typeof product.variants[number]) => selectPrice(variant.prices, selection)
-  const memberList = () => memberSchedulingList({ env, userId, organizationId: organization.id })
   const locationsUsed = locations.filter(entry => product.locations.some(binding => binding.location_id === entry.id))
   const prices = product.variants.map(variant => {
     const price = chosenPrice(variant)
@@ -70,7 +75,7 @@ export async function presentDashboardOffering(
   const photo = leaf('photo', 'Media', product.gallery.length || product.image ? 'View media' : 'Add media', { readonly: !wide })
   photo.image = mediaStillUrl(product.image)
   const definitions = productDetailFields(product.kind).filter(definition => !['pricing_note', 'tagline'].includes(definition.key))
-  const assigned = booking?.assigned_member_id ? (await memberList()).members.find(member => member.id === booking.assigned_member_id)?.name : null
+  const assigned = (rows.at(-1)!.results as { name: string }[])[0]?.name ?? null
   return { title, fields: [], rows: [
     ...(wide && !service ? [photo] : []),
     leaf('name', 'Name', product.name),

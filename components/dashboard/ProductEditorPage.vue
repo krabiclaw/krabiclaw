@@ -1187,9 +1187,9 @@ function roomsSummary(): string {
 if (isNew.value && !form.stay_location_id && locationId.value) form.stay_location_id = locationId.value
 
 // ── The index ─────────────────────────────────────────────
-// Who handles a bookable service's consultations, by name: the same list the
-// assignment concern reads, so it is one request shared by both.
-const { data: schedulingMembers, error: schedulingMembersError } = useMemberSchedulingList(() => dashboard.organization.value?.id)
+// Dishes and practice areas without consultations have no assignment to draw.
+const { data: schedulingMembers, error: schedulingMembersError } = useMemberSchedulingList(() =>
+  product.value?.booking || stayEditor.value || isNew.value && form.kind === 'stay' ? organizationId : null)
 /** The assignee by its loaded name; a read failure, a pending read or an unknown id says so. */
 function assignmentSummary(): string {
   const assignment = isNew.value ? form : product.value?.booking

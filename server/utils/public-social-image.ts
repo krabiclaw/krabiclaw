@@ -1,5 +1,5 @@
-import { d1JsonStringSet, queryAll, type DbClient } from '~/server/db'
-import { readMediaPlacements } from '~/server/utils/media-asset-manager'
+import { d1JsonStringSet, executeBatch, type DbClient } from '~/server/db'
+import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import type { MediaPlacementItem } from '~/server/utils/media-placement'
 import type { MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 import { publicSocialMediaFromPlacements, type PublicSocialMedia as PublicSocialMediaContract } from '~/utils/social-metadata'
@@ -87,18 +87,19 @@ export async function loadPublicSocialMedia(
   const uniqueOwnerIds = [...new Set(ownerIds)]
   // The organization's placements are read for its `social_share`, which is
   // the picture of an owner that has none of its own — never its logo.
-  const [ownerPlacements, organizationPlacements, locationPrivacyRows] = await Promise.all([
-    readMediaPlacements(db, { organizationId, ownerType, ownerIds: uniqueOwnerIds }),
-    readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] }),
-    ownerType === 'business_location' ? queryAll<{ id: string; is_stay_location: number }>(db, `
+  const [placements, privacy] = await executeBatch(db, [
+    mediaPlacementsQuery({ organizationId, ownerType, owners: uniqueOwnerIds, includeOrganizationFallback: true }),
+    ...(ownerType === 'business_location' ? [{ query: `
       SELECT bl.id, ${publicLocationProtectedSql('bl')} AS is_stay_location FROM business_locations bl
        WHERE bl.organization_id = ? AND bl.id IN (SELECT value FROM json_each(?))
-    `, [organizationId, d1JsonStringSet(uniqueOwnerIds)]) : [],
-  ])
-  const organizationMedia = organizationPlacements.get(organizationId) ?? []
-  const locationPrivacy = new Map(locationPrivacyRows.map(location => [location.id, location]))
+    `, params: [organizationId, d1JsonStringSet(uniqueOwnerIds)] }] : []),
+  ], { operation: 'Read public media and sharing image' })
+  const ownerPlacements = groupMediaPlacements(placements!.results)
+  const organizationMedia = (ownerPlacements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
+  const locationPrivacy = new Map((privacy?.results as { id: string; is_stay_location: number }[] | undefined ?? [])
+    .map(location => [location.id, location]))
   return new Map(uniqueOwnerIds.map((ownerId): [string, PublicSocialMedia] => {
-    const media = ownerPlacements.get(ownerId) ?? []
+    const media = (ownerPlacements.get(ownerId) ?? []).filter(item => item.owner_type === ownerType)
     if (ownerType !== 'business_location') return [ownerId, publicSocialMediaFromPlacements(ownerType, media, organizationMedia)]
     const source = locationPrivacy.get(ownerId)
     if (!source) throw new Error('Location social image privacy context is unavailable')
