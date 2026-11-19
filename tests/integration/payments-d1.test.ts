@@ -1030,7 +1030,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
     assert.equal(handoff.state, 'open')
     assert.deepEqual(handoff.billing_details, { name: 'Guest', email: 'guest@example.com', phone: '+12025550114' })
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
-    assert.ok(events.take('payment.financial'))
+    assert.equal(events.take('payment.financial'), undefined)
 
     const review = await reviewPayment(db, env, ORG, 'ach-payment', claim, 'pm_achproof123', null)
     assert.equal(review.surcharge, 0)
