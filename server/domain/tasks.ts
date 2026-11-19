@@ -124,8 +124,8 @@ export interface TurnoverHome {
 }
 
 /** A nights booking's stored ends read as the home's days. */
-type StoredStay = { id: string; product_id: string; status: StayWindow['status']; starts_at: string; ends_at: string; timezone: string }
-const stayWindowOf = (row: StoredStay): StayWindow => ({ id: row.id, product_id: row.product_id, status: row.status, check_in_date: bookingDay(row.starts_at, row.timezone), check_out_date: bookingDay(row.ends_at, row.timezone) })
+type StoredStay = { id: string; product_id: string; status: StayWindow['status']; starts_at: string; ends_at: string; actual_check_out_date: string | null; timezone: string }
+const stayWindowOf = (row: StoredStay): StayWindow => ({ id: row.id, product_id: row.product_id, status: row.status, check_in_date: bookingDay(row.starts_at, row.timezone), check_out_date: row.actual_check_out_date ?? bookingDay(row.ends_at, row.timezone) })
 
 function nextTurnoverArrival<T extends Pick<StayWindow, 'id' | 'check_in_date'>>(stay: Pick<StayWindow, 'id' | 'check_out_date'>, confirmed: T[]): T | null {
   return confirmed.reduce<T | null>((next, other) => other.id === stay.id || other.check_in_date < stay.check_out_date
@@ -141,7 +141,7 @@ function storedOn(column: string, date: string, timezone: string): BatchQuery {
 
 /** The batch guard: the turnover statements apply only if the booking is what they were computed for, its ends on these days in its home's clock. */
 function stayIs(organizationId: string, stay: StayWindow, timezone: string): BatchQuery {
-  const starts = storedOn('starts_at', stay.check_in_date, timezone), ends = storedOn('ends_at', stay.check_out_date, timezone)
+  const starts = storedOn('starts_at', stay.check_in_date, timezone), ends = storedOn('COALESCE(actual_check_out_date, ends_at)', stay.check_out_date, timezone)
   return { query: `EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND product_id = ? AND status = ? AND product_session_id IS NULL AND ${starts.query} AND ${ends.query})`,
     params: [organizationId, stay.id, stay.product_id, stay.status, ...starts.params!, ...ends.params!] }
 }
@@ -161,8 +161,8 @@ export function turnoverHomeColumns(checkIn: string): string {
     assigned_member_id: 'b.assigned_member_id',
     // Read one day wider for a checkout instant on a different UTC day than its local day.
     turnover_neighbours: `(SELECT json_group_array(json_object('id', id, 'product_id', product_id, 'status', status,
-      'starts_at', starts_at, 'ends_at', ends_at, 'timezone', timezone))
-      FROM (SELECT id, product_id, status, starts_at, ends_at, timezone FROM bookings
+      'starts_at', starts_at, 'ends_at', ends_at, 'actual_check_out_date', actual_check_out_date, 'timezone', timezone))
+      FROM (SELECT id, product_id, status, starts_at, ends_at, actual_check_out_date, timezone FROM bookings
         WHERE organization_id = c.organization_id AND product_id = c.product_id AND product_session_id IS NULL
           AND status = 'confirmed' AND ends_at >= date(${checkIn}, '-401 days')
         ORDER BY id)) || ''`,
@@ -185,6 +185,34 @@ export function readTurnoverHomes(db: DbClient, change: TurnoverChange): Promise
   return queryAll<TurnoverHome>(db, `SELECT ${turnoverHomeColumns('anchor.value')}
     FROM ${TURNOVER_HOME_FROM} JOIN json_each(?) anchor ON c.product_id = anchor.key
     WHERE c.organization_id = ?`, [JSON.stringify(anchors), change.organizationId])
+}
+
+function turnoverTimes(home: TurnoverHome, checkout: string, next: string | null) {
+  const startsAt = home.check_out_time === null ? null : localDateTimeToInstant(checkout, home.check_out_time, home.timezone, 'compatible').toISOString()
+  const arrival = next === null || home.check_in_time === null ? null : localDateTimeToInstant(next, home.check_in_time, home.timezone, 'compatible').toISOString()
+  return { startsAt, dueAt: arrival !== null && startsAt !== null && arrival < startsAt ? startsAt : arrival }
+}
+
+/** After a home merge, every open turnover uses the surviving home's hours and combined bookings. */
+export async function mergedHomeTurnovers(db: DbClient, organizationId: string, sourceId: string, targetId: string, today: string, now: string): Promise<BatchQuery> {
+  const homes = await readTurnoverHomes(db, {
+    organizationId, before: { product_id: sourceId, check_in_date: today }, after: { product_id: targetId, check_in_date: today },
+  })
+  const target = homes.find(home => home.product_id === targetId)
+  if (!target) throw new Error(`Home ${targetId} has no stay settings`)
+  const stays = homes.flatMap(home => (JSON.parse(home.turnover_neighbours) as StoredStay[]).map(stayWindowOf))
+  const times = stays.map(stay => {
+    const { startsAt, dueAt } = turnoverTimes(target, stay.check_out_date, nextTurnoverArrival(stay, stays)?.check_in_date ?? null)
+    return { id: stay.id, starts_at: startsAt, due_at: dueAt }
+  })
+  return {
+    query: `UPDATE tasks SET starts_at = json_extract(window.value, '$.starts_at'),
+        due_at = json_extract(window.value, '$.due_at'), updated_at = ?, version = tasks.version + 1
+      FROM json_each(?) window WHERE tasks.organization_id = ? AND tasks.product_id = ? AND tasks.kind = 'turnover'
+        AND tasks.status = 'open' AND tasks.subject_id = json_extract(window.value, '$.id')
+        AND (tasks.starts_at IS NOT json_extract(window.value, '$.starts_at') OR tasks.due_at IS NOT json_extract(window.value, '$.due_at'))`,
+    params: [now, JSON.stringify(times), organizationId, targetId],
+  }
 }
 
 /**
@@ -218,9 +246,7 @@ export function turnoverTaskQueries(input: TurnoverChange & { after: StayWindow;
     }
   }
   for (const { stay, home, next } of windows.values()) {
-    const startsAt = home.check_out_time === null ? null : localDateTimeToInstant(stay.check_out_date, home.check_out_time, home.timezone, 'compatible').toISOString()
-    const arrival = next === null || home.check_in_time === null ? null : localDateTimeToInstant(next, home.check_in_time, home.timezone, 'compatible').toISOString()
-    const dueAt = arrival !== null && startsAt !== null && arrival < startsAt ? startsAt : arrival
+    const { startsAt, dueAt } = turnoverTimes(home, stay.check_out_date, next)
     const key = `turnover:${stay.id}`
     queries.push({
       query: `UPDATE tasks SET product_id = ?, location_id = ?, timezone = ?, starts_at = ?, due_at = ?,
@@ -843,7 +869,7 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
   const statusSql = query.status ? 't.status = ?' : `(t.status = 'open' OR (? = 'today' AND t.status IN ('done', 'skipped') AND t.closed_at >= ?))`
   const statusParams = query.status ? [query.status] : [query.range, closedSince]
   // The tasks and everything their cards show, in one round trip.
-  const listed = { sql: `SELECT t.*, s.ends_at AS checkout_at, s.timezone AS checkout_timezone FROM tasks t
+  const listed = { sql: `SELECT t.*, COALESCE(s.actual_check_out_date, s.ends_at) AS checkout_at, s.timezone AS checkout_timezone FROM tasks t
     LEFT JOIN bookings s ON t.kind = 'turnover' AND t.starts_at IS NULL AND s.organization_id = t.organization_id AND s.id = t.subject_id
     WHERE t.organization_id = ? AND ${scope.sql} AND ${statusSql}${filters.map(sql => ` AND ${sql}`).join('')}`, params: [organizationId, ...scope.params, ...statusParams, ...params] }
   const [read, ...related] = await executeBatch(db, [

@@ -1,3 +1,4 @@
+import { stripeMetadataId } from './stripe-metadata'
 import { publishEvent } from '~/server/events'
 import { freeCancellationUntil } from '~/shared/availability-settings'
 import type Stripe from 'stripe'
@@ -188,7 +189,7 @@ export async function paymentHandoff(db: DbClient, env: CloudflareEnv, organizat
   const { intent, state } = await readCheckoutIntent(stripe, payment, now)
   const snapshot = snapshotOf(payment)
   // The methods Stripe resolved for this intent from the business's configuration, with nothing that redirects; the Element offers exactly these.
-  if (intent.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
+  if (stripeMetadataId('payment', intent.metadata) !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
   // Stripe's own saved-card features for a signed-in buyer, scoped to this business's customer.
   let customerSession: string | null = null
   const customerId = typeof intent.customer === 'string' ? intent.customer : intent.customer?.id
@@ -214,7 +215,7 @@ export async function cancelStayPayment(db: DbClient, env: CloudflareEnv, organi
   if (snapshot.approval) throw new HTTPError({ statusCode: 409, statusMessage: 'Manage changes from your approved stay' })
   if (state === 'processing') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment has started processing and cannot be changed here', data: { code: 'payment_in_progress' } })
   if (state === 'paid') throw new HTTPError({ statusCode: 409, statusMessage: 'This stay is already paid; open its booking to request a change', data: { code: 'payment_paid' } })
-  if (current.livemode !== Boolean(payment.livemode) || current.currency.toUpperCase() !== payment.currency || current.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
+  if (current.livemode !== Boolean(payment.livemode) || current.currency.toUpperCase() !== payment.currency || stripeMetadataId('payment', current.metadata) !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
   if (state !== 'open' && state !== 'verifying' && current.status !== 'canceled') throw new HTTPError({ statusCode: 409, statusMessage: state === 'expired' ? 'This payment has expired; start the booking again' : 'This payment was not accepted; start the booking again', data: { code: `payment_${state}` } })
   if (current.status !== 'canceled' && !['requires_payment_method', 'requires_confirmation', 'requires_action'].includes(current.status)) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'This payment has started processing and cannot be changed here', data: { code: 'payment_in_progress' } })
@@ -251,7 +252,7 @@ export async function reviewPayment(db: DbClient, env: CloudflareEnv, organizati
     ...(tax ? { hooks: { inputs: { tax: { calculation: tax.id } } } } : {}),
     ...(rate !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
   } as Stripe.PaymentIntentUpdateParams, { stripeAccount: payment.stripe_account_id }) as IntentWithSurcharge
-  if (intent.metadata.krabiclaw_payment_id !== payment.id || intent.livemode !== Boolean(payment.livemode) || intent.amount !== amount || intent.currency.toUpperCase() !== payment.currency) throw new Error('Stripe PaymentIntent does not match the purchase')
+  if (stripeMetadataId('payment', intent.metadata) !== payment.id || intent.livemode !== Boolean(payment.livemode) || intent.amount !== amount || intent.currency.toUpperCase() !== payment.currency) throw new Error('Stripe PaymentIntent does not match the purchase')
   let surcharge = 0
   if (rate !== null) {
     const native = intent.amount_details?.surcharge
@@ -403,7 +404,7 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
   if (payment.captured_amount <= 0) {
     const stripe = paymentsStripe(env, Boolean(payment.livemode))
     const { intent, state } = await readCheckoutIntent(stripe, payment, now)
-    if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
+    if (intent.livemode !== Boolean(payment.livemode) || stripeMetadataId('payment', intent.metadata) !== payment.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
     if (state === 'taken') return { state: 'taken' }
     if (state === 'failed' || state === 'expired') return { state: 'expired' }
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) {

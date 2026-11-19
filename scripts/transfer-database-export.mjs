@@ -32,7 +32,7 @@ register('../tests/unit/support/alias-hooks.mjs', import.meta.url)
 const DECLARED_ORGANIZATION_ROLES = new Set(Object.keys(organizationRoles))
 
 const MIGRATIONS_DIRECTORY = 'migrations'
-const PREVIOUS_EPOCH_DIRECTORY = 'migrations-history/v27'
+const PREVIOUS_EPOCH_DIRECTORIES = ['migrations-history/v27', 'migrations-history/v28']
 const hash = value => createHash('sha256').update(value).digest('hex')
 const qi = value => `"${value.replaceAll('"', '""')}"`
 const assert = (condition, message) => { if (!condition) throw new Error(message) }
@@ -447,7 +447,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     const applied = new Set(ledger)
     assert(applied.size === ledger.length, 'Source migration ledger contains duplicate filenames')
     assert(ledger[0] === '0000_baseline.sql', 'Source migration ledger must start with 0000_baseline.sql')
-    const sourceChain = [MIGRATIONS_DIRECTORY, PREVIOUS_EPOCH_DIRECTORY].find(directory => {
+    const sourceChain = [MIGRATIONS_DIRECTORY, ...PREVIOUS_EPOCH_DIRECTORIES].find(directory => {
       const migrations = migrationFiles(directory)
       if (!ledger.every((name, index) => name === migrations[index])) return false
       const candidate = new Database(':memory:')
@@ -471,7 +471,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       for (const row of rows) insert.run(...tableColumns.map(name => row[name]))
       assert(digest(rows, tableColumns) === digest(stage.prepare(`SELECT * FROM ${qi(table)}`).all(), tableColumns), `${table}: copy differs`)
     }
-    for (const name of migrationFiles(sourceChain).slice(ledger.length)) stage.exec(readFileSync(resolve(sourceChain, name), 'utf8'))
+    const forward = migrationFiles(sourceChain).slice(ledger.length).map(name => resolve(sourceChain, name))
+    if (sourceChain === PREVIOUS_EPOCH_DIRECTORIES[0]) {
+      // v28 was a new baseline of the end of v27. Its forward migrations apply to those same rows.
+      const nextEpoch = PREVIOUS_EPOCH_DIRECTORIES[1]
+      forward.push(...migrationFiles(nextEpoch).slice(1).map(name => resolve(nextEpoch, name)))
+    }
+    for (const migration of forward) stage.exec(readFileSync(migration, 'utf8'))
     const unsupported = stage.prepare('SELECT organization_id, id, kind FROM products ORDER BY organization_id, id').all().filter(row => !PRODUCT_KINDS.includes(row.kind))
     assert(unsupported.length === 0, `Unsupported offerings: ${unsupported.map(row => `${row.organization_id}/${row.id} (${row.kind})`).join(', ')}; no rows were copied`)
     const names = tableNames(stage)

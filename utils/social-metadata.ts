@@ -116,17 +116,24 @@ function toSocialImageSource(source: SocialMediaSource | null | undefined): Soci
 }
 
 /**
- * A resource's og:image is its own generated `social_card`. Until one exists
- * it is the picture `resolveOwnerPicture` gives that owner — the same one the
- * card will draw — and with neither there is no image tag at all.
+ * Listings and offerings prefer their own photograph in sharing previews.
+ * Other resources use their generated social card when one exists.
  */
 export function resolveSocialImageFromMedia(
   ownerType: MediaPlacementOwnerType,
   ownerMedia: readonly SocialMediaSource[],
   organizationMedia: readonly SocialMediaSource[],
 ): SocialImageSource | null {
-  return toSocialImageSource(ownerMedia.find(item => item.slot === 'social_card')
-    ?? resolveOwnerPicture(ownerType, ownerMedia, organizationMedia))
+  const socialCard = ownerMedia.find(item => item.slot === 'social_card')
+  if (ownerType !== 'product') return toSocialImageSource(socialCard ?? resolveOwnerPicture(ownerType, ownerMedia, organizationMedia))
+
+  const ownPhoto = resolveOwnerPicture(ownerType, ownerMedia, [])
+  const ownGallery = ownerMedia.find(item => item.slot === 'gallery' && item.kind !== 'video' && resolveSocialImageUrl(item))
+  const picture = ownPhoto
+    ?? ownGallery
+    ?? resolveOwnerPicture(ownerType, ownerMedia, organizationMedia)
+    ?? socialCard
+  return toSocialImageSource(picture)
 }
 
 export interface PublicSocialMedia<T extends SocialMediaSource = SocialMediaSource> {

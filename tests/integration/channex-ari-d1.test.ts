@@ -169,14 +169,16 @@ async function boot(airbnbConnected = true) {
     const unpriced = await home('Loft', null)
     const local = await home('Barn', 90_00)
     for (const [productId, listing, enabled] of [[connected, '1', 1], [unpriced, '2', 1], [local, '3', 0]] as const) {
-      await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
-        VALUES (?, ?, 'channex', ?, 'chan-1', ?, ?, ?, 'complete', ?)`).bind(ORG, productId, `listing-${listing}`, `prop-${listing}`, `room-${listing}`, `rate-${listing}`, enabled).run()
+      await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, property_id, room_type_id, rate_plan_id, import_stage, enabled)
+        VALUES (?, ?, 'channex', ?, ?, ?, 'complete', ?)`).bind(ORG, productId, `prop-${listing}`, `room-${listing}`, `rate-${listing}`, enabled).run()
+      await db.prepare(`INSERT INTO product_airbnb_listings (organization_id, product_id, listing_id, channel_id, import_stage, enabled)
+        VALUES (?, ?, ?, 'chan-1', 'complete', ?)`).bind(ORG, productId, `listing-${listing}`, enabled).run()
       // A home that syncs had its calendar ahead sent when it was imported: every night within reach has its
       // delivery row. What Channex confirmed for each is left empty, so the scenarios send each night whole.
       if (enabled) await db.prepare(`INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state)
         SELECT ?, ?, 'channex', value, 'pushed' FROM json_each(?)`).bind(ORG, productId, JSON.stringify(Array.from({ length: 501 }, (_, offset) => day(offset)))).run()
     }
-    if (airbnbConnected) await db.prepare("INSERT INTO channex_connections (organization_id,status,group_id,channel_id,connected_at) VALUES (?, 'connected', 'group-1','chan-1', ?)").bind(ORG, new Date().toISOString()).run()
+    if (airbnbConnected) await db.prepare("INSERT INTO channex_connections (id,organization_id,status,channel_id,connected_at) VALUES ('account-1', ?, 'connected','chan-1', ?)").bind(ORG, new Date().toISOString()).run()
     return { runtime, db, env, queue, connected, unpriced, local }
   } catch (error) {
     await runtime.dispose()
@@ -410,7 +412,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     channex.missingMapping = '2'
     t.mock.timers.enable({ apis: ['Date'], now: localDateTimeToInstant(day(2), '12:00', TZ, 'compatible').getTime() })
     try {
-      await deliver()
+      await assert.rejects(deliver(), /Airbnb rejected a listing’s calendar sync/)
     } finally {
       t.mock.timers.reset()
     }
@@ -633,7 +635,7 @@ test('migration verification reads Airbnb availability and refuses missing chann
   try {
     const dates = [day(2), day(3)]
     assert.equal((await verifyStayCalendarOccupancy(db, env, manager, connected, dates)).state, 'not_connected')
-    await db.prepare("INSERT INTO channex_connections (organization_id,status,group_id,channel_id,connected_at) VALUES (?, 'connected', 'group-1','chan-1', ?)").bind(ORG, new Date().toISOString()).run()
+    await db.prepare("INSERT INTO channex_connections (id,organization_id,status,channel_id,connected_at) VALUES ('account-1', ?, 'connected','chan-1', ?)").bind(ORG, new Date().toISOString()).run()
     await createStay(db, env, manager, { product_id: connected, idempotency_key: 'migration-verification-stay', check_in_date: day(2), check_out_date: day(4), guest_name: 'Imported guest', guest_email: 'imported-guest@example.test', adults: 1, total_minor: 30_000 })
     const mismatch = await verifyStayCalendarOccupancy(db, env, manager, connected, dates)
     assert.equal(mismatch.state, 'needs_attention')

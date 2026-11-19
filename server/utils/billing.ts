@@ -150,10 +150,12 @@ export function liveHomeSql(alias: string): string {
       OR EXISTS (SELECT 1 FROM product_channel_mappings lm WHERE lm.organization_id = ${alias}.organization_id AND lm.product_id = ${alias}.id AND lm.enabled = 1)))`
 }
 
-const ACTIVE_HOMES_SQL = `SELECT COUNT(*) FROM products p WHERE p.organization_id = ? AND ${liveHomeSql('p')}`
+const ACTIVE_HOMES_SQL = `SELECT COALESCE(SUM(MAX(1, (SELECT COUNT(*) FROM product_airbnb_listings l
+  WHERE l.organization_id = p.organization_id AND l.product_id = p.id AND l.enabled = 1))), 0)
+  FROM products p WHERE p.organization_id = ? AND ${liveHomeSql('p')}`
 const DRAFT_HOMES_SQL = `SELECT COUNT(*) FROM products p WHERE p.organization_id = ? AND p.kind = 'stay' AND NOT ${liveHomeSql('p')}`
 
-/** The homes a plan bills: every live home. */
+/** Each live home counts once, plus each active Airbnb listing after the first on that home. */
 export async function countActiveHomes(db: DbClient, organizationId: string): Promise<number> {
   const row = await queryFirst<{ homes: number }>(db, `SELECT (${ACTIVE_HOMES_SQL}) AS homes`, [organizationId])
   if (!row) throw new Error('Billing usage could not be read')

@@ -99,6 +99,8 @@ export const usePublicPageData = async <T = Product>(options: {
             server: options.server ?? true,
             lazy: deferredSupplement,
             dedupe: 'defer',
+            // The root can finish the read before the page itself mounts on the server.
+            getCachedData: import.meta.server ? (key, app) => app.payload.data[key] : undefined,
             immediate: !deferredSupplement,
             watch: [],
           },

@@ -174,6 +174,7 @@ CREATE TABLE `bookings` (
 	`location_id` text,
 	`starts_at` text NOT NULL,
 	`ends_at` text NOT NULL,
+	`actual_check_out_date` text,
 	`timezone` text NOT NULL,
 	`party_size` integer NOT NULL,
 	`adults` integer,
@@ -359,9 +360,9 @@ CREATE UNIQUE INDEX `channel_threads_conversation_unique` ON `channel_threads` (
 CREATE UNIQUE INDEX `channel_threads_booking_unique` ON `channel_threads` (`provider`,`external_booking_id`) WHERE external_booking_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `channel_threads_org_idx` ON `channel_threads` (`organization_id`);--> statement-breakpoint
 CREATE TABLE `channex_connections` (
-	`organization_id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
 	`status` text NOT NULL,
-	`group_id` text,
 	`setup_property_id` text,
 	`state_hash` text,
 	`authorization_url` text,
@@ -376,13 +377,21 @@ CREATE TABLE `channex_connections` (
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`authorization_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
 	CONSTRAINT "channex_connections_status_check" CHECK(status IN ('not_connected', 'authorizing', 'connected', 'disconnecting')),
-	CONSTRAINT "channex_connections_connected_check" CHECK(status <> 'connected' OR (channel_id IS NOT NULL AND group_id IS NOT NULL AND connected_at IS NOT NULL)),
+	CONSTRAINT "channex_connections_connected_check" CHECK(status <> 'connected' OR (channel_id IS NOT NULL AND connected_at IS NOT NULL)),
 	CONSTRAINT "channex_connections_authorizing_check" CHECK(status <> 'authorizing' OR (authorization_url IS NOT NULL AND state_hash IS NOT NULL AND authorization_expires_at IS NOT NULL AND authorization_title IS NOT NULL)),
 	CONSTRAINT "channex_connections_instants_check" CHECK((authorization_expires_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', authorization_expires_at, '+0 days') IS authorization_expires_at) AND (connected_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', connected_at, '+0 days') IS connected_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `channex_connections_group_unique` ON `channex_connections` (`group_id`) WHERE group_id IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `channex_connections_org_idx` ON `channex_connections` (`organization_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `channex_connections_signup_unique` ON `channex_connections` (`organization_id`) WHERE channel_id IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `channex_connections_channel_unique` ON `channex_connections` (`channel_id`) WHERE channel_id IS NOT NULL;--> statement-breakpoint
+CREATE TABLE `channex_groups` (
+	`organization_id` text PRIMARY KEY NOT NULL,
+	`group_id` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `channex_groups_group_id_unique` ON `channex_groups` (`group_id`);--> statement-breakpoint
 CREATE TABLE `collection_products` (
 	`organization_id` text NOT NULL,
 	`collection_id` text NOT NULL,
@@ -1528,6 +1537,28 @@ CREATE INDEX `prices_variant_validity_idx` ON `prices` (`organization_id`,`produ
 CREATE INDEX `prices_location_idx` ON `prices` (`organization_id`,`location_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `prices_stay_date_unique` ON `prices` (`product_variant_id`,`stay_date`);--> statement-breakpoint
 CREATE UNIQUE INDEX `prices_weekend_unique` ON `prices` (`product_variant_id`) WHERE weekend = 1;--> statement-breakpoint
+CREATE TABLE `product_airbnb_listings` (
+	`listing_id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`channel_id` text NOT NULL,
+	`rate_plan_id` text,
+	`import_stage` text NOT NULL,
+	`import_content` text,
+	`import_written` text,
+	`enabled` integer DEFAULT 0 NOT NULL,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "product_airbnb_listings_stage_check" CHECK(import_stage IN ('property', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')),
+	CONSTRAINT "product_airbnb_listings_enabled_check" CHECK(enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('mapping', 'activate', 'reservations', 'messages', 'complete'))),
+	CONSTRAINT "product_airbnb_listings_content_check" CHECK(import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')),
+	CONSTRAINT "product_airbnb_listings_written_check" CHECK(import_written IS NULL OR (json_valid(import_written) AND json_type(import_written) = 'object'))
+);
+--> statement-breakpoint
+CREATE INDEX `product_airbnb_listings_home_idx` ON `product_airbnb_listings` (`organization_id`,`product_id`);--> statement-breakpoint
+CREATE INDEX `product_airbnb_listings_channel_idx` ON `product_airbnb_listings` (`channel_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `product_airbnb_listings_rate_plan_unique` ON `product_airbnb_listings` (`rate_plan_id`) WHERE rate_plan_id IS NOT NULL;--> statement-breakpoint
 CREATE TABLE `product_availability_rules` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -1618,16 +1649,11 @@ CREATE TABLE `product_channel_mappings` (
 	`organization_id` text NOT NULL,
 	`product_id` text NOT NULL,
 	`provider` text NOT NULL,
-	`listing_id` text,
-	`channel_id` text,
 	`property_id` text,
 	`room_type_id` text,
 	`rate_plan_id` text,
 	`import_stage` text NOT NULL,
 	`import_property` text,
-	`import_calendar` text,
-	`import_content` text,
-	`import_written` text,
 	`enabled` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
@@ -1635,17 +1661,13 @@ CREATE TABLE `product_channel_mappings` (
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "product_channel_mappings_provider_check" CHECK(provider = 'channex'),
-	CONSTRAINT "product_channel_mappings_stage_check" CHECK(import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')),
-	CONSTRAINT "product_channel_mappings_airbnb_ids_check" CHECK((listing_id IS NULL) = (channel_id IS NULL) AND (listing_id IS NOT NULL OR import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete'))),
+	CONSTRAINT "product_channel_mappings_stage_check" CHECK(import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete')),
 	CONSTRAINT "product_channel_mappings_ids_check" CHECK((import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)),
-	CONSTRAINT "product_channel_mappings_calendar_check" CHECK(import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')),
 	CONSTRAINT "product_channel_mappings_property_json_check" CHECK(import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')),
-	CONSTRAINT "product_channel_mappings_content_json_check" CHECK(import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')),
-	CONSTRAINT "product_channel_mappings_enabled_check" CHECK(enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('draft', 'mapping', 'activate', 'reservations', 'messages', 'complete'))),
+	CONSTRAINT "product_channel_mappings_enabled_check" CHECK(enabled IN (0, 1) AND (enabled = 0 OR import_stage = 'complete')),
 	CONSTRAINT "product_channel_mappings_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `product_channel_mappings_listing_unique` ON `product_channel_mappings` (`provider`,`listing_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `product_channel_mappings_property_unique` ON `product_channel_mappings` (`provider`,`property_id`) WHERE property_id IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `product_channel_mappings_room_type_unique` ON `product_channel_mappings` (`provider`,`room_type_id`) WHERE room_type_id IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `product_channel_mappings_rate_plan_unique` ON `product_channel_mappings` (`provider`,`rate_plan_id`) WHERE rate_plan_id IS NOT NULL;--> statement-breakpoint

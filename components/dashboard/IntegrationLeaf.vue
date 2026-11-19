@@ -4,6 +4,7 @@
 
     <template v-else>
       <!-- 1. Account: whose account this is, and who linked it. -->
+      <slot name="account">
       <section class="space-y-3">
         <h2 class="text-sm font-semibold text-muted">Account</h2>
         <div class="flex flex-wrap items-center gap-4">
@@ -20,6 +21,7 @@
           </div>
         </div>
       </section>
+      </slot>
 
       <!-- 3. Linked items: the provider's items that map to ours, chosen here and changeable any time. -->
       <section v-if="definition.items && items" class="space-y-4">
@@ -85,9 +87,11 @@
 
       <slot name="connected" />
 
+      <slot name="disconnect">
       <div class="border-t border-default pt-6">
         <UButton icon="i-lucide-link-2-off" color="error" variant="outline" :loading="disconnecting" :disabled="applying" @click="emit('disconnect')">Disconnect</UButton>
       </div>
+      </slot>
     </template>
   </div>
 </template>

@@ -117,8 +117,8 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "blawby-production-v28"
-database_id = "737276b7-41f7-4e05-8c6c-dc575b8d8e2a"
+database_name = "blawby-production-v29"
+database_id = "ba04f645-2820-4813-83fa-4567850be3e1"
 migrations_dir = "migrations"
 remote = false
 
@@ -317,8 +317,8 @@ E2E_ALLOW_DEV_ROUTES = "true"
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "blawby-staging-v28"
-database_id = "c6237771-99ed-4c38-b05e-d886b986da4c"
+database_name = "blawby-staging-v29"
+database_id = "7d177cb1-aae2-4e99-b495-b0505f68802c"
 migrations_dir = "migrations"
 remote = false
 
