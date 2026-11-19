@@ -235,9 +235,9 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await memberPage.reload()
     await expect(detail.getByText(when({ weekday: 'short', month: 'short', day: 'numeric' }), { exact: true })).toBeVisible()
     const missingId = crypto.randomUUID()
-    const missingRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/bookings/${missingId}`)
+    const missingRead = await memberContext.request.get(`/api/dashboard/bookings/${missingId}`, { params: { org: SLUG } })
+    expect(await body(missingRead, 404)).not.toHaveProperty('booking')
     await memberPage.goto(`${DASHBOARD}/bookings/${missingId}/change`)
-    expect(await body(await missingRead, 404)).not.toHaveProperty('booking')
     await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
     await expect(change).toHaveCount(0)
 
