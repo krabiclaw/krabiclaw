@@ -37,7 +37,9 @@ import { hasPublicLocationPages, isPublicLocationPath, resolvePublicSite, type P
 import { CLAIMED_PUBLIC_ROUTES } from '#claimed-public-routes'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
-import { listFaqBlockQa } from '~/server/utils/location-qa'
+import { qaListQuery } from '~/server/utils/location-qa'
+import type { QaDocument } from '~/server/utils/location-qa'
+import { platformLocale } from '~/shared/platform-locales'
 
 export interface TenantPageEditorInput {
   id?: string
@@ -264,15 +266,21 @@ export interface TenantPageScope {
   organizationId: string
 }
 
-function pageRepresentationQuery(variantId: string, scope?: TenantPageScope): BatchQuery {
+function pageRepresentationQuery(variantId: string, organization?: string | { sql: string }, editor = false): BatchQuery {
+  const scope = typeof organization === 'string' ? '?' : organization?.sql
+  const publication = editor ? `,
+    CASE WHEN ${publicTenantPageSql('p')} AND EXISTS (SELECT 1 FROM organization_locales l
+      WHERE l.organization_id = v.organization_id AND l.locale = v.locale
+        AND (v.row_role = 'root' OR l.status = 'published'))
+      THEN v.path END AS public_path` : ''
   return {
     query: `SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale, v.path,
       v.title, v.summary, p.product_id, v.kind, v.row_role, v.root_id, v.created_at,
-      json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at
+      json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at${publication}
       FROM content_documents v JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id)
         AND p.row_role = 'root' AND p.kind = 'page' AND p.organization_id = v.organization_id
-      WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.id = ? AND (? IS NULL OR v.organization_id = ?) LIMIT 1`,
-    params: [variantId, scope?.organizationId ?? null, scope?.organizationId ?? null],
+      WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.id = ? ${scope ? `AND v.organization_id = ${scope}` : ''} LIMIT 1`,
+    params: [variantId, ...(typeof organization === 'string' ? [organization] : [])],
   }
 }
 
@@ -503,32 +511,49 @@ function tenantPageBlocksFromRows([blocks, media]: Awaited<ReturnType<typeof exe
   })) as TenantPageBlock[]
 }
 
-async function readTenantPageEditorSnapshot(db: DbClient, variantId: string, scope?: TenantPageScope) {
-  const page = pageRepresentationQuery(variantId, scope)
-  const [result, ...blocks] = await executeBatch(db, [
-    page,
-    ...tenantPageBlockQueries({ sql: '(SELECT organization_id FROM page_scope)' }, { sql: '(SELECT id FROM page_scope)' })
-      .map(query => ({
+export function prepareTenantPageEditorSnapshot(variantId: string, organization?: string | { sql: string }, editor = false) {
+  const page = pageRepresentationQuery(variantId, organization, editor)
+  const scoped = { sql: '(SELECT organization_id FROM page_scope)' }
+  const document = { sql: '(SELECT id FROM page_scope)' }
+  const pageWithFaq = { sql: `(SELECT path FROM page_scope WHERE EXISTS (
+    SELECT 1 FROM content_blocks b WHERE b.document_id = page_scope.id AND b.type = 'faq'
+      AND json_extract(b.data_json, '$.source') = 'page_qa'))` }
+  const locale = { sql: '(SELECT locale FROM page_scope)' }
+  const material = tenantPageBlockQueries(scoped, document)
+  if (editor) material.push(qaListQuery(scoped, null, locale, true, pageWithFaq))
+  return {
+    queries: [
+      page,
+      ...material.map(query => ({
         query: `WITH page_scope AS (${page.query}) ${query.query}`,
         params: [...(page.params ?? []), ...(query.params ?? [])],
       })),
-  ], { operation: 'Read website page and blocks' })
-  const row = result!.results[0] as (PageRepresentationRow & ContentDocumentRow) | undefined
-  if (!row) notFound('Tenant page variant not found')
-  return { row, blocks: tenantPageBlocksFromRows(blocks) }
+    ],
+    read([result, ...related]: D1Result[]) {
+      const row = result!.results[0] as (PageRepresentationRow & ContentDocumentRow & { public_path?: string | null }) | undefined
+      if (!row) return null
+      const blocks = tenantPageBlocksFromRows(related)
+      const faq = related[2]?.results as QaDocument[] | undefined
+      if (faq?.length) for (const block of blocks) {
+        if (block.type === 'faq' && block.data.source === 'page_qa' && (!Array.isArray(block.data.items) || !block.data.items.length)) {
+          block.data.items = faq.map(qa => ({ title: qa.question, description: qa.answer ?? '' }))
+        }
+      }
+      const route = row.public_path && (row.id === row.page_id ? row.public_path : platformLocale(row.locale)
+        ? `/${row.locale}${row.public_path === '/' ? '' : row.public_path}` : null)
+      return { row, blocks, page: pageDto(row, documentOf(row), blocks), publicPath: route ?? null }
+    },
+  }
 }
 
-export async function getTenantPageForEditor(db: DbClient, variantId: string, scope?: TenantPageScope): Promise<TenantPageDto> {
-  const { row, blocks } = await readTenantPageEditorSnapshot(db, variantId, scope)
-  for (const block of blocks) {
-    if (block.type === 'faq' && block.data.source === 'page_qa' && (!Array.isArray(block.data.items) || !block.data.items.length)) {
-      const pageQa = await listFaqBlockQa(db, row.organization_id, row.path, 'page_qa', row.locale)
-      if (pageQa.length) {
-        block.data.items = pageQa.map(qa => ({ title: qa.question, description: qa.answer ?? '' }))
-      }
-    }
-  }
-  return pageDto(row, documentOf(row), blocks)
+async function readTenantPageSnapshot(db: DbClient, variantId: string, scope?: TenantPageScope, editor = false) {
+  const plan = prepareTenantPageEditorSnapshot(variantId, scope?.organizationId, editor)
+  const snapshot = plan.read(await executeBatch(db, plan.queries, { operation: 'Read website page and blocks' }))
+  return snapshot ?? notFound('Tenant page variant not found')
+}
+
+export async function getTenantPageById(db: DbClient, variantId: string, scope?: TenantPageScope): Promise<TenantPageDto> {
+  return (await readTenantPageSnapshot(db, variantId, scope, true)).page
 }
 
 export async function getPublishedTenantPage(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<TenantPageDto | null> {
@@ -896,7 +921,7 @@ export async function createTenantPage(db: DbClient, input: TenantPageCreateInpu
     throw error
   }
   await refreshTenantPageCard(db, input.env, prepared, input.userId)
-  return { page: await getTenantPageForEditor(db, prepared.variantId) }
+  return { page: await getTenantPageById(db, prepared.variantId) }
 }
 
 /**
@@ -915,7 +940,7 @@ export async function createTenantPage(db: DbClient, input: TenantPageCreateInpu
  * to be seeded with, is deletable precisely because nothing renders it.
  */
 export async function prepareTenantPageDelete(db: DbClient, variantId: string, input: { scope: TenantPageScope; expectedUpdatedAt: string }) {
-  const { query, params } = pageRepresentationQuery(variantId, input.scope)
+  const { query, params } = pageRepresentationQuery(variantId, input.scope.organizationId)
   const row = await queryFirst<PageRepresentationRow>(db, query, params)
   if (!row) notFound('Tenant page variant not found')
   if (row.updated_at !== input.expectedUpdatedAt) conflict('Tenant page content was updated by another writer')
@@ -1018,7 +1043,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   // recipe into `recipe is required for recipe pages`.
   if (!input.data.page_type) badRequest('page_type is required')
   if (input.data.recipe === undefined) badRequest('recipe is required, and may be null')
-  const { row, blocks: currentBlocks } = await readTenantPageEditorSnapshot(db, variantId, input.scope)
+  const { row, blocks: currentBlocks } = await readTenantPageSnapshot(db, variantId, input.scope)
   if (input.data.path !== row.path) badRequest('A page keeps its saved path')
   if (!input.data.updated_at || row.updated_at !== input.data.updated_at) conflict('Tenant page content was updated by another writer')
   const identity = await canonicalTenantPageIdentity(db, row, {
@@ -1069,7 +1094,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   ]
   if (!changedFields.length) {
     if (path !== '/') await refreshSocialCard({ db, env: input.env, owner: { owner_type: 'content_document', owner_id: variantId }, actorId: input.userId })
-    return { page: await getTenantPageForEditor(db, variantId, input.scope) }
+    return { page: await getTenantPageById(db, variantId, input.scope) }
   }
   const updateVariant: BatchQuery = {
     query: 'UPDATE content_documents SET path = ?, title = ?, summary = ?, updated_by = ? WHERE id = ? AND organization_id = ?',
@@ -1092,7 +1117,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   if (path !== '/') {
     await refreshSocialCard({ db, env: input.env, owner: { owner_type: 'content_document', owner_id: variantId }, actorId: input.userId })
   }
-  return { page: await getTenantPageForEditor(db, variantId, input.scope) }
+  return { page: await getTenantPageById(db, variantId, input.scope) }
 }
 
 /**
@@ -1126,19 +1151,4 @@ export function publishedTenantPagePathsQuery(organizationId: string | { sql: st
        AND ${publicTenantPageSql('p')}
      ORDER BY v.path ASC
   `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(typeof locale === 'string' ? [locale] : [])] }
-}
-
-export async function getTenantPageById(db: DbClient, variantId: string, scope?: TenantPageScope) {
-  return await getTenantPageForEditor(db, variantId, scope)
-}
-
-export async function getTenantPageForEditorByPath(db: DbClient, organizationId: string, path: string, locale?: string | null) {
-  const resolvedLocale = await resolveLocale(db, organizationId, locale)
-  const row = await queryFirst<{ id: string } | null>(db, `
-    SELECT id FROM content_documents
-     WHERE row_role IN ('root','representation') AND kind = 'page' AND organization_id = ? AND locale = ? AND path = ?
-     LIMIT 1
-  `, [organizationId, resolvedLocale, normalizeTenantPagePath(path)])
-  if (!row) notFound('Tenant page variant not found')
-  return await getTenantPageForEditor(db, row.id)
 }

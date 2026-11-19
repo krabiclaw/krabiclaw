@@ -489,7 +489,7 @@ export function membershipBySlugQuery(slug: string, userId: string | BatchQuery)
   return membershipQuery('slug', slug, userId)
 }
 
-export function membershipByIdQuery(id: string, userId: string): BatchQuery {
+export function membershipByIdQuery(id: string, userId: string | BatchQuery): BatchQuery {
   return membershipQuery('id', id, userId)
 }
 

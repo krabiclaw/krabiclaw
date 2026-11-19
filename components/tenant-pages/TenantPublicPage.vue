@@ -69,9 +69,8 @@ const { data, error, status, execute } = await useAsyncData(key, async () => {
     if (!page) throw createError({ statusCode: 404, statusMessage: 'Tenant page not found' })
     return { success: true as const, page }
   }
-  const query: Record<string, string> = activeLocale.value === 'en' ? { path: pagePath.value } : { path: pagePath.value, locale: activeLocale.value }
   return await publicApiRequest<{ success: true; page: PublicTenantPage }>('/api/public/pages', {
-    query,
+    query: { path: pagePath.value, locale: activeLocale.value },
     validate: isPageResponse,
     coalesceKey: key.value,
   })

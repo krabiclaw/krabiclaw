@@ -46,7 +46,7 @@ export default defineHandler(event => {
             if (resource.startsWith('/api/editor/')) {
               const { organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
               const content = website?.content
-              if (!content || resource !== `/api/editor/organizations/${organization.id}/${content.endpoint}`) {
+              if (!content?.value || resource !== `/api/editor/organizations/${organization.id}/${content.endpoint}`) {
                 throw new HTTPError({ statusCode: 404, message: 'Website content was not read for this document' })
               }
               return content.value

@@ -187,7 +187,7 @@ function createTenantPageDraft(organizationId: string, pageId: string) {
   const load = useAsyncData<SavedPage>(key, async () => {
     if (!website.value) throw createError({ statusCode: 500, statusMessage: 'Website settings are unavailable' })
     if (pageId === 'new') return { page: null, public_url: null, preview_token: null }
-    return dashboardApi(`/api/editor/organizations/${organizationId}/pages/${pageId}`, {
+    return dashboardApi(`/api/editor/organizations/${organizationId}/pages/${encodeURIComponent(pageId)}`, {
       validate: (value): value is SavedPage => isTenantPageResponse(value)
         && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string')
         && 'preview_token' in value && (value.preview_token === null || typeof value.preview_token === 'string'),

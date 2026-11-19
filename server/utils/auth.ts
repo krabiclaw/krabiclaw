@@ -381,6 +381,11 @@ export interface DashboardAuthRead {
   results?: D1Result[]
 }
 
+/** Membership statements can join the same live session before Better Auth decodes it. */
+export function dashboardSessionUserQuery(token: string): BatchQuery {
+  return { query: '(SELECT "userId" FROM session WHERE token = ? AND "expiresAt" >= unixepoch())', params: [token] }
+}
+
 const dashboardAuthRead = new AsyncLocalStorage<DashboardAuthRead>()
 
 /** Drizzle's session/user join normally executes through raw(). Include it in the

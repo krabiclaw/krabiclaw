@@ -1,7 +1,7 @@
 import { queryFirst } from '~/server/db'
 import { apiErrorResponse, cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
-import { getPublicTenantPageForPath, listCanonicalTenantPages } from '~/server/utils/public-tenant-pages'
+import { getPublicTenantPageForPath } from '~/server/utils/public-tenant-pages'
 
 export default defineHandler(async (event) => {
   const organizationId = event.context.organizationId as string | null | undefined
@@ -19,14 +19,13 @@ export default defineHandler(async (event) => {
 
   const query = getQuery(event)
   const path = typeof query.path === 'string' ? query.path : null
+  if (!path) return apiErrorResponse(event, 400, 'PAGE_PATH_REQUIRED', 'A page path is required')
   const locale = typeof query.locale === 'string' ? query.locale : null
 
   try {
-    const pages = path
-      ? await getPublicTenantPageForPath(env, db, organizationId, path, { locale, preview })
-      : await listCanonicalTenantPages(env, db, organizationId, locale)
-    if (path && !pages) return apiErrorResponse(event, 404, 'PAGE_NOT_FOUND', 'Tenant page not found')
-    return jsonResponse({ success: true, page: path ? pages : undefined, pages: path ? undefined : pages, preview })
+    const page = await getPublicTenantPageForPath(env, db, organizationId, path, { locale, preview })
+    if (!page) return apiErrorResponse(event, 404, 'PAGE_NOT_FOUND', 'Tenant page not found')
+    return jsonResponse({ success: true, page, preview })
   } catch (error) {
     const typed = error as { statusCode?: number; statusMessage?: string }
     return apiErrorResponse(event, typed.statusCode ?? 500, 'TENANT_PAGE_LOOKUP_FAILED', typed.statusMessage ?? 'Tenant page lookup failed')
@@ -34,5 +33,4 @@ export default defineHandler(async (event) => {
 })
 import { defineHandler } from 'nitro';
 import { getQuery } from 'nitro/h3';
-import { getRouterParam } from 'nitro/h3';
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'

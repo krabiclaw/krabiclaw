@@ -133,21 +133,25 @@ export async function listQa(db: DbClient, organizationId: string, locationId: s
   return queryAll<QaDocument>(db, query, params)
 }
 
-export function qaListQuery(organizationId: string | { sql: string }, locationId: string | null, locale: string, publishedOnly = false, pagePath?: string | null, qaId?: string | null): BatchQuery {
+export function qaListQuery(organizationId: string | { sql: string }, locationId: string | null, locale: string | { sql: string }, publishedOnly = false, pagePath?: string | { sql: string } | null, qaId?: string | null): BatchQuery {
   const scope = qaId
     ? { clause: 'root.id = ?', params: [qaId] as unknown[] }
-    : scopeSql(locationId, pagePath)
+    : pagePath && typeof pagePath === 'object'
+      ? { clause: `root.location_id IS NULL AND root.scope_path = ${pagePath.sql}`, params: [] }
+      : scopeSql(locationId, pagePath)
+  const filter = pagePath && typeof pagePath === 'object' ? scope.clause
+    : scope.clause.replace(/\b(location_id|scope_path)\b/g, 'root.$1')
   return { query: `
     SELECT p.id, p.organization_id, root.location_id, root.scope_path AS page_path,
       p.title AS question, p.summary AS answer, (root.metadata_json ->> '$.question_author') AS question_author,
       (root.metadata_json ->> '$.question_date') AS question_date, (root.metadata_json ->> '$.answer_author') AS answer_author,
       (root.metadata_json ->> '$.answer_date') AS answer_date, (root.metadata_json ->> '$.is_owner_answer') AS is_owner_answer,
       (root.metadata_json ->> '$.upvote_count') AS upvote_count, root.source, root.status, root.sort_order, p.created_at, p.updated_at
-    FROM content_documents root JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
+    FROM content_documents root JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ${typeof locale === 'string' ? '?' : locale.sql}
     WHERE root.row_role = 'root' AND root.kind = 'qa' AND root.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}
-      AND ${scope.clause.replace(/\b(location_id|scope_path)\b/g, 'root.$1')}${publishedOnly ? " AND root.status = 'published'" : ''}
+      AND ${filter}${publishedOnly ? " AND root.status = 'published'" : ''}
     ORDER BY root.sort_order, is_owner_answer DESC, upvote_count DESC, p.created_at
-  `, params: [locale, ...(typeof organizationId === 'string' ? [organizationId] : []), ...scope.params] }
+  `, params: [...(typeof locale === 'string' ? [locale] : []), ...(typeof organizationId === 'string' ? [organizationId] : []), ...scope.params] }
 }
 
 export function faqBlockSource(block: { type: string; data: Record<string, unknown> }): FaqBlockSource | null {

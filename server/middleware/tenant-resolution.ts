@@ -25,7 +25,7 @@ import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation, type Sit
 import { publicTenantPageSql } from '~/server/utils/content/pages'
 import { buildLoginUrl } from '~/shared/auth/return-target'
 import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
-import { getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
+import { dashboardSessionUserQuery, getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
 import { dashboardOrganizationFrom, getDashboardSession, readDashboardMembership } from '~/server/utils/dashboard-context'
 import { prepareDashboardWorkspaceAccess, readDashboardWorkspaceAccess } from '~/server/utils/dashboard-context-service'
 import { membershipBySlugQuery, BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
@@ -36,6 +36,7 @@ import { readPublicSourceLocale, sourceLocaleQuery } from '~/server/utils/locali
 import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { calendarCoverageQuery } from '~/server/domain/member-scheduling'
 import { calendarConnectionQuery, calendarSettingsFromRows, readCalendarSettingsDocument } from '~/server/utils/google-calendar'
+import { prepareTenantPageEditor } from '~/server/utils/tenant-pages-api'
 import { prepareConnectionSummary, prepareWebsiteSettings } from '~/server/utils/organization-settings'
 import { prepareOrganizationReviews } from '~/server/utils/organization-reviews'
 import { preparePublicLocationDocument } from '~/server/utils/public-route'
@@ -44,7 +45,7 @@ import { prepareBlogList } from '~/server/utils/content/publishing'
 import { preparePostList } from '~/server/utils/post-management'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { qaListQuery, qaPageScopesQuery } from '~/server/utils/location-qa'
-import { rendersWebsiteDocument } from '~/utils/dashboard-document'
+import { rendersWebsiteDocument, websitePageVariant } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -329,9 +330,7 @@ async function resolveDashboardTenant(event: H3Event, slug: string, panel: strin
   let plan: ReturnType<typeof prepareDashboardTenant> | undefined
   const read: DashboardAuthRead = {
     queries(token) {
-      plan = prepareDashboardTenant(event, db, env, membershipBySlugQuery(slug, {
-        query: '(SELECT "userId" FROM session WHERE token = ? AND "expiresAt" >= unixepoch())', params: [token],
-      }), slug, panel)
+      plan = prepareDashboardTenant(event, db, env, membershipBySlugQuery(slug, dashboardSessionUserQuery(token)), slug, panel)
       return plan.queries
     },
   }
@@ -361,6 +360,8 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   const website = rendersWebsiteDocument(panel, query) ? prepareWebsiteSettings(managedOrg, env) : null
   const websitePanel = website ? panel.split('/')[2] : undefined
   const websiteList = prepareWebsitePanel(managedOrg, websitePanel, query)
+  const variantId = websitePageVariant(panel)
+  const websiteEditor = variantId && variantId !== 'new' ? prepareTenantPageEditor(variantId, env) : null
   const catalogRead = { products: ['read'] } as const
   const catalogRoles = [...rolesAllowing({ products: ['read'] }), ...rolesAllowing({ products: ['assigned'] })]
   const catalog = panel === '/products' && query.view !== 'menu' && query.view !== 'section'
@@ -403,6 +404,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(earnings?.queries ?? []),
     ...(website?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(websiteList?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(websiteEditor?.queries.map(query => withViewer(membership, query)) ?? []),
   ]
   return { queries, present }
 
@@ -432,7 +434,9 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     if (website && (viewer as { organization_wide: number }).organization_wide === 1) {
       event.context.dashboardWebsite = {
         settings: website.read(panelRows.slice(0, website.queries.length)),
-        content: websiteList?.read(panelRows.slice(website.queries.length), organization.id),
+        content: websiteEditor
+          ? { endpoint: `pages/${encodeURIComponent(variantId!)}`, value: await websiteEditor.read(panelRows.slice(website.queries.length), organization) }
+          : websiteList?.read(panelRows.slice(website.queries.length), organization.id),
       }
     }
     setResponseHeader(event, 'cache-control', 'private, no-store')
@@ -612,7 +616,7 @@ function setResolvedTenantContext(
   }
 }
 
-const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/messages", "/api/mcp", "/api/integrations/channex"] as const;
+const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/editor/organizations", "/api/messages", "/api/mcp", "/api/integrations/channex"] as const;
 
 export default defineHandler(async (event) => {
   // Nested self-fetches (i18n/icon/internal API calls during SSR) never carry

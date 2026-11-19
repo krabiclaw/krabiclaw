@@ -6,7 +6,7 @@ import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { faqBlockSource, faqItems, listFaqBlockQa } from '~/server/utils/location-qa'
 import type { FaqBlockSource } from '~/shared/faq-block'
 import { listOrganizationReviews } from '~/server/utils/organization-reviews'
-import { getTenantPageForEditor, getPublishedTenantPage, listPublishedTenantPagePaths, publicTenantPageSql, type TenantPageDto } from '~/server/utils/content/pages'
+import { getTenantPageById, getPublishedTenantPage, publicTenantPageSql, type TenantPageDto } from '~/server/utils/content/pages'
 import { validateContentBlockData, type TenantPageBlock } from '~/utils/tenant-page-blocks'
 import type { MediaPlacementItem } from '~/server/utils/media-placement'
 import { COVER_SELECT, attachCoverMedia, coverJoinSql } from '~/server/utils/content/cover'
@@ -576,7 +576,7 @@ export async function getPublicTenantPageForPath(
   } = {},
 ): Promise<PublicTenantPage | null> {
   const page = options.preview
-    ? await getTenantPageForEditor(db, await resolveVariantId(db, organizationId, path, options.locale))
+    ? await getTenantPageById(db, await resolveVariantId(db, organizationId, path, options.locale), { organizationId })
     : await getPublishedTenantPage(db, organizationId, path, options.locale)
   if (!page) return null
   const localizations = page.id === page.page_id
@@ -627,14 +627,4 @@ async function resolveVariantId(db: DbClient, organizationId: string, path: stri
   `, [organizationId, path, locale ?? null, locale ?? null])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Tenant page not found' })
   return row.id
-}
-
-export async function listCanonicalTenantPages(env: CloudflareEnv, db: DbClient, organizationId: string, locale?: string | null) {
-  const paths = await listPublishedTenantPagePaths(db, organizationId, locale)
-  const pages: PublicTenantPage[] = []
-  for (const item of paths) {
-    const page = await getPublicTenantPageForPath(env, db, organizationId, item.path, { locale })
-    if (page) pages.push(page)
-  }
-  return pages
 }
