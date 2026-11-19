@@ -7,7 +7,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { Miniflare } from 'miniflare'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, readHomeCalendar, readStayCalendar, readStayHome, recordStayPayment, importStayNights, quoteStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, readHomeCalendar, readStayCalendar, readStayHome, recordStayPayment, importStayNights, quoteStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, type GuestStay, type StayAccess, cancelStayAsGuest, createStayRequest, dispatchStayCheckoutDeadlines, readPublicStayHome, type PublicStayCalendar  } from '../../server/domain/stays.ts'
 import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { getRequestDataMetrics } from '../../server/utils/request-metrics.ts'
@@ -25,10 +25,10 @@ import paymentHandoffRoute from '../../server/api/public/payments/[payment_id].g
 import paymentConfirmRoute from '../../server/api/public/payments/[payment_id]/confirm.post.ts'
 import paymentReviewRoute from '../../server/api/public/payments/[payment_id]/review.post.ts'
 import { createProductBooking, notifyProductBookingCreated } from '../../server/domain/product-bookings.ts'
+import publicAvailabilityRoute from '../../server/api/public/products/[slug]/availability.get.ts'
 import publicBookingRoute from '../../server/api/public/products/[slug]/book.post.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getThreadOperationalRecord, requestActions } from '../../server/domain/requests.ts'
-import { cancelStayAsGuest, createStayRequest, dispatchStayCheckoutDeadlines, readPublicStayCalendar, readPublicStayHome } from '../../server/domain/stays.ts'
 import { projectStripeConnectedAccount, reserveStripeConnectedAccount } from '../../server/utils/stripe-connect.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[payment_id]/return.post.ts'
 import { updateLocation } from '../../server/utils/location-management.ts'
@@ -1150,15 +1150,28 @@ test('stay request decisions and expiry reconcile the host task and the exact ni
     assert.ok(token)
     const dashboard = new H3()
     let dashboardEvent: H3Event | undefined
-    dashboard.use(event => { dashboardEvent = event })
+    dashboard.use(event => {
+      dashboardEvent = event
+      event.context.organizationId = ORG
+    })
+    dashboard.get('/api/public/products/:slug/availability', publicAvailabilityRoute)
     dashboard.get('/api/dashboard/bookings/:booking_id', dashboardBookingDetailsRoute)
     dashboard.post('/api/dashboard/bookings', dashboardBookingCreateRoute)
     dashboard.patch('/api/dashboard/bookings/:booking_id', dashboardBookingPatchRoute)
-    const hostRequest = (method: 'GET' | 'POST' | 'PATCH', path: string, body?: object) => dashboard.request(Object.assign(new Request(`https://proof.example${path}?org=org`, {
+    const hostRequest = (method: 'GET' | 'POST' | 'PATCH', path: string, body?: object, params: Record<string, string> = {}) => dashboard.request(Object.assign(new Request(`https://proof.example${path}?${new URLSearchParams({ org: ORG, ...params })}`, {
       method, headers: { authorization: `Bearer ${token}`, origin: 'https://proof.example', 'content-type': 'application/json' }, body: JSON.stringify(body),
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     const publicWindow = { from: date(30), to: date(31) }
-    const availability = () => readPublicStayCalendar(db, ORG, cabin.id, publicWindow)
+    const availability = async () => {
+      const response = await hostRequest('GET', `/api/public/products/${cabin.slug}/availability`, undefined, publicWindow)
+      assert.equal(response.status, 200, await response.clone().text())
+      assert.ok(dashboardEvent)
+      const metrics = getRequestDataMetrics(dashboardEvent)
+      assert.deepEqual([metrics.batchRoundTrips, metrics.singleStatementRoundTrips], [1, 0])
+      const calendar = await response.json() as PublicStayCalendar & { unit: string }
+      assert.equal(calendar.unit, 'nights')
+      return calendar
+    }
     assert.equal((await availability()).nights.find(night => night.date === publicWindow.from)?.available, true)
     const added = await hostRequest('POST', '/api/dashboard/bookings', {
       product_id: cabin.id, idempotency_key: 'host-stay-batched-read', check_in_date: date(30), check_out_date: date(31),

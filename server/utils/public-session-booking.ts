@@ -4,7 +4,7 @@ import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/serv
 import { bookableSessions, slotCalendars, slotReadQueries, type SlotCalendar, type SlotRead } from '~/server/utils/availability'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 import type { PublicProduct } from '~/server/types/products'
-import { readPublicStayCalendar } from '~/server/domain/stays'
+import { publicStayCalendarRead } from '~/server/domain/stays'
 import { isCurrencyCode } from '~/shared/currencies'
 import { AVAILABILITY_PAGE_DAYS } from '~/shared/bookings'
 import { addLocalDays, isValidCalendarDate, isValidTimezone, localDateAt } from '~/utils/timezone'
@@ -76,19 +76,24 @@ export async function readPublicProductAvailability(db: DbClient, organizationId
   const now = new Date()
   const request = availabilityRequest(input, now)
   const read = slotRead(organizationId, { query: "SELECT id FROM products WHERE organization_id=? AND slug=? AND kind<>'stay'", params: [organizationId, slug] }, request, now, 'bookable')
-  const [productResult, ...slotResults] = await executeBatch(db, [{
+  const stayRead = publicStayCalendarRead(organizationId, {
+    query: "SELECT id FROM products WHERE organization_id=? AND slug=? AND kind='stay'",
+    params: [organizationId, slug],
+  }, { from: input.from, to: input.to }, now)
+  const slots = slotReadQueries(read)
+  const [productResult, ...results] = await executeBatch(db, [{
     query: `SELECT p.id, p.kind, p.name, p.slug, p.active, p.order_url,
         EXISTS (SELECT 1 FROM product_publications pub WHERE pub.organization_id=p.organization_id AND pub.product_id=p.id AND pub.published=1) AS published
       FROM products p WHERE p.organization_id=? AND p.slug=?`,
     params: [organizationId, slug],
-  }, ...slotReadQueries(read)], { operation: 'Read public availability' })
+  }, ...slots, ...stayRead.queries], { operation: 'Read public availability' })
   const product = productResult?.results[0] as { id: string; kind: string; name: string; slug: string; active: number; order_url: string | null; published: number } | undefined
   if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
-  if (product.kind === 'stay') return { unit: 'nights' as const, ...await readPublicStayCalendar(db, organizationId, product.id, { from: input.from, to: input.to }) }
+  if (product.kind === 'stay') return { unit: 'nights' as const, ...stayRead.calendar(results.slice(slots.length)) }
   if (!product.active || !product.published) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
   const identity = { id: product.id, name: product.name, slug: product.slug }
   if (product.order_url) return { unit: 'slot' as const, product: identity, timezone: null, sessions: [] }
-  const calendar = slotCalendars(env, read, slotResults).get(product.id)
+  const calendar = slotCalendars(env, read, results.slice(0, slots.length)).get(product.id)
   if (!calendar) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
   return publicSessions(calendar, identity, request, now)
 }
