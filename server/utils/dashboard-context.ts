@@ -46,8 +46,6 @@ export type DashboardOrganizationRow = ResolvedMembership & {
   memberId: string
 } & DashboardOrganizationConfig
 
-// The dashboard shows the business's mark and nothing else of its media: the
-// sidebar avatar is its `logo` as its owner presents it, or no avatar at all.
 export interface DashboardLocationRow {
   id: string
   slug: string
