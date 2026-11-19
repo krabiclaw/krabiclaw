@@ -1799,10 +1799,10 @@ async function commit(concern?: ProductConcern) {
     }
     if (savedInternalName) {
       const current = loaded.value
-      const { stay, image, gallery, media, social_image } = current?.product ?? {}
-      if (!current || !stay || !savedInternalName.stay || savedInternalName.id !== current.product.id) {
+      if (!current?.product.stay || !savedInternalName.stay || savedInternalName.id !== current.product.id) {
         throw new Error('The saved listing does not match this editor.')
       }
+      const { image, gallery, media, social_image } = current.product
       loaded.value = { ...current, product: { ...savedInternalName, image, gallery, media, social_image } }
       editVersion.value = savedInternalName.updated_at
       const { id, stay: { internal_name: label } } = savedInternalName
