@@ -309,8 +309,20 @@ export default definePlugin((nitroApp) => {
     const sections = publicSections(organization.vertical, productCatalogRows(publicProducts), contentRows,
       locations.some(location => Number(location.has_reservations) === 1))
 
+    const dynamicSitemapRoots = new Set([
+      '/menu', '/products', '/services', '/experiences', '/stays',
+      '/blog', '/docs',
+      '/posts',
+      '/locations',
+      '/reservations',
+    ])
+
     entries.push(...site.sitemap.exactPaths
-      .filter(loc => !(loc in SECTION_PATHS) || sections.site[SECTION_PATHS[loc]!])
+      .filter(loc => {
+        if (dynamicSitemapRoots.has(loc)) return false
+        if (loc in SECTION_PATHS) return sections.site[SECTION_PATHS[loc]!]
+        return true
+      })
       .map(loc => ({ loc })))
     for (const item of catalogNavigation(organization.vertical, sections.site)) entries.push({ loc: item.path })
     if (sections.site.reservations) entries.push({ loc: '/reservations' })
