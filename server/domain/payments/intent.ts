@@ -461,23 +461,25 @@ export async function completePaymentReturn(db: DbClient, env: CloudflareEnv, or
       if (state === 'processing' || state === 'verifying') return { state: 'processing' }
       throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
     }
-    // The webhook can commit while Stripe's response is in flight. Read the
-    // same claimed payment and hold before preparing any inventory write.
-    const refreshed = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
-    payment = refreshed
-    hold = refreshed.checkout_hold ? JSON.parse(refreshed.checkout_hold) as CheckoutHold : null
+    const visitId = hold?.session_id && hold.status === 'active' ? hold.conversation_id : null
+    if (visitId && receiptLanguage && sessionBuyer) userId = await sessionBuyer()
+    const originalBuyer = visitId && userId && userId === payment.buyer_user_id
+      ? originalCheckoutClaim(payment.id, userId, await tokenHash(claim), new Date().toISOString()) : null
+    const cancellation = visitId && originalBuyer ? await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', visitId) : null
+    const visit = visitId && cancellation ? await visitReceipt(visitId, cancellation.token) : null
+    // A visit with a receipt plan checks for the webhook's capture in the same
+    // batch that can claim the booking itself.
+    if (!visit) {
+      const refreshed = await readCheckoutPayment(db, organizationId, paymentId, claim, now, 'settlement')
+      payment = refreshed
+      hold = refreshed.checkout_hold ? JSON.parse(refreshed.checkout_hold) as CheckoutHold : null
+    }
     if (payment.captured_amount > 0) {
       const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : intent.latest_charge?.id
       if (payment.stripe_payment_intent_id !== intent.id || !chargeId || payment.stripe_charge_id !== chargeId
         || payment.captured_amount !== intent.amount_received || payment.currency !== intent.currency.toUpperCase()
         || Boolean(payment.livemode) !== intent.livemode) throw new Error('Stored capture does not match Stripe')
     } else {
-      const visitId = hold?.session_id && hold.status === 'active' ? hold.conversation_id : null
-      if (visitId && receiptLanguage && sessionBuyer) userId = await sessionBuyer()
-      const originalBuyer = visitId && userId && userId === payment.buyer_user_id
-        ? originalCheckoutClaim(payment.id, userId, await tokenHash(claim), new Date().toISOString()) : null
-      const cancellation = visitId && originalBuyer ? await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', visitId) : null
-      const visit = visitId && cancellation ? await visitReceipt(visitId, cancellation.token) : null
       const { settlement } = await reconcilePaymentIntent(db, stripe, payment, intent, env, hold,
         originalBuyer && visit ? [...originalBuyer.queries, ...visit.queries] : undefined)
       if (!settlement) throw new Error('Succeeded Stripe intent did not return a recorded settlement')

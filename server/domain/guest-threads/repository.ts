@@ -364,25 +364,25 @@ export async function unreadBadge(db: DbClient, userId: string): Promise<number>
 export { listUnreadIds }
 
 // The follow-up belongs to the guest's booking and moves with it; it is its host's, else the owner's.
-function bookingFollowUpQueries(conversationId: string, now: string): BatchQuery[] {
+function bookingFollowUpQueries(conversation: BatchQuery, now: string): BatchQuery[] {
   const dueAt = "strftime('%Y-%m-%dT%H:%M:%fZ', br.ends_at, '+1 day')"
   return [{
     query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
-      FROM ${BOOKING_RECORDS_SQL} br WHERE br.conversation_id = ? AND br.unit = 'slot' AND br.status <> 'confirmed' AND tasks.status = 'open'
+      FROM ${BOOKING_RECORDS_SQL} br WHERE br.conversation_id = ${conversation.query} AND br.unit = 'slot' AND br.status <> 'confirmed' AND tasks.status = 'open'
         AND tasks.subject_type = 'booking' AND tasks.subject_id = br.id AND tasks.kind = 'consultation_follow_up' RETURNING id AS changed_task_id`,
-    params: [now, now, conversationId],
+    params: [now, now, ...conversation.params ?? []],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT ?, br.organization_id, 'consultation_follow_up', 'booking', br.id, br.product_id, br.location_id, ${jobAssigneeSql('br.organization_id', 'br.assigned_member_id')}, ${dueAt}, ${dueAt}, br.timezone, 'open', 'consultation_follow_up:' || br.id, 1, ?, ?
         FROM ${BOOKING_RECORDS_SQL} br
-       WHERE br.conversation_id = ? AND br.unit = 'slot' AND br.status = 'confirmed' AND ${dueAt} > ?
+       WHERE br.conversation_id = ${conversation.query} AND br.unit = 'slot' AND br.status = 'confirmed' AND ${dueAt} > ?
       ON CONFLICT (dedupe_key) DO UPDATE SET status = CASE WHEN tasks.status = 'cancelled' THEN 'open' ELSE tasks.status END, closed_at = CASE WHEN tasks.status = 'cancelled' THEN NULL ELSE tasks.closed_at END,
         product_id = excluded.product_id, location_id = excluded.location_id, timezone = excluded.timezone,
         starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at
         WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.starts_at IS NOT excluded.starts_at
           OR tasks.assigned_member_id IS NOT excluded.assigned_member_id OR tasks.product_id IS NOT excluded.product_id
           OR tasks.location_id IS NOT excluded.location_id OR tasks.timezone IS NOT excluded.timezone)) RETURNING id AS changed_task_id`,
-    params: [crypto.randomUUID(), now, now, conversationId, now],
+    params: [crypto.randomUUID(), now, now, ...conversation.params ?? [], now],
   }]
 }
 
@@ -399,15 +399,17 @@ export function resolveScheduledDeliveryFailure(message: BatchQuery, now: string
 }
 
 /** Booking mutations also reconcile approval, follow-ups, session prep and change requests. */
-export function conversationTaskQueries(conversationId: string, now: string, previousSessionId: string | null = null): BatchQuery[] {
+export function conversationTaskQueries(conversationId: string | BatchQuery, now: string, previousSessionId: string | null = null): BatchQuery[] {
+  const conversation = typeof conversationId === 'string' ? { query: '?', params: [conversationId] } : conversationId
+  const conversationParams = conversation.params ?? []
   return [{
     // A booking waiting for the business's approval is work until it is approved, declined or cancelled.
     query: `UPDATE tasks SET status = CASE WHEN b.status = 'cancelled' THEN 'cancelled' ELSE 'done' END, closed_at = ?, version = tasks.version + 1, updated_at = ?,
         closed_by_user_id = (SELECT e.author_user_id FROM messages e WHERE e.conversation_id = c.id AND e.event_name IN ('booking.confirm', 'booking.reject', 'booking.cancel') ORDER BY e.sequence DESC LIMIT 1)
       FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
-      WHERE c.id = ? AND tasks.dedupe_key = 'booking_review:' || b.id AND tasks.status = 'open'
+      WHERE c.id = ${conversation.query} AND tasks.dedupe_key = 'booking_review:' || b.id AND tasks.status = 'open'
         AND (b.status <> 'pending' OR ${stayRequestPayBySql('c.id')} IS NOT NULL)`,
-    params: [now, now, conversationId],
+    params: [now, now, ...conversationParams],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, b.location_id,
@@ -417,14 +419,14 @@ export function conversationTaskQueries(conversationId: string, now: string, pre
         FROM conversations c
         JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
         JOIN product_booking_configs bc ON bc.organization_id = b.organization_id AND bc.product_id = b.product_id
-       WHERE c.id = ? AND c.kind = 'booking' AND b.status = 'pending' AND ${stayRequestPayBySql('c.id')} IS NULL
+       WHERE c.id = ${conversation.query} AND c.kind = 'booking' AND b.status = 'pending' AND ${stayRequestPayBySql('c.id')} IS NULL
       ON CONFLICT (dedupe_key) DO NOTHING`,
-    params: [crypto.randomUUID(), now, now, conversationId],
-  }, ...bookingFollowUpQueries(conversationId, now), ...sessionPrepTaskQueries({
+    params: [crypto.randomUUID(), now, now, ...conversationParams],
+  }, ...bookingFollowUpQueries(conversation, now), ...sessionPrepTaskQueries({
     query: `SELECT b.product_session_id FROM conversations c
-      JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id WHERE c.id = ? AND c.kind = 'booking'
-      UNION SELECT s.id FROM product_sessions s JOIN conversations c ON c.organization_id = s.organization_id WHERE c.id = ? AND s.id = ?`,
-    params: [conversationId, conversationId, previousSessionId],
+      JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id WHERE c.id = ${conversation.query} AND c.kind = 'booking'
+      UNION SELECT s.id FROM product_sessions s JOIN conversations c ON c.organization_id = s.organization_id WHERE c.id = ${conversation.query} AND s.id = ?`,
+    params: [...conversationParams, ...conversationParams, previousSessionId],
   }, now), {
     // A change is answered, or replaced by a newer proposal or a move: its task is done, by whoever answered or replaced it.
     query: `UPDATE tasks SET status = 'done', closed_at = ?, version = tasks.version + 1, updated_at = ?,
@@ -433,8 +435,8 @@ export function conversationTaskQueries(conversationId: string, now: string, pre
           ORDER BY answer.sequence LIMIT 1)
       FROM messages p
       WHERE tasks.kind = 'booking_change' AND tasks.status = 'open' AND tasks.dedupe_key = 'booking_change:' || p.id
-        AND p.conversation_id = ? AND p.event_name = 'booking_change.requested' AND ${CHANGE_ANSWERED_SQL}`,
-    params: [now, now, conversationId],
+        AND p.conversation_id = ${conversation.query} AND p.event_name = 'booking_change.requested' AND ${CHANGE_ANSWERED_SQL}`,
+    params: [now, now, ...conversationParams],
   }, {
     // A change that needs the business: one the guest asked for (now), or a business proposal on a booking
     // (from when it expires unanswered).
@@ -446,11 +448,11 @@ export function conversationTaskQueries(conversationId: string, now: string, pre
         FROM conversations r
         JOIN bookings record ON record.id = r.booking_id AND record.organization_id = r.organization_id
         JOIN messages p ON p.conversation_id = r.id
-       WHERE r.id = ? AND p.event_name = 'booking_change.requested' AND NOT ${CHANGE_ANSWERED_SQL}
+       WHERE r.id = ${conversation.query} AND p.event_name = 'booking_change.requested' AND NOT ${CHANGE_ANSWERED_SQL}
            -- A stay's change proposed by the business waits on the guest's channel, not on the business.
            AND (${GUEST_CAUSED_SQL('p', 'r')} OR record.product_session_id IS NOT NULL)
       ON CONFLICT (dedupe_key) DO NOTHING`,
-    params: [now, now, conversationId],
+    params: [now, now, ...conversationParams],
   }]
 }
 

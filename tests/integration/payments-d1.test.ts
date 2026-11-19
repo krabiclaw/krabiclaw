@@ -1313,7 +1313,7 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
   assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
   const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
   // This provider session reads the attorney's availability and its older purchase reads two attribution rows.
-  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 5 })
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 4 })
   const response = await request('/api/public/booking-requests/' + receipt.conversation_id, { headers: { authorization: `Bearer ${receipt.cancellation_token}` } })
   assert.equal(response.status, 200)
   const { booking } = await response.json() as { booking: { status: string } }
@@ -1370,7 +1370,7 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
   }, { 'webhook-wins': 'succeeded' })
   const stripe = getStripe(env)
   const receipt = await completePaymentReturn(requestDb, { ...env, DB: requestDb }, ORG, 'webhook-wins', claim,
-   async () => 'guest', undefined, async () => ({ locale: 'en', source: true }))
+   async () => 'guest', undefined, async () => ({ locale: 'en', source: true }), async () => 'guest')
   assert.ok(webhook)
   await webhook
   assert.equal(receipt.state, 'paid')
@@ -1387,7 +1387,8 @@ test('the checkout return reuses a booking the webhook saved while Stripe was re
   assert.ok(events.take('payment.captured'))
   assert.equal(events.take('payment.captured'), undefined)
   const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
-  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 2 })
+  // This fixture reads the provider and legacy attribution while preparing the guarded batch.
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 4 })
  } finally { await runtime.dispose() }
 })
 
