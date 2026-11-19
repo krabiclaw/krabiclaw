@@ -4,12 +4,12 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
 import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, oneTimeToken, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
-import { stripe as betterAuthStripe } from '@better-auth/stripe'
+import { stripe as betterAuthStripe, type Subscription } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
-import { getCurrentAuthEndpointContext } from '@better-auth/core/context'
+import { defineRequestState, getCurrentAuthEndpointContext, hasRequestState } from '@better-auth/core/context'
 import { HTTPError, type H3Event } from 'nitro';
 import { createDb, executeBatch, queryAll, queryFirst, schema, type BatchQuery, type DbClient } from '~/server/db'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
@@ -168,6 +168,7 @@ export interface CloudflareEnv {
   APPLE_APP_BUNDLE_ID: string
   APPLE_SERVICES_ID: string
   STRIPE_SECRET_KEY?: string
+  STRIPE_BILLING_METER_MIGRATION?: string
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_CONNECT_WEBHOOK_SECRET?: string
   STRIPE_PAYMENTS_WEBHOOK_SECRET?: string
@@ -507,6 +508,7 @@ function buildAuth(env: CloudflareEnv) {
   if (!env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is required')
   const stripeClient = createStripeClient(env.STRIPE_SECRET_KEY)
   const loadStripePlans = createStripePlanLoader(stripeClient, env)
+  const upgradeItems = defineRequestState<ReadonlySet<string> | undefined>(() => undefined)
 
   const instance = betterAuth({
     baseURL: authBaseUrl,
@@ -821,20 +823,42 @@ function buildAuth(env: CloudflareEnv) {
         organization: { enabled: true },
         subscription: {
           enabled: true,
-          plans: () => loadStripePlans(),
+          plans: async () => loadStripePlans(await hasRequestState() ? await upgradeItems.get() : undefined),
           requireEmailVerification: true,
-          authorizeReference: async ({ user, referenceId }, ctx) => {
+          authorizeReference: async ({ user, referenceId, action }, ctx) => {
             const member = await getOrgAdapter(ctx.context, configuredOrganizationOptions).findMemberByOrgId({
               userId: user.id,
               organizationId: referenceId,
             })
             if (!member) return false
-            return await hasPermission({
+            const allowed = await hasPermission({
               organizationId: referenceId,
               role: member.role,
               options: configuredOrganizationOptions,
               permissions: { billing: ['update'] },
             }, ctx)
+            if (allowed && action === 'upgrade-subscription' && env.STRIPE_BILLING_METER_MIGRATION === 'true') {
+              // The plugin computes plan changes from price IDs. Use the
+              // same generation as the existing contract throughout upgrade.
+              const subscriptions = await ctx.context.adapter.findMany<Subscription>({
+                model: 'subscription',
+                where: [
+                  { field: 'referenceId', value: referenceId },
+                  { field: 'status', operator: 'in', value: ['active', 'trialing'] },
+                  ...(typeof ctx.body?.subscriptionId === 'string'
+                    ? [{ field: 'stripeSubscriptionId', value: ctx.body.subscriptionId }]
+                    : []),
+                ],
+                limit: 2,
+              })
+              if (subscriptions.length > 1) throw new Error(`Organization ${referenceId} has more than one billed subscription`)
+              const stripeSubscriptionId = subscriptions[0]?.stripeSubscriptionId
+              if (stripeSubscriptionId) {
+                const contract = await stripeClient.subscriptions.retrieve(stripeSubscriptionId)
+                await upgradeItems.set(new Set(contract.items.data.map(item => item.price.id)))
+              }
+            }
+            return allowed
           },
         },
         // The plugin's own /api/auth/stripe/webhook handlers own the
@@ -842,6 +866,16 @@ function buildAuth(env: CloudflareEnv) {
         // mechanism. A throw in this signed event hook reaches Stripe.
         onEvent: async (event) => {
           await handleStripeGa4Event(env, db, stripeClient, event)
+          if (env.STRIPE_BILLING_METER_MIGRATION === 'true') {
+            const { replaceRenewedStripeMeters } = await import('~/server/utils/stripe-meter-usage')
+            const customer = await replaceRenewedStripeMeters(stripeClient, event)
+            if (customer) {
+              const [owner, ...duplicates] = await queryAll<{ id: string }>(db, 'SELECT id FROM organization WHERE "stripeCustomerId" = ?', [customer])
+              if (!owner || duplicates.length) throw new Error('The renewing Stripe subscription must belong to one Blawby organization')
+              const { deliverPaymentsUsage } = await import('~/server/domain/payments/usage')
+              await deliverPaymentsUsage(db, env, owner.id)
+            }
+          }
           const { reportBillingUsageForSubscriptionEvent } = await import('~/server/utils/billing')
           const organizationId = await reportBillingUsageForSubscriptionEvent(env, db, event)
           if (organizationId) await publishEvent(env, { type: 'calendar.changed', organization_id: organizationId, booking_id: null })

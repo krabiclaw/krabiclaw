@@ -128,6 +128,7 @@ export const BILLING_METERS = Object.freeze({
   homes: Object.freeze({
     name: 'Home',
     eventName: 'krabiclaw_homes',
+    replacementEventName: 'blawby_homes',
     formula: 'last',
     unitLabel: 'home',
     plans: [GROWTH_PLAN_ID, BUSINESS_PLAN_ID],
@@ -137,6 +138,7 @@ export const BILLING_METERS = Object.freeze({
   captured_volume: Object.freeze({
     name: 'Payments fee',
     eventName: 'krabiclaw_captured_volume',
+    replacementEventName: 'blawby_captured_volume',
     formula: 'sum',
     unitLabel: 'cent',
     plans: [BUSINESS_PLAN_ID],
@@ -146,6 +148,7 @@ export const BILLING_METERS = Object.freeze({
   stripe_cost: Object.freeze({
     name: 'Stripe fees',
     eventName: 'krabiclaw_stripe_cost',
+    replacementEventName: 'blawby_stripe_cost',
     formula: 'sum',
     unitLabel: 'cent',
     plans: [BUSINESS_PLAN_ID],
@@ -155,6 +158,7 @@ export const BILLING_METERS = Object.freeze({
   ad_spend: Object.freeze({
     name: 'Managed ads',
     eventName: 'krabiclaw_ad_spend',
+    replacementEventName: 'blawby_ad_spend',
     formula: 'sum',
     unitLabel: 'cent',
     plans: [BUSINESS_PLAN_ID],
