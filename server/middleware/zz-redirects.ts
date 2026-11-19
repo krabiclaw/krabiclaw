@@ -3,6 +3,7 @@ import { defineHandler, HTTPError, type H3Event } from 'nitro';
 import {    redirect, setResponseHeader } from 'nitro/h3';
 import { queryFirst } from '~/server/db'
 import { cloudflareEnv } from '~/server/utils/api-response'
+import { getR2KeyFromPublicUrl } from '~/server/utils/cloudflare-r2'
 import { markTranscriptMiddlewareComplete } from '~/server/utils/request-metrics'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { presentationForProduct } from '~/utils/product-presentation'
@@ -198,7 +199,9 @@ export default defineHandler(async (event) => {
       const isApprovedMediaTarget = (() => {
         try {
           const targetUrl = new URL(tenantRedirect.toPath || '')
-          return targetUrl.protocol === 'https:' && ['media.krabiclaw.com', 'images.krabiclaw.com'].includes(targetUrl.hostname)
+          if (targetUrl.protocol !== 'https:') return false
+          if (['media.krabiclaw.com', 'images.krabiclaw.com'].includes(targetUrl.hostname)) return true
+          return getR2KeyFromPublicUrl(cloudflareEnv(event), targetUrl.href) !== null
         } catch {
           return false
         }

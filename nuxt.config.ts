@@ -214,7 +214,7 @@ export default defineNuxtConfig({
       watch: {
         ignored: ['**/.wrangler/**', '**/.data/**', '**/node_modules/**', '**/.git/**', '**/.nuxt/**', '**/.output/**', '**/dist/**']
       },
-      allowedHosts: ['.krabiclaw.com']
+      allowedHosts: ['.blawby.com', '.krabiclaw.com']
     },
   },
 
