@@ -25,7 +25,7 @@ import {
   type MediaAsset,
 } from "~/server/utils/media-asset-manager";
 import { getMediaPlacements } from '~/server/utils/media-placement'
-import type { Collection, PublicProduct } from '~/server/types/products'
+import type { Collection, PublicMenuProduct, PublicProduct } from '~/server/types/products'
 import { COVER_SELECT, attachCoverMedia, coverJoinSql } from "~/server/utils/content/cover";
 import { ARTICLE_CATEGORY_SELECT, articleCategoryJoinSql, attachArticleCategory, localizeArticleCategories } from '~/server/utils/content/article-categories'
 import { documentOfRootSql, getContentBlocksForDocument } from '~/server/utils/content/documents'
@@ -39,7 +39,7 @@ import { isNonProductionHost } from "~/server/utils/tenant-hosts";
 import { loadPublicBase } from "~/server/utils/public-base";
 import { appendPublicShellQueries, buildPublicShellPayload, readPublicExperiences } from "~/server/utils/public-shell-query";
 import { publicLocationSql } from "~/server/utils/public-locations";
-import { isPublicPagePayload } from '~/utils/public-resource-contracts'
+import { isPublicMenuProduct, isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
@@ -217,14 +217,15 @@ async function loadPublicPageSource(
       ? query.datasets.split(",")
       : [],
   );
-  const includeProducts = requestedDatasets.has('products');
+  const menuCards = requestedDatasets.has('menu_cards')
+  const includeProducts = requestedDatasets.has('products') || menuCards;
   const blogSlug = typeof query.blogSlug === "string" ? query.blogSlug : null;
   const locale = typeof query.locale === "string" ? query.locale : undefined;
 
   // Validate query inputs before using KV cache — only allow known-safe values
   // to prevent unbounded cache entries from arbitrary variants.
   const VALID_DATASETS = new Set([
-    'content', 'location', 'products', 'reviews', 'photos', 'qa',
+    'content', 'location', 'products', 'reviews', 'photos', 'qa', 'menu_cards',
     'blog_post',
   ]);
   // Mirrors composables/usePublicPageRequest.ts's getPublicPageRequest() — the only
@@ -248,7 +249,7 @@ async function loadPublicPageSource(
   const isValidBlogSlug = blogSlug === null || /^[a-z0-9_-]+$/.test(blogSlug);
 
   const allInputsValid = areDatasetsValid && isValidLocale && isValidPage &&
-    isValidLocation && isValidBlogSlug;
+    isValidLocation && isValidBlogSlug && (!menuCards || (page === 'menu' && !requestedDatasets.has('products')));
   if (!allInputsValid) {
     throw new HTTPError({ statusCode: 400, statusMessage: "Invalid public page query" });
   }
@@ -287,11 +288,14 @@ async function loadPublicPageSource(
       if (cached) {
         try {
           const parsed = JSON.parse(cached) as unknown;
-          if (!isPublicPagePayload(parsed, page ?? 'home')) {
+          const checked = menuCards
+            ? isPublicPagePayload(parsed, 'menu', isPublicMenuProduct) && parsed
+            : isPublicPagePayload(parsed, page ?? 'home') && parsed
+          if (!checked) {
             throw new Error("Page cache contract mismatch");
           }
           if (mutateResponseHeaders) setHeader(event, "x-bootstrap-cache", "HIT");
-          return parsed;
+          return checked;
         } catch (error) {
           await kv.delete(cacheKey);
           throw new HTTPError({ statusCode: 500, statusMessage: "Public page cache is invalid", cause: error });
@@ -384,7 +388,7 @@ async function loadPublicPageSource(
           AND ma.organization_id = mp.organization_id
           AND ma.status = 'active'
         WHERE mp.organization_id = ?
-          AND mp.owner_type = 'product' AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+          AND mp.owner_type = 'product' AND ${menuCards ? "mp.slot = 'image'" : "mp.slot IN ('image', 'gallery')"} AND mp.status = 'active'
           ${productKind ? 'AND EXISTS (SELECT 1 FROM products p WHERE p.id = mp.owner_id AND p.organization_id = mp.organization_id AND p.kind = ?)' : ''}
         ORDER BY mp.owner_id, mp.slot, mp.sort_order, mp.id`,
       [orgId, ...(productKind ? [productKind] : [])],
@@ -737,7 +741,7 @@ async function loadPublicPageSource(
     content: contentRows,
     content_blocks: groupContentBlocks(contentRows),
     tenant_page: tenantPage,
-    products,
+    products: menuCards ? products.map(menuProduct) : products,
     collections,
     location_reviews: fullReviewList.slice(0, 3).map(({ title: _title, is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))),
     global_reviews: needsGlobalReviews ? (reviewRows.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))) : [],
@@ -768,6 +772,24 @@ async function loadPublicPageSource(
   }
 
   return payload;
+}
+
+function menuProduct(product: PublicProduct): PublicMenuProduct {
+  const { id, kind, name, slug, description, active, details, locations, collections, image,
+    order_url, updated_at, booking, page, variants } = product
+  if (kind !== 'dish') throw new Error('The menu contains a product that is not a dish')
+  return {
+    id, kind, name, slug, description, active, locations, collections, image, order_url, updated_at, stay: null,
+    details: Object.fromEntries(Object.entries(details).filter(([key]) => ['pricing_note', 'featured', 'dietary_notes'].includes(key))),
+    booking: booking ? { held_online: booking.held_online, duration_minutes: booking.duration_minutes } : null,
+    page: page ? { path: page.path } : null,
+    variants: variants.map(({ id, name, active, prices }) => ({
+      id, name, active,
+      prices: prices.map(({ id, active, currency, location_id, type, recurring_interval, recurring_interval_count, valid_from_at,
+        valid_until_at, unit_amount, compare_at_unit_amount }) => ({ id, active, currency, location_id, type, recurring_interval,
+        recurring_interval_count, valid_from_at, valid_until_at, unit_amount, compare_at_unit_amount })),
+    })),
+  }
 }
 
 export const loadPublicPage = (

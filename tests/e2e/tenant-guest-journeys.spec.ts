@@ -71,6 +71,23 @@ async function chooseFirstAvailableTime(page: Page) {
   await page.getByRole('button', { name: /continue/i }).click()
 }
 
+test('Ember & Slice menu cards retain their links and prices with a compact route payload', async ({ page }) => {
+  const tenant = seededTenant('restaurant')
+  const product = tenant.products.margherita!
+  const location = tenant.locations.brooklyn!
+  const origin = seededSiteURL('restaurant')
+  const headers = seededSiteHeaders('restaurant')
+  const response = await openTenantPage(page, origin + '/menu', headers)
+  expect(response?.status()).toBe(200)
+  const link = page.locator(`main a[href="/locations/${location.slug}/menu/${product.slug}"]`).first()
+  await expect(link).toBeVisible()
+  await expect(page.locator('main').getByText(/^\$18(?:\.00)?$/).first()).toBeVisible()
+  await expect(page.locator('script#__NUXT_DATA__')).toContainText('menu_cards')
+  const localized = await openTenantPage(page, origin + '/th/menu', headers)
+  expect(localized?.status()).toBe(200)
+  await expect(page.locator('html')).toHaveAttribute('lang', 'th')
+})
+
 test.describe('tenant guest journeys (disposable local/preview data only)', () => {
   test.skip(!writableEnvironment, 'guest writes are forbidden outside local and preview')
 

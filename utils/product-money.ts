@@ -1,6 +1,6 @@
 import type { Price, PriceSelection } from '~/shared/prices'
 import { formatMinorAmount, selectPrice } from '~/shared/prices'
-import type { ProductVariant } from '~/server/types/products'
+import type { MenuPrice, ProductVariant } from '~/server/types/products'
 
 /**
  * Render one resolved offer.
@@ -8,7 +8,7 @@ import type { ProductVariant } from '~/server/types/products'
  * Null means the caller omits the price element entirely. There is no
  * "Price on request" stand-in: text nobody supplied is not a price.
  */
-export function formatProductMoney(price: Price | null, locale?: string): string | null {
+export function formatProductMoney(price: Pick<Price, 'unit_amount' | 'currency'> | null, locale?: string): string | null {
   return price ? formatMinorAmount(price.unit_amount, price.currency, locale) : null
 }
 
@@ -25,7 +25,7 @@ export function formatVariantPrice(variant: ProductVariant, selection: PriceSele
 }
 
 /** Card prices use the same offer selection as the chosen variant at checkout. */
-export function summarizeProductPrices(variants: readonly ProductVariant[], selections: readonly PriceSelection[], includeInactive = false) {
+export function summarizeProductPrices<T extends MenuPrice>(variants: readonly { active: boolean; prices: readonly T[] }[], selections: readonly PriceSelection[], includeInactive = false) {
   const offers = [...new Map(selections.flatMap(selection => variants.filter(variant => includeInactive || variant.active)
     .flatMap(variant => selectPrice(variant.prices, selection) ?? [])).map(offer => [offer.id, offer])).values()]
   if (!offers.length) return { lowest: null, highest: null, count: 0 }
