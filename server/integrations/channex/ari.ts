@@ -160,7 +160,7 @@ function warnedDates(warning: unknown, dates: readonly string[]): string[] | nul
 }
 
 /** Each refused night of a 200 answer with its reason; every night when Channex did not report success or named no dates. */
-function refusals(result: Record<string, unknown>, kind: string, dates: readonly string[]): Map<string, string> {
+export function ariRefusals(result: Record<string, unknown>, kind: string, dates: readonly string[]): Map<string, string> {
   const meta = object(result.meta, 'Channex ARI result')
   if (meta.message !== 'Success') return new Map(dates.map(date => [date, `Channex did not report success for the ${kind} update: ${JSON.stringify(meta).slice(0, 500)}`]))
   if (meta.warnings === undefined) return new Map()
@@ -487,7 +487,7 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
     const span = `${batch[0]!.row.date}..${batch.at(-1)!.row.date}`
     try {
       const result = await send(batch)
-      const refused = refusals(result, kind, batch.map(change => change.row.date))
+      const refused = ariRefusals(result, kind, batch.map(change => change.row.date))
       const task = ariTask(result, refused.size > 0)
       for (const change of batch) {
         const reason = refused.get(change.row.date)

@@ -25,7 +25,7 @@ import { PHOTO_WIDTH, minorUnits, listingCalendar, listingContent, listingDetail
 import { DETAIL_FIELDS, IMPORT_STAGES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
 export type { ImportStage } from '~/shared/airbnb-import'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
-import { calendarMinimumDefaults, configureStayCalendar, forgetConfirmedNights, type ChannexMapping } from './ari'
+import { ariRefusals, ariTask, calendarMinimumDefaults, configureStayCalendar, forgetConfirmedNights, logAriCall, type ChannexMapping } from './ari'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 import { publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
@@ -607,11 +607,16 @@ export class ChannexConnection {
     ])
     const closed = new Set(closedNights.map(night => night.date))
     const digits = currencyFractionDigits(details.currency)
-    await channexRequest(this.env, '/restrictions', 'POST', { values: calendar.map(night => ({
+    const receipt = await channexRequest(this.env, '/restrictions', 'POST', { values: calendar.map(night => ({
       property_id: propertyId, rate_plan_id: plan.id, date_from: night.date, date_to: night.date,
       rate: (minorUnits(night.rate, details.currency) / 10 ** digits).toFixed(digits), stop_sell: closed.has(night.date), min_stay_arrival: night.minStay, max_stay: night.maxStay,
       closed_to_arrival: night.closedToArrival, closed_to_departure: night.closedToDeparture,
     })) })
+    const refused = ariRefusals(receipt, 'restrictions', calendar.map(night => night.date))
+    const detail = refused.values().next().value ?? `Seeded the rates for Airbnb listing ${listingId}`
+    await logAriCall(this.db, { organizationId: this.organizationId, productId, propertyId, kind: 'restrictions',
+      status: refused.size ? 'needs_review' : 'pushed', detail, taskId: ariTask(receipt, refused.size > 0) })
+    if (refused.size) fail(502, 'PROVIDER_VERIFICATION_FAILED', detail)
     if (!existing) {
       await execute(this.db, `INSERT INTO product_airbnb_listings (listing_id, organization_id, product_id, channel_id, rate_plan_id, import_stage)
         VALUES (?, ?, ?, ?, ?, 'draft')`, [listingId, this.organizationId, productId, row.channel_id, plan.id])
