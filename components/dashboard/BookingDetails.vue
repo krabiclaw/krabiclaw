@@ -668,10 +668,21 @@ const note = computed(() => {
 async function savePrivateNote(input: { id: string; version: number; text: string }) {
   if (note.value?.id !== input.id) throw new Error('The reservation is no longer available to edit.')
   const revision = accessChangeRevision
-  const updated = await dashboardApi(dashboardBookingPath(input.id), {
-    method: 'PATCH', body: { private_notes: input.text, version: input.version }, validate: isDashboardBooking,
+  const { booking: saved } = await dashboardApi(dashboardBookingPath(input.id), {
+    method: 'PATCH',
+    body: { private_notes: input.text, version: input.version },
+    validate: (value): value is { booking: { booking_id: string; private_notes: string | null; version: number } } =>
+      isRecord(value) && isRecord(value.booking) && value.booking.booking_id === input.id
+      && value.booking.private_notes === (input.text.trim() || null) && value.booking.version === input.version + 1,
   })
-  if (accessChangeRevision !== revision) throw new Error('Reservation access changed while saving the note.')
+  const current = data.value
+  const currentNote = note.value
+  if (accessChangeRevision !== revision || !isDashboardBooking(current) || currentNote?.id !== input.id) {
+    throw new Error('Reservation access changed while saving the note.')
+  }
+  if (currentNote.version > saved.version) return
+  const updated = { ...current, booking: { ...current.booking, ...saved } }
+  if (!isDashboardBooking(updated)) throw new Error('The reservation could not be updated with the saved note.')
   data.value = updated
 }
 

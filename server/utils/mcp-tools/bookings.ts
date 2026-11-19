@@ -221,11 +221,9 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const { booking_id: _bookingId, ...patch } = args
     if (access) return nightBookingMutation(await updateStay(db, env, access, id, { ...patch, version: args.version }))
     if (Object.keys(patch).some(field => field !== 'version' && field !== 'private_notes')) throw new HTTPError({ statusCode: 422, message: 'Use request_product_booking_change to update a timed booking' })
-    await setBookingNote(db, { organizationId, bookingId: id }, { ...patch, private_notes: patch.private_notes ?? '' })
+    const booking = await setBookingNote(db, { organizationId, bookingId: id }, { ...patch, private_notes: patch.private_notes ?? '' })
     await publishConversationEvent(env, db, { conversationId: row.conversation_id, type: 'MESSAGE_UPDATE' })
-    const booking = await queryFirst<{ booking_id: string; unit: 'slot'; private_notes: string | null; version: number }>(db, "SELECT id AS booking_id, 'slot' AS unit, private_notes, version FROM bookings WHERE id=? AND organization_id=?", [id, organizationId])
-    if (!booking) throw new Error('Updated booking could not be read')
-    return booking
+    return { ...booking, unit: 'slot' }
   }
   if (access && toolName === 'get_product_booking') return { booking_id: id, unit: 'nights', record: await getStay(db, access, id) }
   const thread = await getGuestRequest(db, row.conversation_id, organizationId, 'booking')
