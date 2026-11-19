@@ -252,9 +252,10 @@ export interface CalendarLocation {
   opening_hours: unknown
   special_hours: unknown
 }
-export const calendarLocationKey = Symbol('calendar-location') as InjectionKey<{
+export const calendarDayKey = Symbol('calendar-day') as InjectionKey<{
   location: Ref<CalendarLocation | null | undefined>
-  refresh: () => Promise<void>
+  refreshLocation: () => Promise<void>
+  read: (date: string) => { items: CalendarItem[]; status: 'loading' | 'ready' | 'error'; error: unknown }
 }>
 
 /** Product sessions use the Calendar's existing period, day navigation and readback. */
@@ -420,7 +421,6 @@ const { data: chosenLocation, error: locationError, refresh: refreshLocation } =
     : (await dashboardApi<{ location: CalendarLocation }>(`/api/organizations/${organizationId}/locations/${filters.locationId}`, { validate: isLocationHours })).location,
   { watch: [() => filters.locationId] },
 )
-provide(calendarLocationKey, { location: chosenLocation, refresh: async () => { await refreshLocation() } })
 function isUnavailableKey(key: string): boolean {
   if (sessionProduct.value) return false
   const record = chosenLocation.value
@@ -535,7 +535,9 @@ async function ensureLoaded(keys: string[]): Promise<void> {
   await Promise.all(keys.filter(key => monthData.value.get(key)?.status !== 'ready' && monthData.value.get(key)?.status !== 'loading').map(key => loadMonth(key)))
 }
 function neededKeys(): string[] {
-  return view.value === 'year' ? yearKeys.value : gridView.value ? [] : [monthKey.value]
+  const months = view.value === 'year' ? yearKeys.value : gridView.value ? [] : [monthKey.value]
+  const opened = openDay.value?.slice(0, 7)
+  return opened && !months.includes(opened) ? [...months, opened] : months
 }
 async function resetMonths(): Promise<void> {
   generation.value += 1
@@ -582,6 +584,16 @@ function timeOf(item: CalendarItem): string {
 // the same tile, and Back from the leaf clears it.
 const level = useRouteLevel()
 const openDay = computed(() => typeof route.params.day === 'string' ? route.params.day : null)
+provide(calendarDayKey, {
+  location: chosenLocation,
+  refreshLocation,
+  read(date) {
+    const block = monthData.value.get(date.slice(0, 7)) ?? EMPTY_MONTH
+    const items = sessionProduct.value ? itemsOn(date) : itemsByDay.value.get(date) ?? []
+    return { items: block.status === 'ready' ? items : [], status: block.status,
+      error: block.status === 'error' ? block.cause : null }
+  },
+})
 function dayTo(dayKey: string) {
   return { path: `${level.path.value}/${dayKey}`, query: route.query }
 }
@@ -735,7 +747,9 @@ watch(filterSignature, () => {
   void resetMonths()
 })
 watch(openDay, (date) => {
-  if (date && date.slice(0, 7) !== monthKey.value) shownMonth.value = parseDate(date).set({ day: 1 })
+  if (!date) return
+  if (date.slice(0, 7) !== monthKey.value) shownMonth.value = parseDate(date).set({ day: 1 })
+  void ensureLoaded(neededKeys())
 }, { immediate: true })
 if (realtime) {
   watch(realtime.event, event => {

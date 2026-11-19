@@ -165,9 +165,17 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect((await memberPage.goto(new URL(`${productPath}/description?editMode=preview&previewViewport=desktop`, baseURL!).toString()))?.status()).toBe(200)
     await expect(memberPage.getByRole('dialog', { name: 'Legal Services preview', exact: true }).getByText('Your role does not have access to website previews.', { exact: true })).toBeVisible()
     await expect(memberPage.getByTestId('content-preview-frame')).toHaveCount(0)
+    const dayReads: string[] = []
+    const watchDayRead = (request: import('@playwright/test').Request) => {
+      const url = new URL(request.url())
+      if (url.pathname === '/api/dashboard/agenda' && url.searchParams.get('from') === day && url.searchParams.get('to') === day) dayReads.push(url.pathname)
+    }
+    memberPage.on('request', watchDayRead)
     await memberPage.goto(`${DASHBOARD}/calendar/${day}`)
     await waitForNuxtHydration(memberPage)
     await memberPage.locator(`#dashboard-panel-calendar-day a[href="${conversationPath}"]`).click()
+    expect(dayReads).toEqual([])
+    memberPage.off('request', watchDayRead)
     await expect(memberPage).toHaveURL(new URL(reservationPath, baseURL!).toString())
     const thread = memberPage.locator('#dashboard-panel-organization-messages-thread')
     const detail = memberPage.locator('#dashboard-panel-booking-details')

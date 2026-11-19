@@ -43,12 +43,12 @@
       </UCard>
       <p v-else-if="!sessionProduct && !personalScope" class="text-sm text-muted">Choose a location to manage this day's availability.</p>
 
-      <p v-if="sessionProduct && status === 'loading'" role="status" class="text-sm text-muted">Loading scheduled times…</p>
+      <p v-if="status === 'loading'" role="status" class="text-sm text-muted">Loading scheduled times…</p>
 
       <div v-if="items.length" class="divide-y divide-default border-y border-default">
         <AgendaRow v-for="item in items" :key="item.id" :item="item" />
       </div>
-      <div v-else-if="!errorMessage && (status === 'success' || status === 'ready')" class="py-6 text-center">
+      <div v-else-if="!errorMessage && status === 'ready'" class="py-6 text-center">
         <img
           src="https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/e10ff26b-ab52-4f93-8f48-36e23828aa00/w=224"
           alt=""
@@ -68,61 +68,29 @@ import { closureOnDate, datedHours, getDateIntervals, parseOpeningHours, parseSp
 import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import { getVerticalCopy } from '~/utils/vertical-copy'
-import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
-import { calendarLocationKey, calendarSessionsKey } from './CalendarPage.vue'
+import { calendarDayKey, calendarSessionsKey } from './CalendarPage.vue'
 
 // The business's day can be blocked or opened; the account's day only lists its visits.
 const props = defineProps<{ personalScope?: boolean }>()
 
 const route = useRoute()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
-const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
-const organizationId = props.personalScope ? null : useDashboardOrganizationId()
 const calendarSessions = inject(calendarSessionsKey, null)
 const { organization } = useDashboardOrganization()
 const sessionProduct = computed(() => calendarSessions?.product.value)
 const day = computed(() => String(route.params.day ?? ''))
-const locationId = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
 const title = computed(() => formatCalendarDate(day.value, 'en', { weekday: 'long', month: 'long', day: 'numeric' }))
 
-const isAgendaItem = (value: unknown): value is AgendaItem =>
-  isRecord(value) && typeof value.id === 'string' && typeof value.kind === 'string'
-  && typeof value.starts_at === 'string' && typeof value.day_key === 'string'
-  && typeof value.timezone === 'string' && typeof value.title === 'string'
-  && typeof value.status === 'string' && (value.to === null || typeof value.to === 'string')
-const isAgendaPayload = (value: unknown): value is AgendaPayload =>
-  isRecord(value) && Array.isArray(value.items) && value.items.every(isAgendaItem)
 const isPlaceDates = (value: unknown): value is { place: { id: string } } =>
   isRecord(value) && isRecord(value.place) && typeof value.place.id === 'string' && Array.isArray(value.days)
-// The index owns the location; this leaf reads it and asks for it again after a write.
-const calendarLocation = inject(calendarLocationKey)!
-const location = computed(() => calendarLocation.location.value ?? null)
-const refreshLocation = calendarLocation.refresh
-
-const { data, error, status: agendaStatus, refresh } = await useAsyncData(
-  () => `calendar-day:${organizationId}:${day.value}:${locationId.value ?? ''}:${String(route.query.kinds ?? '')}`,
-  async () => {
-    if (sessionProduct.value) return null
-    const agenda = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, {
-      query: { from: day.value, to: day.value, location_id: locationId.value ?? undefined, kinds: typeof route.query.kinds === 'string' ? route.query.kinds : undefined },
-      validate: isAgendaPayload,
-    })
-    return { items: agenda.items }
-  },
-)
-if (!props.personalScope) {
-  const realtime = useDashboardInvalidations()
-  watch(realtime.event, event => {
-    if (event?.type === 'stay.changed' || event?.type === 'nights.changed') void refresh()
-  })
-  watch(realtime.reconnectEpoch, epoch => { if (epoch > 0) void refresh() })
-}
-
-const items = computed(() => sessionProduct.value ? calendarSessions!.itemsOn(day.value) : data.value?.items ?? [])
-const status = computed(() => sessionProduct.value ? calendarSessions!.status.value : agendaStatus.value)
+const calendar = inject(calendarDayKey)!
+const location = computed(() => calendar.location.value ?? null)
+const agenda = computed(() => calendar.read(day.value))
+const items = computed(() => agenda.value.items)
+const status = computed(() => agenda.value.status)
 const saveError = ref<unknown>(null)
 const errorMessage = computed(() => {
-  const cause = saveError.value ?? (sessionProduct.value ? calendarSessions!.error.value : error.value)
+  const cause = saveError.value ?? agenda.value.error
   return cause ? getErrorMessage(cause, 'The day could not be loaded') : ''
 })
 
@@ -162,10 +130,10 @@ async function toggleClosure(): Promise<void> {
       body: { from: day.value, to: addLocalDays(day.value, 1), closed: availability.value.action === 'block', updated_at: record.updated_at },
       validate: isPlaceDates,
     })
-    await refreshLocation()
+    await calendar.refreshLocation()
   } catch (cause) {
     saveError.value = cause
-    await refreshLocation()
+    await calendar.refreshLocation()
   } finally {
     saving.value = false
   }

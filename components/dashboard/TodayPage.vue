@@ -49,7 +49,7 @@ import TodayItemCard from './TodayItemCard.vue'
 import TodayTaskCreate from './TodayTaskCreate.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type BusinessToday, type TodayCard, type TodayFeedPayload, type TodayItem } from '~/shared/dashboard-today'
-import { businessChanged, type HeldRead } from '~/composables/useDashboardInvalidations'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import type { AgendaPayload } from '~/server/utils/dashboard-agenda'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
@@ -119,41 +119,39 @@ const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(val
 const isFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
 const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && Array.isArray(value.items)
 
-// A return within the live connection shows the Today it left, as the Messages inbox does: kept for
-// 30 seconds while the socket stays open, dropped by any event Today re-reads on.
-const todayKey = () => `today-${orgSlug.value}-${range.value}`
-let reading: HeldRead | undefined
-let reuseExpiresAt: number | undefined
-const { data, pending, status: loadStatus, error: loadError, refresh } = await useAsyncData(
+const todayKey = () => `today:${orgSlug.value}:${range.value}`
+const { data, pending, error: loadError, refresh } = await useAsyncData(
   todayKey,
-  async (): Promise<{ business: BusinessToday | null; visits: TodayCard[] }> => {
+  async (_app, { signal }): Promise<{ business: BusinessToday | null; visits: TodayCard[] }> => {
     if (!props.personalScope) {
-      const held = realtime.held.take(`today:${todayKey()}`)
-      reading = realtime.held.begin(`today:${todayKey()}`, businessChanged)
-      reuseExpiresAt = held?.expiresAt
-      if (isBusinessToday(held?.value)) return { business: held.value, visits: [] }
-      return { business: await dashboardApi<BusinessToday>('/api/dashboard/today', { query: { range: range.value }, validate: isBusinessToday }), visits: [] }
+      const key = todayKey()
+      realtime.held.take(key)
+      const reading = realtime.held.begin(key, businessChanged)
+      const business = await dashboardApi<BusinessToday>('/api/dashboard/today', { query: { range: range.value }, validate: isBusinessToday, signal })
+      realtime.held.hold(reading, business, Date.now() + 30_000, 2)
+      return { business, visits: [] }
     }
-    if (range.value === 'today') return { business: null, visits: (await applicationFetch<TodayFeedPayload>('/api/account/today', { validate: isFeed })).cards }
+    if (range.value === 'today') return { business: null, visits: (await applicationFetch<TodayFeedPayload>('/api/account/today', { validate: isFeed, signal })).cards }
     // A guest's upcoming visits: the next year of their own agenda, after today.
     const now = new Date()
     // From yesterday's UTC date, so every zone's tomorrow is inside; each visit is then compared in its own zone.
     const from = addLocalDays(now.toISOString().slice(0, 10), -1)
-    const agenda = await applicationFetch<AgendaPayload>('/api/account/agenda', { query: { from, to: addLocalDays(from, 364), kinds: 'booking,stay' }, validate: isAgenda })
+    const agenda = await applicationFetch<AgendaPayload>('/api/account/agenda', { query: { from, to: addLocalDays(from, 364), kinds: 'booking,stay' }, validate: isAgenda, signal })
     return { business: null, visits: agenda.items.filter(item => item.day_key > localDateAt(now, item.timezone)).map(item => agendaToTodayCard(item, { resolved_at: now.toISOString() })) }
+  },
+  {
+    getCachedData(key, _app, ctx) {
+      if (props.personalScope || ctx.cause !== 'initial') return undefined
+      const business = realtime.held.get(key)
+      return isBusinessToday(business) ? { business, visits: [] } : undefined
+    },
   },
 )
 const business = computed(() => data.value?.business ?? null)
-onScopeDispose(() => {
-  const current = business.value
-  // Reusing a held read does not extend its life.
-  if (!props.personalScope && current && reading && loadStatus.value === 'success') realtime.held.hold(reading, current, reuseExpiresAt ?? Date.now() + 30_000, 1)
-})
 const visits = computed(() => data.value?.visits ?? [])
 
 watch(realtime.event, (event) => {
-  if (!event) return
-  if (['business.changed', 'stay.changed', 'access.changed', 'MESSAGE_CREATE', 'MESSAGE_UPDATE'].includes(event.type)) void refresh()
+  if (event && businessChanged(event)) void refresh()
 })
 watch(realtime.reconnectEpoch, epoch => { if (epoch > 0) void refresh() })
 function resume() { if (document.visibilityState === 'visible') void refresh() }
