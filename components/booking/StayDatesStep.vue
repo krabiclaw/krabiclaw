@@ -114,17 +114,20 @@
     </div>
 
     <div v-if="!inline" class="flex min-h-16 shrink-0 items-center justify-between gap-4 border-t border-default pt-4">
-      <div v-if="vertical" class="min-w-0 text-sm" :aria-busy="quotePending">
-        <StayPriceSummary v-if="quotePending || quote" :controller="controller" />
-        <span v-else>{{ t('stay.add_dates_for_prices') }}</span>
-      </div>
+      <template v-if="vertical">
+        <div class="min-w-0 text-sm" :aria-busy="quotePending">
+          <StayPriceSummary v-if="quotePending || quote" :controller="controller" />
+          <span v-else>{{ t('stay.add_dates_for_prices') }}</span>
+        </div>
+        <TenantButton class="shrink-0 font-medium" :disabled="!checkIn || !checkOut" @click="$emit('done')">{{ t('stay.save_dates') }}</TenantButton>
+      </template>
       <template v-else>
         <button type="button" class="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-muted hover:text-default" aria-label="Keyboard navigation" @click="focusCalendarGrid">
           <UIcon name="i-lucide-keyboard" class="size-5" />
         </button>
         <div class="flex items-center gap-4">
           <button type="button" class="text-sm font-semibold underline underline-offset-4 hover:text-default" @click="clearDates">{{ t('stay.clear_dates') }}</button>
-          <TenantButton class="shrink-0 font-medium" :disabled="vertical && (!checkIn || !checkOut)" @click="$emit('done')">{{ t('stay.close_dates') }}</TenantButton>
+          <TenantButton class="shrink-0 font-medium" @click="$emit('done')">{{ t('stay.close_dates') }}</TenantButton>
         </div>
       </template>
     </div>

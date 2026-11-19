@@ -88,14 +88,15 @@
     </button>
     <!-- Crawlable image elements for all gallery items beyond the initial mosaic -->
     <div v-if="items.length > 5" class="sr-only">
-      <img
-        v-for="(item, index) in items.slice(5)"
-        :key="`${item.url}-${index}`"
-        :src="item.url"
-        :alt="item.alt || title"
-        loading="lazy"
-        decoding="async"
-      >
+      <template v-for="(item, index) in items.slice(5)" :key="`${item.url}-${index}`">
+        <img
+          v-if="item.kind !== 'video'"
+          :src="item.url"
+          :alt="item.alt || title"
+          loading="lazy"
+          decoding="async"
+        >
+      </template>
     </div>
     <MediaLightbox v-model:open="lightboxOpen" v-model:index="lightboxIndex" v-model:overview="lightboxOverview" :items="items" :title="title" :photo-groups="photoGroups">
       <template v-if="$slots.caption" #caption="slotProps">
