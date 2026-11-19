@@ -40,7 +40,7 @@ import {
 } from '~/shared/prices'
 import { assertProductKind, patchProductDetails, validateProductDetails, validateStayAlarmDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
 import { presentationForProduct, type CatalogCounts } from '~/utils/product-presentation'
-import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
+import { preparePublicTenantOrigin } from '~/server/utils/public-base'
 import { FormQuestionDefinitionError, formQuestionsRevision, normalizeFormQuestionsInput, parseStoredFormQuestions } from '~/shared/form-questions'
 
 /** The home's weekend rate, read alongside the rest of its calendar policy. */
@@ -445,29 +445,34 @@ export async function getProduct(db: DbClient, organizationId: string, productId
 
 /** The saved routes a guest may open, shared by MCP and both dashboard editor scopes. */
 export async function productPublicPresentation(db: DbClient, env: CloudflareEnv, organizationId: string, product: Product) {
-  const readiness = product.kind === 'experience' || product.kind === 'stay' || product.booking
-    ? await productBookingReadiness(db, organizationId, product, { env }) : null
-  const published = await queryFirst(db, `SELECT p.id FROM products p
-    JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`, [organizationId, product.id])
-  const origin = published ? await resolvePublicTenantOrigin(db, env, organizationId) : null
   const siteProduct = product.kind === 'experience' || product.kind === 'stay'
-  const path = siteProduct
-    ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
-  // An authored Page remains readable when its offering cannot be booked.
-  // Its publication owner also proves the saved binding and source address.
-  const page = !siteProduct && product.page
-    ? await resolvePublishedTenantPageIdentity(db, organizationId, product.page.path) : null
+  const path = siteProduct ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
+  const originPlan = preparePublicTenantOrigin(organizationId)
+  // Publication, address and location links describe the same saved product.
+  const [readiness, page, [published, originRow, locations]] = await Promise.all([
+    product.kind === 'experience' || product.kind === 'stay' || product.booking
+      ? productBookingReadiness(db, organizationId, product, { env }) : null,
+    !siteProduct && product.page ? resolvePublishedTenantPageIdentity(db, organizationId, product.page.path) : null,
+    executeBatch(db, [{
+      query: `SELECT p.id FROM products p
+        JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+        WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`,
+      params: [organizationId, product.id],
+    }, ...originPlan.queries, ...(product.kind === 'dish' ? [{
+      query: `SELECT l.id, l.slug FROM business_locations l
+        JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
+        WHERE l.organization_id = ? AND pl.product_id = ? AND l.status = 'active' AND pl.published = 1`,
+      params: [organizationId, product.id],
+    }] : [])], { operation: 'Read product publication and links' }),
+  ])
+  const origin = published!.results.length ? originPlan.read([originRow!], env) : null
   const publicPath = siteProduct ? path && (!readiness || readiness.ready) ? path : null
     : page && page.id === product.page?.id && page.product_id === product.id ? page.path : null
   const publicUrls: Record<string, string> = {}
   if (origin && product.kind === 'dish') {
-    const locations = await queryAll<{ id: string; slug: string }>(db, `
-      SELECT l.id, l.slug FROM business_locations l
-      JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
-      WHERE l.organization_id = ? AND pl.product_id = ? AND l.status = 'active' AND pl.published = 1
-    `, [organizationId, product.id])
-    for (const location of locations) publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
+    for (const location of locations!.results as { id: string; slug: string }[]) {
+      publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
+    }
   }
   return { readiness, publicUrl: origin && publicPath ? new URL(publicPath, origin).toString() : null, publicUrls }
 }

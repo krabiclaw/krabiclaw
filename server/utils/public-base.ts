@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro';
 import { oncePerRequest } from '~/server/utils/request-scope'
 
 import type { H3Event } from 'nitro'
-import { queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { cloudflareEnv } from '~/server/utils/api-response'
@@ -51,20 +51,28 @@ export function publicTenantVisibilitySql(alias: string, previewAuthorized: bool
 }
 
 /** A saved public address exists only while the tenant and its canonical domain are public. */
-export async function resolvePublicTenantOrigin(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<string | null> {
-  const organization = await queryFirst<{ subdomain: string; canonical_domain: string }>(db, `
-    SELECT o.subdomain, d.domain AS canonical_domain
+export function preparePublicTenantOrigin(organizationId: string) {
+  return {
+    queries: [{ query: `SELECT o.subdomain, d.domain AS canonical_domain
       FROM organization o
       JOIN organization_domains d ON d.organization_id = o.id AND d.role = 'canonical' AND d.status = 'active'
-     WHERE o.id = ? AND ${publicTenantVisibilitySql('o', false)} LIMIT 1
-  `, [organizationId])
-  if (!organization) return null
-  return tenantOrganizationOrigin({
-    platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
-    freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
-    subdomain: organization.subdomain,
-    canonicalDomain: organization.canonical_domain,
-  }) || null
+      WHERE o.id = ? AND ${publicTenantVisibilitySql('o', false)} LIMIT 1`, params: [organizationId] }],
+    read(rows: D1Result[], env: CloudflareEnv): string | null {
+      const organization = rows[0]!.results[0] as { subdomain: string; canonical_domain: string } | undefined
+      if (!organization) return null
+      return tenantOrganizationOrigin({
+        platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+        freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+        subdomain: organization.subdomain,
+        canonicalDomain: organization.canonical_domain,
+      }) || null
+    },
+  }
+}
+
+export async function resolvePublicTenantOrigin(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<string | null> {
+  const plan = preparePublicTenantOrigin(organizationId)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read public tenant origin' }), env)
 }
 
 export function loadPublicBase(
