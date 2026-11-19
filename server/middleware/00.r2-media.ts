@@ -6,7 +6,7 @@ import { defineHandler } from 'nitro';
 import type { getHeader} from 'nitro/h3';
 import {  sendStream, setHeader, setResponseStatus } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { isNonProductionHost } from '~/server/utils/tenant-hosts'
+import { hostnameOf, isNonProductionHost } from '~/server/utils/tenant-hosts'
 
 const MEDIA_HOSTS = new Set(['media.blawby.com', 'media.krabiclaw.com'])
 const WORKER_MEDIA_PREFIX = '/__media/'
@@ -18,7 +18,7 @@ const WORKER_MEDIA_PREFIX = '/__media/'
 // hosts use the dedicated media host.
 function isWorkerMediaPathAllowed(event: Parameters<typeof getHeader>[0]): boolean {
   if (import.meta.dev) return true
-  const hostname = ((event.req.headers.get('host')) || '').split(':')[0] ?? ''
+  const hostname = hostnameOf(event.req.headers.get('host') ?? '')
   return isNonProductionHost(hostname)
 }
 
@@ -49,7 +49,7 @@ function mediaResponse(
 }
 
 export default defineHandler(async (event) => {
-  const host = ((event.req.headers.get('host')) || '').split(':')[0]
+  const host = hostnameOf(event.req.headers.get('host') ?? '')
   const url = event.url
   const isMediaHost = MEDIA_HOSTS.has(host)
   const isWorkerMediaPath = url.pathname.startsWith(WORKER_MEDIA_PREFIX) && isWorkerMediaPathAllowed(event)
