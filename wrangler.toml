@@ -185,7 +185,7 @@ enabled = true
 
 # Stable staging environment — uses dedicated non-production data/resources.
 # Tenant aliases stay at the first subdomain level (for example,
-# pottery-house-staging.krabiclaw.com), which is covered by the zone certificate.
+# pottery-house-staging.blawby.com), which is covered by the zone certificate.
 # The more-specific environment route wins over production's broad wildcard.
 # `nuxt dev` only. Wrangler's platform proxy runs an empty script, so a Durable
 # Object bound to a class in this Worker never resolves there; the class is
@@ -262,7 +262,10 @@ remote = true
 binding = "IMAGES"
 
 [env.staging]
+name = "blawby-staging"
 routes = [
+  { pattern = "staging.blawby.com/*", zone_name = "blawby.com" },
+  { pattern = "*-staging.blawby.com/*", zone_name = "blawby.com" },
   { pattern = "staging.krabiclaw.com/*", zone_name = "krabiclaw.com" },
   { pattern = "*-staging.krabiclaw.com/*", zone_name = "krabiclaw.com" }
 ]
@@ -294,13 +297,13 @@ APNS_BUNDLE_ID = "com.krabiclaw.app"
 # Web push (VAPID). The public key is what browsers subscribe with; VAPID_PRIVATE_KEY is its secret.
 NUXT_PUBLIC_VAPID_PUBLIC_KEY = "BK_xrjKKq-juVkp961DdsBtXYnf38NvPsSHUN0gESru1OCtvWjXukSFzDZTY2qDIV4RtDpl4_qvoNfcc0fwaMTo"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
-BETTER_AUTH_URL = "https://staging.krabiclaw.com"
-NUXT_PUBLIC_PLATFORM_DOMAIN = "https://staging.krabiclaw.com"
-MEDIA_BASE_URL = "https://staging.krabiclaw.com/__media"
+BETTER_AUTH_URL = "https://staging.blawby.com"
+NUXT_PUBLIC_PLATFORM_DOMAIN = "https://staging.blawby.com"
+MEDIA_BASE_URL = "https://staging.blawby.com/__media"
 NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN = "https://blawby.com"
 NUXT_PUBLIC_APP_NAME = "Blawby"
-NUXT_PUBLIC_SITE_URL = "https://staging.krabiclaw.com"
-NUXT_PUBLIC_HELP_URL = "https://staging.krabiclaw.com/help"
+NUXT_PUBLIC_SITE_URL = "https://staging.blawby.com"
+NUXT_PUBLIC_HELP_URL = "https://staging.blawby.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 # Staging runs on a copy of production's rows and has no Zaraz zone of its own;
 # reconciling would rewrite production's tags. Production leaves this unset.

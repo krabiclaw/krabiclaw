@@ -23,8 +23,8 @@ const localEnv: TenantHostEnv = {
 }
 
 const stagingEnv: TenantHostEnv = {
-  NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com',
-  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://staging.krabiclaw.com',
+  NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://blawby.com',
+  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://staging.blawby.com',
 }
 
 test('normalizeHost strips protocol, trailing slash and port', () => {
@@ -103,6 +103,8 @@ test('non-production is local and staging, including staging tenant aliases', ()
   assert.equal(isNonProductionHost('127.0.0.1:3000'), true)
   assert.equal(isNonProductionHost('preview.krabiclaw.com'), false)
   assert.equal(isNonProductionHost('staging.krabiclaw.com'), true)
+  assert.equal(isNonProductionHost('staging.blawby.com'), true)
+  assert.equal(isNonProductionHost('pottery-house-staging.blawby.com'), true)
   assert.equal(isNonProductionHost('pottery-house-preview.krabiclaw.com'), false)
   assert.equal(isNonProductionHost('pottery-house-staging.krabiclaw.com'), true)
   assert.equal(isNonProductionHost('preview.customer.com'), false)
@@ -140,8 +142,8 @@ test('Cloudflare Quick Tunnels are development hosts without implicit tenant or 
 
 test('environment tenant aliases use first-level staging hostnames', () => {
   assert.equal(
-    environmentTenantAliasHostname('staging.krabiclaw.com', 'pottery-house'),
-    'pottery-house-staging.krabiclaw.com',
+    environmentTenantAliasHostname('staging.blawby.com', 'pottery-house'),
+    'pottery-house-staging.blawby.com',
   )
   assert.equal(environmentTenantAliasHostname('preview.krabiclaw.com', 'ncls'), '')
   assert.equal(environmentTenantAliasHostname('krabiclaw.com', 'ncls'), '')
@@ -151,7 +153,13 @@ test('environment tenant aliases use first-level staging hostnames', () => {
     environmentTenantAliasSlug('pottery-house-staging.krabiclaw.com', stagingEnv),
     'pottery-house',
   )
+  assert.equal(environmentTenantAliasSlug('pottery-house-staging.blawby.com', stagingEnv), 'pottery-house')
+  assert.equal(environmentTenantAliasSlug('pottery-house-staging.blawby.com', prodEnv), null)
+  assert.equal(environmentTenantAliasSlug('staging.blawby.com', stagingEnv), null)
   assert.equal(environmentTenantAliasSlug('staging.krabiclaw.com', stagingEnv), null)
+  assert.equal(isPlatformHost('staging.krabiclaw.com', stagingEnv), true)
+  assert.equal(isPlatformHost('staging.blawby.com', stagingEnv), true)
+  assert.equal(isPlatformHost('staging.blawby.com', prodEnv), false)
   assert.equal(environmentTenantAliasSlug('pottery-house-preview.krabiclaw.com', stagingEnv), null)
   assert.equal(environmentTenantAliasSlug('unknown.example.com', stagingEnv), null)
 })

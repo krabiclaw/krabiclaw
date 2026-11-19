@@ -190,7 +190,7 @@ const { values } = parseArgs({ options: { staging: { type: 'boolean' }, producti
 if (values.staging === values.production) throw new StepError('Pass exactly one of --staging or --production.')
 const TARGET = values.production
   ? { base: 'https://krabiclaw.com', site: `https://${DEMO.slug}.krabiclaw.com`, email: 'CANARY_LOGIN_EMAIL', password: 'CANARY_LOGIN_PASSWORD', owner: 'the production app-review account' }
-  : { base: 'https://staging.krabiclaw.com', site: `https://${DEMO.slug}-staging.krabiclaw.com`, email: 'KRABICLAW_DEV_EMAIL', password: 'KRABICLAW_DEV_PASSWORD', owner: 'the staging development owner' }
+  : { base: 'https://staging.blawby.com', site: `https://${DEMO.slug}-staging.blawby.com`, email: 'KRABICLAW_DEV_EMAIL', password: 'KRABICLAW_DEV_PASSWORD', owner: 'the staging development owner' }
 const BASE = TARGET.base
 const email = process.env[TARGET.email]
 const password = process.env[TARGET.password]

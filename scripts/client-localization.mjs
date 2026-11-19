@@ -16,7 +16,7 @@ const { values: options } = parseArgs({ options: {
   apply: { type: 'boolean' },
   verify: { type: 'boolean' },
 } })
-const base = new URL(options['base-url'] || 'https://staging.krabiclaw.com')
+const base = new URL(options['base-url'] || 'https://staging.blawby.com')
 if (base.protocol !== 'https:' || base.pathname !== '/') throw new Error('--base-url must be an HTTPS origin')
 if (!options['token-file']) throw new Error('--token-file is required (keep it outside Git)')
 const resource = new URL('/api/mcp', base).href
