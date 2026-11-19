@@ -112,6 +112,10 @@ export async function findLocation(
   `, [input.locationId, input.organizationId])
 }
 
+/** The organization's first owner, by when they joined: who a job goes to when nobody else does it. The one place this is looked up. */
+export const organizationOwnerSql = (organizationSql: string) =>
+  `(SELECT owner.id FROM member owner WHERE owner.organizationId = ${organizationSql} AND ${roleMatchesSql('owner.role', ['owner'])} ORDER BY owner.createdAt, owner.id LIMIT 1)`
+
 export function isOrganizationWideRole(role: string): boolean {
   return role.split(',').some(value => workspaceManagementRoles.some(management => management === value.trim()))
 }
@@ -410,7 +414,7 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv & 
     // A job always has someone: it goes to the owner; a task someone added and an offering are left with nobody.
     const open = table === 'tasks' ? " AND status = 'open'" : ''
     const released = table === 'tasks'
-      ? `CASE WHEN kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'maintenance') THEN (SELECT owner.id FROM member owner WHERE owner.organizationId = tasks.organization_id AND owner.role = 'owner' ORDER BY owner.createdAt, owner.id LIMIT 1) END`
+      ? `CASE WHEN kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'maintenance') THEN ${organizationOwnerSql('tasks.organization_id')} END`
       : 'NULL'
     const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
     const rows = await queryAll<{ resource_id: string; assigned_member_id: string }>(db,

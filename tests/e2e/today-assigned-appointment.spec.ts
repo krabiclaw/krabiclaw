@@ -304,8 +304,9 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
       id: followUp!.id, status: 'open', version: followUp!.version + 1, due_at: followUp!.due_at, assignee: { id: owner.id },
     }])
 
-    // The client's message reports something broken at the office. The owner makes a maintenance job of it in the conversation,
+    // A client writes to the office that its door sticks. The owner makes a maintenance job of that message, prefilled with the office,
     // for this member, who now does maintenance; their Today has the job, and Done with a note closes it in the job's conversation.
+    // A booking's opening, which Blawby writes for the client, offers no such job.
     await body(await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'maintenance' },
     }), 200)
@@ -314,11 +315,18 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto(new URL(conversationPath, baseURL!).toString())
     await waitForNuxtHydration(page)
+    await expect(page.locator('[data-message]').first()).toBeVisible()
+    await expect(page.getByTestId('conversation-create-maintenance')).toHaveCount(0)
+    const report = await body<{ conversation_id: string }>(await clientContext.request.post('/api/public/contact', {
+      headers: seededSiteHeaders('legal'),
+      data: { name: guestName, email: `today-repair-${Date.now()}@playwright.example`, subject: 'Office door', message: 'The lobby door at your office sticks and is hard to open.', location_id: office.id },
+    }), 201)
+    await page.goto(new URL(`${DASHBOARD}/messages/${report.conversation_id}`, baseURL!).toString())
+    await waitForNuxtHydration(page)
     await page.getByTestId('conversation-create-maintenance').first().click()
     const sheet = page.getByRole('dialog', { name: 'New maintenance job', exact: true })
     await sheet.getByLabel(/^What needs fixing/).fill(repairTitle)
-    await sheet.getByRole('combobox', { name: /^Where/ }).click()
-    await page.getByRole('option', { name: office.title, exact: true }).click()
+    await expect(sheet.getByRole('combobox', { name: /^Where/ })).toContainText(office.title)
     const eligible = await body<{ assignees: Array<{ id: string; name: string }> }>(await page.request.get(`/api/organizations/${ORGANIZATION}/tasks/maintenance-options`), 200)
     const fixer = eligible.assignees.find(person => person.id === actor.id)
     if (!fixer) throw new Error('The maintenance member is not offered for repair work')

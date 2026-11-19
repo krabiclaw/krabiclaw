@@ -4,7 +4,7 @@ import { publishChangedJobs } from '~/server/events'
 import { HTTPError } from 'nitro'
 import type { ProductKind } from '~/shared/product-details'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, isOrganizationWideRole, locationMemberSql, roleAllows, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
+import { assertRoleAllows, isOrganizationWideRole, locationMemberSql, organizationOwnerSql, roleAllows, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { conversationMemberSql, messageQueries, participantGuard } from '~/server/domain/conversations'
@@ -111,8 +111,7 @@ export const jobEndKeys = (taskId: string) => JOB_END_STATES.map(state => `${sta
  * the organization's owner (the first, by when they joined). A job is never
  * stored with nobody; the one place the fallback is written.
  */
-export const jobAssigneeSql = (organizationSql: string, memberSql: string) =>
-  `COALESCE(${memberSql}, (SELECT owner.id FROM member owner WHERE owner.organizationId = ${organizationSql} AND owner.role = 'owner' ORDER BY owner.createdAt, owner.id LIMIT 1))`
+export const jobAssigneeSql = (organizationSql: string, memberSql: string) => `COALESCE(${memberSql}, ${organizationOwnerSql(organizationSql)})`
 
 // ---------------------------------------------------------------------------
 // Subject writes. Each returns statements for the batch that changes the
@@ -1196,13 +1195,10 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
   const replayId = await readReplay()
   if (replayId) return { task: await afterWrite(db, viewer, replayId), created: false }
 
-  const chosen = await readTaskAssignee(db, organizationId, body)
-  // A job is never nobody's: with no one chosen it is the owner's, by the one fallback jobs are written with.
-  const assigned = maintenance
-    ? (await queryFirst<{ id: string | null }>(db, `SELECT ${jobAssigneeSql('?', '?')} AS id`, [chosen, organizationId]))?.id ?? null
-    : chosen
+  const assigned = await readTaskAssignee(db, organizationId, body)
+  // A repair is someone's from the start: whoever creates it says whose.
   if (maintenance) {
-    if (!assigned) throw new Error(`Organization ${organizationId} has no owner to give a maintenance job`)
+    if (!assigned) fail(422, 'JOB_ASSIGNEE_REQUIRED', 'Choose who does the repair: a maintenance member, an owner or an admin', 'assigned_member_id')
     await assertMaintenanceAssignee(db, organizationId, assigned)
   }
   type Place = { location_id: string; timezone: string }

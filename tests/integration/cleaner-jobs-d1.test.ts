@@ -6,7 +6,7 @@ import { hashPassword } from 'better-auth/crypto'
 import sharp from 'sharp'
 import type { DbClient } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { type MemberAccessPrincipal, memberAccessPrincipal } from '../../server/utils/member-access.ts'
+import { type MemberAccessPrincipal, memberAccessPrincipal, reconcileResponsibilities } from '../../server/utils/member-access.ts'
 import { cancelStay, createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { conversationPageFor } from './support/conversation-page.ts'
 import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
@@ -255,8 +255,10 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const [acPhoto] = await uploadMessagePhotos(db, env, ORG, [{ bytes: pixels, filename: 'ac.avif' }], { source: 'external', userId: null })
     await appendMessage(db, { id: 'ac-report', conversationId: deeConversation, authorKind: 'guest', authorUserId: null, body: 'The AC is blowing warm air.' },
       messagePhotoPlacements(ORG, 'ac-report', [acPhoto!], new Date().toISOString()))
-    // The owner's conversation offers to make a maintenance job of it, at the place it is about.
-    assert.deepEqual((await conversationPageFor(db, owner, deeConversation)).maintenance, { product_id: cabin.id, location_id: 'cabin-site', guest: 'Dee' })
+    // The owner's conversation offers to make a maintenance job of it, at the place it is about; only Dee's own words are hers to report.
+    const deePage = await conversationPageFor(db, owner, deeConversation)
+    assert.deepEqual(deePage.maintenance, { product_id: cabin.id, location_id: 'cabin-site', guest: 'Dee' })
+    assert.deepEqual(deePage.entries.flatMap(entry => entry.type === 'message' && entry.author_kind === 'guest' ? [entry.id] : []), ['ac-report'])
     // Repair goes to the maintenance member, an owner or an admin, at the cabin or its location.
     const options = await maintenanceOptions(db, ownerViewer)
     assert.deepEqual(options.assignees.map(person => person.id).sort(), ['m-admin', 'm-fixer', 'm-owner'])
@@ -264,6 +266,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     const repair = { kind: 'maintenance', title: 'AC not cooling', product_id: cabin.id, location_id: 'cabin-site', source_message_id: 'ac-report', due_at: at(day(5), '17:00').toISOString() }
     await assert.rejects(createTask(db, ownerViewer, { ...repair, assigned_member_id: 'm-cleaner', idempotency_key: 'ac-cleaner' }), { status: 422, data: { code: 'INVALID_RESPONSIBILITY', field: 'assigned_member_id' } })
     await assert.rejects(createTask(db, ownerViewer, { ...repair, product_id: null, location_id: null, assigned_member_id: 'm-fixer', idempotency_key: 'ac-nowhere' }), { status: 422, data: { code: 'TASK_LOCATION_REQUIRED', field: 'location_id' } })
+    await assert.rejects(createTask(db, ownerViewer, { ...repair, idempotency_key: 'ac-nobody' }), { status: 422, data: { code: 'JOB_ASSIGNEE_REQUIRED', field: 'assigned_member_id' } })
     const { task: ac } = await createTask(db, ownerViewer, { ...repair, assigned_member_id: 'm-fixer', idempotency_key: 'ac' })
     // Stored as the job of the guest's message, at the cabin, Fran's.
     assert.deepEqual(await db.prepare('SELECT kind, subject_type, subject_id, product_id, location_id, assigned_member_id, claim_role FROM tasks WHERE id = ?').bind(ac.id).first(),
@@ -298,6 +301,13 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert(finished?.type === 'message')
     assert.deepEqual([finished.author_user_id, finished.photos.length], ['fixer', 1])
     assert.deepEqual((await getTask(db, ownerViewer, ac.id)).outcome?.photos.map(photo => photo.id), finished.photos.map(photo => photo.id))
+
+    // When Fran leaves, her open repair goes to the owner, found by role even when the owner holds two.
+    await db.prepare("UPDATE member SET role = 'owner,maintenance' WHERE id = 'm-owner'").run()
+    const { task: leak } = await createTask(db, ownerViewer, { kind: 'maintenance', title: 'Tap drips', location_id: 'cabin-site', assigned_member_id: 'm-fixer', idempotency_key: 'leak' })
+    await db.prepare("DELETE FROM member WHERE id = 'm-fixer'").run()
+    await reconcileResponsibilities(env, db, { organizationId: ORG })
+    assert.equal(await db.prepare('SELECT assigned_member_id FROM tasks WHERE id = ?').bind(leak.id).first<string>('assigned_member_id'), 'm-owner')
   } finally {
     await runtime.dispose()
   }

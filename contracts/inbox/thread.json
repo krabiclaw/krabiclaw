@@ -48,6 +48,7 @@
     },
     {
       "author": "Mililani",
+      "author_kind": "guest",
       "author_user_id": null,
       "automatic": false,
       "body": "¿En invierno dejan aparcar en la calle?",
@@ -66,6 +67,7 @@
     },
     {
       "author": "Mililani",
+      "author_kind": "guest",
       "author_user_id": null,
       "automatic": false,
       "body": null,
@@ -92,6 +94,7 @@
     },
     {
       "author": "You",
+      "author_kind": "member",
       "author_user_id": null,
       "automatic": false,
       "body": "Yes, the street facing downhill is easiest.",
@@ -110,6 +113,7 @@
     },
     {
       "author": "Mililani",
+      "author_kind": "guest",
       "author_user_id": null,
       "automatic": false,
       "body": "Thank you! What time is check-in?",
@@ -133,6 +137,7 @@
     },
     {
       "author": "Automatic",
+      "author_kind": "krabiclaw",
       "author_user_id": null,
       "automatic": true,
       "body": "Your door code is 1106. Garage D is unlocked.",
@@ -165,6 +170,7 @@
     },
     {
       "author": "You",
+      "author_kind": "member",
       "author_user_id": "owner-contract",
       "automatic": false,
       "body": "Check-in is from 4 PM.",

@@ -53,14 +53,14 @@ function reservationInThread(context: HistoryContext, viewer: { conversation: Co
   return { at, day: { type: 'day', id: `day:${day.key}`, label: dayFormat.label(instant, day) }, confirmation }
 }
 
-function presentMessage(message: Pick<MessageRow, 'id' | 'sequence' | 'event_name'>, context: MessageContext, input: {
+function presentMessage(message: Pick<MessageRow, 'id' | 'sequence' | 'event_name' | 'author_kind'>, context: MessageContext, input: {
   author: string; viewerRole: ConversationViewerRole; guestName: string; authorUserId: string | null
   side: ConversationMessage['side']; body: string | null; sentAt: string; automatic: boolean; showAlerts: boolean
   unshownFiles?: number
 }): ConversationMessage {
   const deliveries = input.viewerRole === 'member' ? context.deliveriesByMessage.get(message.id) : undefined
   const projected = conversationMessage({
-    id: message.id, sequence: message.sequence, authorUserId: input.authorUserId, side: input.side, author: input.author,
+    id: message.id, sequence: message.sequence, authorUserId: input.authorUserId, authorKind: message.author_kind, side: input.side, author: input.author,
     automatic: input.automatic, sentAt: input.sentAt, body: input.body, attachments: context.photos.get(message.id) ?? [],
     deliveries: input.showAlerts ? deliveries?.filter(delivery => delivery.purpose === 'owner_alert') : undefined,
     unshownFiles: input.unshownFiles,

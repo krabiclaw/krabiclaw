@@ -74,7 +74,7 @@
                   {{ message.receipt }}<template v-if="message.retryable"> · <button type="button" class="underline underline-offset-2 disabled:opacity-50" :disabled="retrying" @click="retry(message.id)">Try again</button></template>
                 </p>
                 <UButton v-if="thread.kind === 'team' && !message.automatic && !item.mine" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" @click="reportError = null; reporting = message">Report</UButton>
-                <UButton v-if="data?.maintenance && message.side === 'guest' && !message.automatic && conversationOrganization" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" data-testid="conversation-create-maintenance" @click="repairing = message">Create maintenance job</UButton>
+                <UButton v-if="data?.maintenance && message.author_kind === 'guest' && conversationOrganization" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" data-testid="conversation-create-maintenance" @click="repairing = message">Create maintenance job</UButton>
                 <div v-if="thread.kind === 'team' && failedDeliveries(message).length" class="mt-1 text-xs text-error" data-team-delivery-failure>
                   <p>Message saved. {{ failedDeliveries(message).length === 1 ? 'A notification failed.' : `${failedDeliveries(message).length} notifications failed.` }}</p>
                   <UCollapsible v-if="failedDeliveries(message).some(delivery => delivery.error)">
@@ -362,7 +362,7 @@ const rows = computed<Row[]>(() => {
   }
   if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
-      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, job: false, deliveries: [], sent_at: new Date().toISOString(),
+      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, author_kind: mineSide.value === 'guest' ? 'guest' : 'member', automatic: false, job: false, deliveries: [], sent_at: new Date().toISOString(),
       time: 'Sending', body: attempt.value.body || null, receipt: null, retryable: false, unshown_files: 0, sending: true,
       photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnail_url: photo.url, width: null, height: null })),
     })

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:3446d2e3962012605343dce53a09e400ae06309227456f5debc7c792604bbe62",
-  "documentationFingerprint": "sha256:33946a6e253ea5c1bd2ba6027e9b1be007459fd6911df99ea8d68fb7ba06ccb7",
+  "fingerprint": "sha256:b5c29f3362ec88fd0dec092c4d2a8823ab866e36fa2c20112fd8402e02f60c12",
+  "documentationFingerprint": "sha256:8655e3d9074a20780bbe00599cf7f43aee247b51da8a2a982e70e1d114ba7027",
   "tools": [
     {
       "name": "add_organization_language",
@@ -37101,7 +37101,7 @@
     {
       "name": "create_task",
       "title": "Create task",
-      "description": "Create a task with optional dates and one assignee, or a maintenance job: a repair at a listing (product_id) or a location (location_id), posted to its person in a team conversation. A maintenance job reported by a guest names their message with source_message_id; its photos go with the job. Without an assignee, maintenance goes to the owner. Specify location_id when the product is offered at multiple locations. A new assignee may be notified according to their settings. Reuse idempotency_key only for the same request.",
+      "description": "Create a task with optional dates and one assignee, or a maintenance job: a repair at a listing (product_id) or a location (location_id), posted to its person in a team conversation. A maintenance job reported by a guest names their message with source_message_id; its photos go with the job. A maintenance job requires assigned_member_id. Specify location_id when the product is offered at multiple locations. A new assignee may be notified according to their settings. Reuse idempotency_key only for the same request.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

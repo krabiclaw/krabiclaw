@@ -32,6 +32,8 @@ export interface ConversationMessage {
   id: string
   sequence: number
   author_user_id: string | null
+  /** Who wrote it, as stored: the guest's own words, a member, or Blawby (a booking's opening, a support mirror). `side` is where it is drawn. */
+  author_kind: 'guest' | 'member' | 'krabiclaw'
   side: 'guest' | 'business'
   author: string
   automatic: boolean
