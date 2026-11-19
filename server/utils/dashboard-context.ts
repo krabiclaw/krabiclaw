@@ -7,13 +7,14 @@ import type { H3Event } from 'nitro'
 
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { assertOrganizationWideAccess, ASSIGNED_SERVICE_SQL, DASHBOARD_ORGANIZATION_COLUMNS, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
 import { getOrganizationPlan } from '~/server/utils/billing-access'
 
 import { parsePostalAddress } from '~/utils/postal-address'
-import { readMediaPlacements } from '~/server/utils/media-asset-manager'
-import { loadPublicSocialMedia, type PublicSocialMedia } from '~/server/utils/public-social-image'
+import { groupMediaPlacements, mediaPlacementsQuery, readMediaPlacements } from '~/server/utils/media-asset-manager'
+import { publicLocationSocialMediaFromPlacements, type PublicSocialMedia } from '~/server/utils/public-social-image'
+import { publicLocationProtectedSql } from '~/server/utils/public-location-privacy'
 import { mediaStillUrl, resolveOwnerPicture, type LogoPresentation } from '~/shared/media-placement-contract'
 import type { StayMapSharing } from '~/shared/stay-listing'
 
@@ -345,24 +346,24 @@ export async function listDashboardLocations(
   includeInactive = false,
 ) {
 
-  const locations = await queryAll<Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null }>(db, `
-    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.stay_map_sharing, l.latitude, l.longitude
-    FROM business_locations l
+  const params = assignedUserId ? [organizationId, assignedUserId] : [organizationId]
+  const visible = `FROM business_locations l
     WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
       ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM products p WHERE p.organization_id = l.organization_id AND (${ASSIGNED_SERVICE_SQL})
         AND (EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = l.id)
-          OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))))` : ''}
-    ORDER BY l.title ASC
-  `, assignedUserId ? [organizationId, assignedUserId] : [organizationId])
-  const [media, organizationPlacements] = await Promise.all([
-    loadPublicSocialMedia(db, organizationId, 'business_location', locations.map(location => location.id)),
-    readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId], slot: 'social_share' }),
-  ])
-  const organizationMedia = organizationPlacements.get(organizationId) ?? []
-
-  return locations.map((location) => {
-    const locationMedia = media.get(location.id)
-    if (!locationMedia) throw new Error(`Location ${location.id} media was not loaded`)
+          OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))))` : ''}`
+  type Location = Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null; is_stay_location: number }
+  const [locations, media] = await executeBatch(db, [
+    { query: `SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.stay_map_sharing, l.latitude, l.longitude,
+      ${publicLocationProtectedSql('l')} AS is_stay_location ${visible} ORDER BY l.title ASC`, params },
+    mediaPlacementsQuery({ organizationId, ownerType: 'business_location',
+      owners: { sql: `SELECT l.id ${visible}`, params }, includeOrganizationFallback: true }),
+  ], { operation: 'Read dashboard locations and pictures' })
+  const placements = groupMediaPlacements(media!.results)
+  const organizationMedia = (placements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
+  return (locations!.results as Location[]).map(({ is_stay_location, ...location }) => {
+    const ownMedia = (placements.get(location.id) ?? []).filter(item => item.owner_type === 'business_location')
+    const locationMedia = publicLocationSocialMediaFromPlacements({ is_stay_location }, ownMedia, organizationMedia)
     const hero = locationMedia.media.filter(item => item.slot === 'hero')
     return {
       ...location,
