@@ -412,7 +412,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     channex.missingMapping = '2'
     t.mock.timers.enable({ apis: ['Date'], now: localDateTimeToInstant(day(2), '12:00', TZ, 'compatible').getTime() })
     try {
-      await deliver()
+      await assert.rejects(deliver(), /Airbnb rejected a listing’s calendar sync/)
     } finally {
       t.mock.timers.reset()
     }

@@ -694,11 +694,12 @@ test('a sync request is checked against the plan once, then Blawby imports, acti
     const creates = (path: string) => channex.seen.filter(request => request.method === 'POST' && request.path === path).length
     assert.deepEqual([creates('/properties') - propertyCreatesBefore, creates('/room_types'), creates('/rate_plans'), creates('/channels/chan-1/mappings')], [1, 1, 1, 1])
     assert.equal(await db.prepare('SELECT id FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first('id'), queuedId)
-    const done = await job()
-    assert.deepEqual({ ...done, product_id: null }, { action: 'sync', state: 'done', product_id: null, last_error_code: null })
-    const productId = done!.product_id as string
+    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: null, last_error_code: null })
+    const completed = (await call('GET')).body.listings as Array<Record<string, unknown>>
+    const productId = completed[0]?.product_id
+    assert.ok(typeof productId === 'string')
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_airbnb_listings WHERE product_id = ?').bind(productId).first(), { import_stage: 'complete', enabled: 1 })
-    assert.deepEqual(((await call('GET')).body.listings as Array<Record<string, unknown>>).map(listing => [listing.product_id, listing.action, listing.status, listing.stage, listing.error]), [[productId, 'sync', 'done', 'complete', null]])
+    assert.deepEqual(completed.map(listing => [listing.product_id, listing.action, listing.status, listing.stage, listing.error]), [[productId, 'sync', 'done', 'complete', null]])
     assert.equal(channex.photoFetches, 11)
     assert.equal((await readStayHome(db, manager, productId)).photos.length, 11)
     assert.equal(await countActiveHomes(db, ORG), 3)

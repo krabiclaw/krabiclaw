@@ -1594,6 +1594,7 @@ export async function deliverPendingChannelNights(env: CloudflareEnv, organizati
       AND p.product_id = json_extract(home.value, '$.product_id') AND p.date >= json_extract(home.value, '$.from') AND p.date < json_extract(home.value, '$.to')
     GROUP BY 1`, [JSON.stringify(homes.map(({ product_id, from, to }) => ({ product_id, from, to }))), organizationId])).map(row => [row.product_id, row.nights]))
   let next = Infinity
+  const syncFailures: unknown[] = []
   for (const row of homes) {
     // A home's calendar gains its next night at its own midnight.
     next = Math.min(next, localDateTimeToInstant(addDays(row.from, 1), '00:00', row.timezone, 'compatible').getTime())
@@ -1619,11 +1620,19 @@ export async function deliverPendingChannelNights(env: CloudflareEnv, organizati
     const home = await readStayHome(db, { organizationId, actorId: 'system', manage: true }, row.product_id)
     const read = (start: string, end: string) => homeNights(db, organizationId, home, start, end)
     // Before the new nights are queued: a sync Channex did not take leaves them unsent, so the wake's retry asks again.
-    if (added.length) await syncAirbnbListing(db, env, organizationId, home.product_id)
+    if (added.length) {
+      try {
+        await syncAirbnbListing(db, env, organizationId, home.product_id)
+      } catch (cause) {
+        syncFailures.push(cause)
+        continue
+      }
+    }
     const retryAt = await deliverStayNights(db, env, organizationId, home, read, added)
     if (retryAt !== null) next = Math.min(next, retryAt)
     await publishStayInvalidation(env, { type: 'nights.changed', organization_id: organizationId, location_id: home.location_id, product_id: home.product_id, booking_id: null }, { updated_at: new Date().toISOString() })
   }
+  if (syncFailures.length) throw new AggregateError(syncFailures, 'Airbnb rejected a listing’s calendar sync')
   return Number.isFinite(next) ? next : null
 }
 
