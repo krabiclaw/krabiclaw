@@ -262,7 +262,7 @@ async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizatio
   }
   const channex = await queryFirst<{ status: string; connected_at: string | null }>(
     db,
-    'SELECT status, connected_at FROM channex_connections WHERE organization_id = ?',
+    "SELECT status, connected_at FROM channex_connections WHERE organization_id = ? ORDER BY status = 'connected' DESC, connected_at, id LIMIT 1",
     [organizationId],
   )
   return {

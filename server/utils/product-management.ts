@@ -632,8 +632,8 @@ export interface StayImportWrite { channelId: string; listingId: string; written
 export function stayImportWrittenQuery(organizationId: string, productId: string, source: StayImportWrite, fields: readonly string[]): BatchQuery {
   const written = Object.fromEntries(fields.filter(field => Object.hasOwn(source.written, field)).map(field => [field, source.written[field]]))
   return {
-    query: `UPDATE product_channel_mappings SET import_written = json_patch(COALESCE(import_written, '{}'), ?), updated_at = ?
-      WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND channel_id = ? AND listing_id = ?`,
+    query: `UPDATE product_airbnb_listings SET import_written = json_patch(COALESCE(import_written, '{}'), ?), updated_at = ?
+      WHERE organization_id = ? AND product_id = ? AND channel_id = ? AND listing_id = ?`,
     params: [JSON.stringify(written), new Date().toISOString(), organizationId, productId, source.channelId, source.listingId],
   }
 }

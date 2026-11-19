@@ -83,8 +83,10 @@ test('the business outbox sends due messages, leaves future ones pending and rec
     // Eve's conversation is addressed through Channex. The provider's answer to
     // the read before any send is malformed, so nothing is sent and the
     // message fails with the provider's typed facts instead of staying sending.
-    await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
-      VALUES (?, ?, 'channex', 'listing', 'channel', 'property', 'room', 'rate', 'complete', 1)`).bind(ORG, cabin.id).run()
+    await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, property_id, room_type_id, rate_plan_id, import_stage, enabled)
+      VALUES (?, ?, 'channex', 'property', 'room', 'rate', 'complete', 1)`).bind(ORG, cabin.id).run()
+    await db.prepare(`INSERT INTO product_airbnb_listings (organization_id, product_id, listing_id, channel_id, import_stage, enabled)
+      VALUES (?, ?, 'listing', 'channel', 'complete', 1)`).bind(ORG, cabin.id).run()
     await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, conversation_id, external_booking_id, provider_updated_at)
       VALUES ('channex', 'thread-eve', ?, ?, ?, NULL, '2026-10-16T00:00:00')`).bind(ORG, cabin.id, eve.conversation_id).run()
     const channexEnv = { ...env, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key' } as CloudflareEnv

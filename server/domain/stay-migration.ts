@@ -306,11 +306,10 @@ function blockChunks(input: MigrationInput) {
 interface BlockNight { product_id: string; date: string; closed: number; state: string | null; sent_closed: number | null; delivery_required: number; timezone: string }
 async function blockState(db: DbClient, access: StayAccess, input: MigrationInput) {
   if (!input.blocks.length) return new Map<string, BlockNight>()
-  const rows = await queryAll<BlockNight>(db, `SELECT n.product_id, n.date, n.closed, p.state, json_extract(p.sent_json, '$.stop_sell') AS sent_closed, l.timezone, CASE WHEN m.enabled = 1 AND c.status = 'connected' AND m.channel_id = c.channel_id THEN 1 ELSE 0 END AS delivery_required FROM product_nights n
+  const rows = await queryAll<BlockNight>(db, `SELECT n.product_id, n.date, n.closed, p.state, json_extract(p.sent_json, '$.stop_sell') AS sent_closed, l.timezone, CASE WHEN m.enabled = 1 THEN 1 ELSE 0 END AS delivery_required FROM product_nights n
     JOIN product_stay_configs h ON h.organization_id = n.organization_id AND h.product_id = n.product_id
     JOIN business_locations l ON l.organization_id = h.organization_id AND l.id = h.location_id
     LEFT JOIN product_channel_mappings m ON m.organization_id = n.organization_id AND m.product_id = n.product_id AND m.provider = 'channex'
-    LEFT JOIN channex_connections c ON c.organization_id = n.organization_id
     LEFT JOIN channel_night_pushes p ON p.organization_id = n.organization_id AND p.product_id = n.product_id AND p.date = n.date AND p.provider = 'channex'
     WHERE n.organization_id = ? AND n.product_id IN (SELECT value FROM json_each(?)) AND n.date >= ? AND n.date < ?`,
   [access.organizationId, JSON.stringify([...new Set(input.blocks.map(block => block.product_id))]), input.blocks.map(block => block.from).sort()[0], input.blocks.map(block => block.to).sort().at(-1)])

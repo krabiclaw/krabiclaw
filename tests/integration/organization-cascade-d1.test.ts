@@ -64,8 +64,8 @@ function lodgingGraph(org: string): string[] {
       VALUES ('${stay}','${org}','${org}-guest','${home}','${home}-night','${location}','2099-01-05T08:00:00.000Z','2099-01-07T04:00:00.000Z','Asia/Bangkok',2,2,0,0,'direct','app','confirmed','{"advance_notice_minutes":null,"party_size_min":null,"party_size_max":null,"minimum_guest_age":null,"accessibility_contact_required":false,"payment":null,"cancellation":null}',30000,'USD')`,
     `INSERT INTO conversations (id,kind,organization_id,location_id,booking_id,user_id,payload_json,last_message_at,created_at) VALUES ('${stay}-thread','booking','${org}','${location}','${stay}','${org}-guest','{"guest":{"name":"Ana","email":null,"phone":null},"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}','${NOW}','${NOW}')`,
     `INSERT INTO stay_nights (organization_id,product_id,date,booking_id) VALUES ('${org}','${home}','2099-01-05','${stay}'),('${org}','${home}','2099-01-06','${stay}')`,
-    `INSERT INTO channex_connections (organization_id,status,group_id) VALUES ('${org}','not_connected','${org}-group')`,
-    `INSERT INTO product_channel_mappings (organization_id,product_id,provider,listing_id,channel_id,import_stage) VALUES ('${org}','${home}','channex','${org}-listing','${org}-channel','property')`,
+    `INSERT INTO channex_groups (organization_id,group_id) VALUES ('${org}','${org}-group')`,
+    `INSERT INTO product_channel_mappings (organization_id,product_id,provider,import_stage) VALUES ('${org}','${home}','channex','property')`,
     `INSERT INTO message_templates (id,organization_id,title,body,version,created_at,updated_at) VALUES ('${org}-template','${org}','Welcome','Hello',1,'${NOW}','${NOW}')`,
     `INSERT INTO scheduled_guest_messages (id,organization_id,product_id,booking_id,template_id,template_title,template_version,body,due_at,timezone,status,created_at,updated_at)
       VALUES ('${org}-scheduled','${org}','${home}','${stay}','${org}-template','Welcome',1,'Hello','2099-01-05T08:00:00.000Z','Asia/Bangkok','pending','${NOW}','${NOW}')`,
