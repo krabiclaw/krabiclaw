@@ -1,6 +1,6 @@
 <template>
   <UDrawer
-    v-if="!pane && !overlayOpen"
+    v-if="mounted && !pane && !overlayOpen"
     :open="drawerOpen"
     :title="title"
     :description="lead"
@@ -19,9 +19,9 @@
     </template>
   </UDrawer>
 
-  <!-- Moving the panel preserves its fields, form state and draft across lg. -->
-  <Teleport :to="drawerTarget ?? pendingDrawerTarget" :disabled="pane">
-  <UDashboardPanel :id="id" :class="!pane && !drawerTarget ? 'invisible' : undefined" :ui="{ root: 'min-h-0 lg:min-h-full pb-[env(safe-area-inset-bottom)] lg:pb-0' }">
+  <!-- Keep the document panel in place through hydration, then move it into the mobile drawer when its target exists. -->
+  <Teleport :to="drawerTarget ?? 'body'" :disabled="pane || !drawerTarget">
+  <UDashboardPanel :id="id" :class="!mounted ? 'max-lg:invisible' : !pane && !drawerTarget ? 'invisible' : undefined" :ui="{ root: 'min-h-0 lg:min-h-full pb-[env(safe-area-inset-bottom)] lg:pb-0' }">
     <template #header>
       <!--
         Below lg the leaf is a sheet, as Airbnb's field sheets are: ✕, its title
@@ -120,7 +120,8 @@ const pane = useDashboardPane()
 const overlayOpen = inject(dashboardOverlayOpenKey, null)
 const drawerOpen = ref(true)
 const drawerTarget = useTemplateRef<HTMLDivElement>('drawerTarget')
-const pendingDrawerTarget = import.meta.client ? document.createElement('div') : 'body'
+const mounted = ref(false)
+onMounted(() => { mounted.value = true })
 const parent = inject(dashboardLeafParentKey, null)
 let cancelled = false
 
