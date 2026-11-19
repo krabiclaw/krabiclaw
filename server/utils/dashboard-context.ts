@@ -6,16 +6,15 @@ import { getQuery } from 'nitro/h3';
 import type { H3Event } from 'nitro'
 
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
+import { getAuthSession } from '~/server/utils/auth'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { assertOrganizationWideAccess, ASSIGNED_SERVICE_SQL, DASHBOARD_ORGANIZATION_COLUMNS, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
-import { getOrganizationPlan } from '~/server/utils/billing-access'
 
 import { parsePostalAddress } from '~/utils/postal-address'
-import { groupMediaPlacements, mediaPlacementsQuery, readMediaPlacements } from '~/server/utils/media-asset-manager'
+import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { publicLocationSocialMediaFromPlacements, type PublicSocialMedia } from '~/server/utils/public-social-image'
 import { publicLocationProtectedSql } from '~/server/utils/public-location-privacy'
-import { mediaStillUrl, resolveOwnerPicture, type LogoPresentation } from '~/shared/media-placement-contract'
+import { mediaStillUrl, resolveOwnerPicture } from '~/shared/media-placement-contract'
 import type { StayMapSharing } from '~/shared/stay-listing'
 
 /**
@@ -46,31 +45,6 @@ export type DashboardOrganizationRow = ResolvedMembership & {
   /** The caller's Better Auth member row in this organization. */
   memberId: string
 } & DashboardOrganizationConfig
-
-// The dashboard shows the business's mark and nothing else of its media: the
-// sidebar avatar is its `logo` as its owner presents it, or no avatar at all.
-export type DashboardOrganizationMedia = Array<{ asset_id: string, slot: string, public_url: string | null, thumbnail_url: string | null, kind: string | null, presentation: LogoPresentation | null }>
-
-/** The presentation the tenant card needs: the plan and the logo, one read each. */
-export interface DashboardOrganizationCard {
-  effective_plan: string
-  media: DashboardOrganizationMedia
-}
-
-export async function loadDashboardOrganizationCard(
-  env: CloudflareEnv,
-  db: DbClient,
-  organizationId: string,
-): Promise<DashboardOrganizationCard> {
-  const [effectivePlan, placements] = await Promise.all([
-    getOrganizationPlan(env, organizationId),
-    readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId], slot: 'logo' }),
-  ])
-  const media = (placements.get(organizationId) ?? []).map(item => ({
-    asset_id: item.asset_id, slot: item.slot, public_url: item.public_url, thumbnail_url: item.thumbnail_url, kind: item.kind, presentation: item.presentation,
-  }))
-  return { effective_plan: effectivePlan, media }
-}
 
 export interface DashboardLocationRow {
   id: string
@@ -345,13 +319,13 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
   }
 }
 
-export async function listDashboardLocations(
+export async function readDashboardLocations(
   db: DbClient,
   organizationId: string,
   assignedUserId?: string,
   includeInactive = false,
+  includeLogo = false,
 ) {
-
   const params = assignedUserId ? [organizationId, assignedUserId] : [organizationId]
   const visible = `FROM business_locations l
     WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
@@ -359,15 +333,16 @@ export async function listDashboardLocations(
         AND (EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = l.id)
           OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))))` : ''}`
   type Location = Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null; is_stay_location: number }
-  const [locations, media] = await executeBatch(db, [
+  const [locations, media, logo] = await executeBatch(db, [
     { query: `SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.stay_map_sharing, l.latitude, l.longitude,
       ${publicLocationProtectedSql('l')} AS is_stay_location ${visible} ORDER BY l.title ASC`, params },
     mediaPlacementsQuery({ organizationId, ownerType: 'business_location',
       owners: { sql: `SELECT l.id ${visible}`, params }, includeOrganizationFallback: true }),
+    ...(includeLogo ? [mediaPlacementsQuery({ organizationId, ownerType: 'organization', owners: [organizationId], slot: 'logo' })] : []),
   ], { operation: 'Read dashboard locations and pictures' })
   const placements = groupMediaPlacements(media!.results)
   const organizationMedia = (placements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
-  return (locations!.results as Location[]).map(({ is_stay_location, ...location }) => {
+  const rows = (locations!.results as Location[]).map(({ is_stay_location, ...location }) => {
     const ownMedia = (placements.get(location.id) ?? []).filter(item => item.owner_type === 'business_location')
     const locationMedia = publicLocationSocialMediaFromPlacements({ is_stay_location }, ownMedia, organizationMedia)
     const hero = locationMedia.media.filter(item => item.slot === 'hero')
@@ -383,4 +358,13 @@ export async function listDashboardLocations(
       social_image: locationMedia.social_image,
     }
   })
+  const organizationLogo = groupMediaPlacements(logo?.results ?? []).get(organizationId) ?? []
+  const organizationMediaForDashboard = organizationLogo.map(({ asset_id, slot, public_url, thumbnail_url, kind, presentation }) => ({
+    asset_id, slot, public_url, thumbnail_url, kind, presentation,
+  }))
+  return { locations: rows, media: organizationMediaForDashboard }
+}
+
+export async function listDashboardLocations(db: DbClient, organizationId: string, assignedUserId?: string, includeInactive = false) {
+  return (await readDashboardLocations(db, organizationId, assignedUserId, includeInactive)).locations
 }

@@ -29,6 +29,7 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
   if (import.meta.server) {
     const context = useDashboardContext(scope)
     const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
+      read: (orgSlug: string, resource: string, query: Record<string, unknown>) => Promise<unknown>
       catalog: (orgSlug: string) => Promise<unknown>
       today: (orgSlug: string) => Promise<unknown>
     } | undefined
@@ -36,6 +37,17 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
       await Promise.allSettled([context, provider?.catalog(scope.orgSlug)])
     } else if (to.name === 'dashboard-org_slug') {
       await Promise.allSettled([context, provider?.today(scope.orgSlug)])
+    } else if (/^\/dashboard\/[^/]+\/earnings(?:\/performance)?\/?$/.test(to.path)) {
+      const current = new Date().toISOString().slice(0, 7)
+      const selected = typeof to.query.month === 'string' && /^\d{4}-\d{2}$/.test(to.query.month) ? to.query.month : current
+      const months = new Set(/\/performance\/?$/.test(to.path) ? [current, selected] : [current])
+      await Promise.allSettled([context, ...Array.from(months, month =>
+        provider?.read(scope.orgSlug, '/api/dashboard/payments', { view: 'performance', year: Number(month.slice(0, 4)), month }))])
+    } else if (/^\/dashboard\/[^/]+\/integrations(?:\/google-calendar)?\/?$/.test(to.path)) {
+      const calendar = /\/google-calendar\/?$/.test(to.path)
+        ? provider?.read(scope.orgSlug, '/api/dashboard/integrations/google-calendar', {})
+        : undefined
+      await Promise.allSettled([context, calendar, provider?.read(scope.orgSlug, '/api/dashboard/settings', { connections: '1' })])
     } else if (isReservation) {
       await Promise.all([context, useDashboardReservation(scope, String(to.params.record_id))])
     } else {

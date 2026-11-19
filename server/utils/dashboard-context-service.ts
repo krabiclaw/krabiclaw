@@ -3,9 +3,9 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import {
   dashboardOrgQueryParam,
   getDashboardMemberContext,
-  listDashboardLocations,
-  loadDashboardOrganizationCard,
+  readDashboardLocations,
 } from '~/server/utils/dashboard-context'
+import { getOrganizationPlan } from '~/server/utils/billing-access'
 import { loadOrganizationFeatures } from '~/server/utils/cms-capabilities'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 
@@ -28,9 +28,9 @@ export async function loadDashboardContext(
   recordRequestPhase(event, 'context', contextStartedAt)
 
   const resourcesStartedAt = performance.now()
-  const [card, locations, features] = await Promise.all([
-    loadDashboardOrganizationCard(env, db, organization.id),
-    listDashboardLocations(db, organization.id),
+  const [effective_plan, { locations, media }, features] = await Promise.all([
+    getOrganizationPlan(env, organization.id),
+    readDashboardLocations(db, organization.id, undefined, false, true),
     loadOrganizationFeatures(db, organization.id),
   ])
   recordRequestPhase(event, 'resources', resourcesStartedAt)
@@ -38,7 +38,7 @@ export async function loadDashboardContext(
   const { memberId, ...business } = organization
   return {
     success: true as const,
-    organization: { ...business, ...card, features, member_id: memberId },
+    organization: { ...business, effective_plan, media, features, member_id: memberId },
     locations,
   }
 }

@@ -6,10 +6,10 @@ import { oncePerRequest } from '~/server/utils/request-scope'
 import type { H3Event } from 'nitro';
 import {  setHeader } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { executeBatch, queryAll, type BatchQuery } from '~/server/db'
+import { queryAll } from '~/server/db'
 import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
-import { appendPublicShellQueries, buildPublicShellPayload, readPublicExperiences } from '~/server/utils/public-shell-query'
+import { buildPublicShellPayload, readPublicExperiences, readPublicShellRows } from '~/server/utils/public-shell-query'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 import { getOptionalPublicConsultationSettings, getPublicCompliance } from '~/server/utils/professional-services'
 import { listPublishedTenantPagePaths } from '~/server/utils/content/pages'
@@ -89,13 +89,11 @@ export async function loadPublicShellSource(
     readPublicSourceLocale(event, db, organizationId),
   ])
   const sourceLocale = source.locale
-  const shellQueries: BatchQuery[] = []
-  const shellIndexes = appendPublicShellQueries(shellQueries, organization.id, previewAuthorized && organization.vertical === 'restaurant')
   // The language, the shell rows and the bookable experiences depend on the
   // site alone; they were three sequential round trips on every cold shell.
   const [
     language,
-    shellResults,
+    { results: shellResults, indexes: shellIndexes },
     experiences,
     sourceConsultation,
     sourceCompliance,
@@ -103,7 +101,7 @@ export async function loadPublicShellSource(
     localizedRows,
   ] = await Promise.all([
     assertPublicOrganizationLanguage(db, organization.id, locale ?? sourceLocale, source),
-    executeBatch(db, shellQueries),
+    readPublicShellRows(event, db, organization.id, previewAuthorized && organization.vertical === 'restaurant'),
     readPublicExperiences(event, db, organization.id, env),
     // Only a legal practice books consultations; a venue's site has no schedule page.
     isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) ? getOptionalPublicConsultationSettings(db, organization.id) : null,

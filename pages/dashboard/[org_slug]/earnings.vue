@@ -52,7 +52,6 @@
 </template>
 
 <script setup lang="ts">
-import { getLocalTimeZone, today } from '@internationalized/date'
 import PayoutCard from '~/components/dashboard/PayoutCard.vue'
 import PaymentsHelp from '~/components/dashboard/PaymentsHelp.vue'
 import ChannelReservationSummary from '~/components/dashboard/ChannelReservationSummary.vue'
@@ -67,9 +66,9 @@ const route = useRoute()
 const dashboard = useDashboardOrganization()
 const api = useDashboardApi()
 const level = useRouteLevel()
-const thisMonth = today(getLocalTimeZone()).set({ day: 1 })
-const thisMonthKey = `${thisMonth.year}-${String(thisMonth.month).padStart(2, '0')}`
-const monthName = formatCalendarDate(thisMonth.toString(), 'en', { month: 'long' })
+const thisMonthKey = new Date().toISOString().slice(0, 7)
+const thisYear = Number(thisMonthKey.slice(0, 4))
+const monthName = formatCalendarDate(`${thisMonthKey}-01`, 'en', { month: 'long' })
 
 // The year by month, in UTC as the money is recorded; this month is the card's total.
 // Upcoming is what Stripe still holds or has on its way; Paid is what it has sent, with what each payout carried.
@@ -77,9 +76,9 @@ const monthName = formatCalendarDate(thisMonth.toString(), 'en', { month: 'long'
 const [{ data: performance, error }, { data: payouts, error: payoutsError }] = await Promise.all([
   useAsyncData(
     () => `earnings-performance:${route.params.org_slug}:${thisMonthKey}`,
-    () => api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: thisMonth.year, month: thisMonthKey }, validate: isEarningsPerformance }),
+    () => api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: thisYear, month: thisMonthKey }, validate: isEarningsPerformance }),
   ),
-  useLazyAsyncData(() => `earnings-payouts:${route.params.org_slug}`, () => api<PayoutsView>('/api/dashboard/payments', { query: { view: 'payouts', with_items: '1' }, validate: isPayoutsView })),
+  useLazyAsyncData(() => `earnings-payouts:${route.params.org_slug}`, () => api<PayoutsView>('/api/dashboard/payments', { query: { view: 'payouts', with_items: '1' }, validate: isPayoutsView }), { server: false }),
 ])
 const money = (amount: number) => paymentMoney(amount, performance.value!.currency)
 const monthRow = (month: string) => performance.value?.months.find(row => row.month === month)

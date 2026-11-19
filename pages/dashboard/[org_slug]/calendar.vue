@@ -45,16 +45,16 @@ type Homes = { homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | '
 const isHomes = (value: unknown): value is Homes => isRecord(value) && typeof value.manage === 'boolean' && Array.isArray(value.homes)
   && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.internal_name === 'string' && typeof home.timezone === 'string' && isValidTimezone(home.timezone))
 // The available views can be decided in parallel.
-const todayKey = today(getLocalTimeZone()).toString()
+const todayKey = today(dashboard.organization.value?.timezone ?? getLocalTimeZone()).toString()
 const [{ data: homes, error: homesError }, { data: places, error: placesError }] = await Promise.all([
   useAsyncData(
     () => `calendar-homes:${String(route.params.org_slug)}`,
-    () => dashboard.hasFeature('stays') ? api('/api/dashboard/stay-homes', { validate: isHomes }) : Promise.resolve(null),
+    () => dashboard.hasFeature('stays') ? api('/api/dashboard/stay-homes', { query: { view: 'calendar' }, validate: isHomes }) : Promise.resolve(null),
   ),
   useAsyncData(
     () => `calendar-places:${String(route.params.org_slug)}`,
     () => api('/api/dashboard/bookings/calendar', { query: { unit: 'slot', from: todayKey, to: parseDate(todayKey).add({ days: 1 }).toString() }, validate: (value): value is { places: unknown[] } => isRecord(value) && Array.isArray(value.places) }),
-    { lazy: route.query.view !== 'places' },
+    { lazy: route.query.view !== 'places', server: route.query.view === 'places' },
   ),
 ])
 const knownHome = computed(() => homes.value?.homes.find(home => home.product_id === productId.value))

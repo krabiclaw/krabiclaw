@@ -40,7 +40,10 @@ const isCalendarResponse = (value: unknown): value is {calendar:GoogleCalendarIn
  return (calendar === null || (isRecord(calendar) && ['revision','account_id','calendar_id','calendar_name','created_at','updated_at'].every(field => typeof calendar[field] === 'string')
   && ['active','disabled','error'].includes(String(calendar.status)) && (calendar.last_error === null || typeof calendar.last_error === 'string')))
 }
-const { data, error, refresh } = await useAsyncData(`google-calendar:${organizationId}`, () => applicationFetch(api, {query:{coverage:'1'},validate:isCalendarResponse}))
+const dashboardApi = useDashboardApi()
+const { data, error, refresh } = await useAsyncData(`google-calendar:${organizationId}`, () => import.meta.server
+  ? dashboardApi('/api/dashboard/integrations/google-calendar', { validate: isCalendarResponse })
+  : applicationFetch(api, { query: { coverage: '1' }, validate: isCalendarResponse }))
 const calendar = computed(() => data.value?.calendar ?? null)
 const connected = computed(() => calendar.value && calendar.value.status !== 'disabled')
 watch(error, value => { if(value) failure.value = getErrorMessage(value, 'Could not load Google Calendar.') }, {immediate:true})

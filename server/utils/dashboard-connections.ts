@@ -1,3 +1,4 @@
+import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { HTTPError, type H3Event } from 'nitro'
 import { useNitroApp } from 'nitro/app'
 import { MEMBER_BUSY_SCOPES } from '~/shared/member-scheduling'
@@ -304,4 +305,11 @@ export async function dashboardConnections(
   if (connected && !calendar && !social && !managedAds) return invalid('Disconnect this account before selecting a new one', 409)
   await api(`${path}/${calendar ? 'connect' : integration === 'discord' ? 'channels' : 'select'}`, { ...body, ...(managedAds ? { service: 'managed-ads', revision: current?.revision ?? null } : {}) })
   return managedAds ? screen : { ...screen, destination: { view: 'connection', query: scope } }
+}
+
+export async function readDashboardConnections(event: H3Event, orgSlug?: string) {
+  const { db, env, organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
+  const integrations = await loadConnectionSummary(db, env, organization.id)
+  const connections = await connectionRows({ db, env, organization }, integrations)
+  return { success: true as const, settings: { integrations }, connectionFilters, connectionGroups, connections }
 }
