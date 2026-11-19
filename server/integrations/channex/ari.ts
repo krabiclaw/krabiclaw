@@ -1,3 +1,4 @@
+import { AIRBNB_MAPPINGS } from './listing-mappings'
 import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { StayHome, StayNight } from '~/server/domain/stays'
 import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
@@ -231,12 +232,11 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
     const linked = await queryFirst<{
       channel_id: string | null; listing_id: string | null; enabled: number; import_stage: string
     }>(db, `SELECT CASE WHEN c.status = 'connected' AND c.channel_id = m.channel_id THEN m.channel_id END AS channel_id,
-      m.listing_id, m.enabled, m.import_stage FROM product_channel_mappings m
-      LEFT JOIN channex_connections c ON c.organization_id = m.organization_id
-      WHERE m.organization_id = ? AND m.product_id = ? AND m.provider = 'channex'`, [organizationId, home.product_id])
-    if (!linked) throw new ChannexDataError('The home has no Channex property mapping')
-    const channelId = linked.import_stage === 'draft' ? null : linked.channel_id
-    if (channelId !== null) {
+      m.listing_id, m.enabled, m.import_stage FROM ${AIRBNB_MAPPINGS} m
+      LEFT JOIN channex_connections c ON c.organization_id = m.organization_id AND c.channel_id = m.channel_id
+      WHERE m.organization_id = ? AND m.product_id = ? AND m.rate_plan_id = ? ORDER BY m.enabled DESC, m.listing_id LIMIT 1`, [organizationId, home.product_id, target.rate_plan_id])
+    const channelId = !linked || linked.import_stage === 'draft' ? null : linked.channel_id
+    if (linked && channelId !== null) {
       const channelPath = `/channels/${encodeURIComponent(channelId)}`
       const channel = await channexGet(env, channelPath, 'channel')
       if (channel.id !== channelId || channel.attributes.channel !== 'AirBNB') throw new ChannexDataError('Channex returned a different Airbnb channel for this home')
@@ -455,10 +455,17 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
   }
   const review = (date: string, detail: string) => { if (outcomes.get(date)?.state !== 'pending') outcomes.set(date, { state: 'needs_review', detail }) }
 
+  const additionalRates = await queryAll<{ rate_plan_id: string }>(db, `SELECT rate_plan_id FROM product_airbnb_listings
+    WHERE organization_id = ? AND product_id = ? AND rate_plan_id IS NOT NULL AND enabled = 1`, [organizationId, home.product_id])
   const requests = [
-    ['restrictions', changes.filter(change => change.restrictions.length), (batch: typeof changes) => channexRequest(env, '/restrictions', 'POST', { values: dateRanges(batch.map(change => ({
-      date: change.row.date, change: Object.fromEntries(change.restrictions.map(field => [field, change.values[field]])),
-    }))).map(range => ({ property_id: mapping.property_id, rate_plan_id: mapping.rate_plan_id, ...range })) }),
+    ['restrictions', changes.filter(change => change.restrictions.length), (batch: typeof changes) => channexRequest(env, '/restrictions', 'POST', { values: [
+      ...dateRanges(batch.map(change => ({
+        date: change.row.date, change: Object.fromEntries(change.restrictions.map(field => [field, change.values[field]])),
+      }))).map(range => ({ property_id: mapping.property_id, rate_plan_id: mapping.rate_plan_id, ...range })),
+      ...additionalRates.flatMap(plan => dateRanges(batch.filter(change => change.restrictions.includes('stop_sell')).map(change => ({
+        date: change.row.date, change: { stop_sell: change.values.stop_sell },
+      }))).map(range => ({ property_id: mapping.property_id, rate_plan_id: plan.rate_plan_id, ...range }))),
+    ] }),
     (change: typeof changes[number]) => { for (const field of change.restrictions) Object.assign(confirmed.get(change.row.date)!, { [field]: change.values[field] }) }],
     ['availability', changes.filter(change => change.availability), (batch: typeof changes) => channexRequest(env, '/availability', 'POST', { values: dateRanges(batch.map(change => ({
       date: change.row.date, change: { availability: change.values.availability },
@@ -534,9 +541,9 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
   return { next: Number.isFinite(next) ? next : null, ...(defaultsFailure ? { failure: defaultsFailure.error } : {}) }
 }
 
-export async function activeAirbnbMapping(db: DbClient, organizationId: string, productId: string) {
-  return await queryFirst<{ channel_id: string; listing_id: string; rate_plan_id: string }>(db, `SELECT m.channel_id, m.listing_id, m.rate_plan_id
-    FROM product_channel_mappings m JOIN channex_connections c ON c.organization_id = m.organization_id AND c.channel_id = m.channel_id
+export async function activeAirbnbMappings(db: DbClient, organizationId: string, productId: string) {
+  return await queryAll<{ channel_id: string; listing_id: string; rate_plan_id: string }>(db, `SELECT m.channel_id, m.listing_id, m.rate_plan_id
+    FROM ${AIRBNB_MAPPINGS} m JOIN channex_connections c ON c.organization_id = m.organization_id AND c.channel_id = m.channel_id
     WHERE m.organization_id = ? AND m.product_id = ? AND m.provider = 'channex' AND c.status = 'connected'
       AND m.enabled = 1 AND m.import_stage IN ('reservations', 'messages', 'complete')`, [organizationId, productId])
 }
@@ -548,14 +555,15 @@ export async function activeAirbnbMapping(db: DbClient, organizationId: string, 
  * send; a listing Channex no longer maps is the home's nights needing review.
  */
 export async function syncAirbnbListing(db: DbClient, env: ChannexEnv, organizationId: string, productId: string): Promise<void> {
-  const mapping = await activeAirbnbMapping(db, organizationId, productId)
-  if (!mapping) return
-  try {
-    await channexRequest(env, `/meta/airbnb/${encodeURIComponent(mapping.channel_id)}/full_sync_listing`, 'POST', { listing_id: mapping.listing_id })
-  } catch (error) {
-    if (!(error instanceof ChannexError) || error.providerStatus !== 404) throw error
-    await execute(db, `UPDATE channel_night_pushes SET state = 'needs_review', detail = ? WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= date('now', '-1 day')`,
-      [MAPPING_MISSING, organizationId, productId])
+  const mappings = await activeAirbnbMappings(db, organizationId, productId)
+  for (const mapping of mappings) {
+    try {
+      await channexRequest(env, `/meta/airbnb/${encodeURIComponent(mapping.channel_id)}/full_sync_listing`, 'POST', { listing_id: mapping.listing_id })
+    } catch (error) {
+      if (!(error instanceof ChannexError) || error.providerStatus !== 404) throw error
+      await execute(db, `UPDATE channel_night_pushes SET state = 'needs_review', detail = ? WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= date('now', '-1 day')`,
+        [MAPPING_MISSING, organizationId, productId])
+    }
   }
 }
 
@@ -563,7 +571,7 @@ export async function syncAirbnbListing(db: DbClient, env: ChannexEnv, organizat
  * Push the changed check-in, checkout, house rules or cancellation settings
  * for a connected Airbnb home. The mapped rate plan carries dated stay rules.
  */
-export async function pushAirbnbBookingSettings(env: ChannexEnv, row: NonNullable<Awaited<ReturnType<typeof activeAirbnbMapping>>>, booking: Record<string, unknown>): Promise<ChannelPush | null> {
+export async function pushAirbnbBookingSettings(env: ChannexEnv, row: Awaited<ReturnType<typeof activeAirbnbMappings>>[number], booking: Record<string, unknown>): Promise<ChannelPush | null> {
   if (!Object.keys(booking).length) return null
   const path = `/channels/${encodeURIComponent(row.channel_id)}`
   const channel = object((await channexRequest(env, path)).data, 'channel')

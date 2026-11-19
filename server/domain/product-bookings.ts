@@ -687,6 +687,7 @@ export interface BookedRecordInRange {
   location_title: string | null
   starts_at: string
   ends_at: string
+  actual_check_out_date: string | null
   timezone: string
   party_size: number
   /** A stay's adults and children; a visit's are null. */
@@ -746,7 +747,7 @@ export function bookedRecordsInRange(viewer: ViewerTerms, range: {
   return {
     query: `SELECT b.id, b.organization_id, org.name AS organization_name, org.vertical, b.status, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit, b.product_id, p.kind AS product_kind,
         ${range.guest ? 'p.name' : 'COALESCE(sc.internal_name, p.name)'} AS product_name, b.product_session_id, COALESCE(b.location_id, sc.location_id) AS location_id, l.title AS location_title,
-        b.starts_at, b.ends_at, b.timezone, b.party_size, b.adults, b.children, b.party_size_is_minimum, ${privateColumn("json_extract(r.payload_json, '$.guest.name')")} AS guest_name,
+        b.starts_at, b.ends_at, b.actual_check_out_date, b.timezone, b.party_size, b.adults, b.children, b.party_size_is_minimum, ${privateColumn("json_extract(r.payload_json, '$.guest.name')")} AS guest_name,
         ${privateColumn('(SELECT u.image FROM user u WHERE u.id = r.user_id)')} AS guest_image_url, b.owner, b.channel, b.overbooked, b.total_minor,
         CASE WHEN b.total_minor IS NULL THEN org.default_currency ELSE b.currency END AS currency,
         ${paid} AS paid_minor,

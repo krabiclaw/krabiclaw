@@ -12,7 +12,7 @@ import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { calendarStays, dashboardStayEditQueries, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
+import { canReleaseStayNights, calendarStays, dashboardStayEditQueries, getStay, stayAccessFor, stayCalendarOf, stayCalendarQueries, readStayReservationHome, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadStaffBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
@@ -120,7 +120,7 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
           if (!record) throw new Error('The conversation has no booking')
           return requestActions(record, new Date().toISOString())
         })
-      : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel'],
+      : canReleaseStayNights(stay) ? ['release_nights'] : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel'],
     stay.channel === 'airbnb' && channelOwned
       ? pendingStayChanges(db, { bookingId, conversationId: booking.conversation_id, organizationId: organization.id, userId })
       : [],

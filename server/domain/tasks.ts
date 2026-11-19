@@ -124,8 +124,8 @@ export interface TurnoverHome {
 }
 
 /** A nights booking's stored ends read as the home's days. */
-type StoredStay = { id: string; product_id: string; status: StayWindow['status']; starts_at: string; ends_at: string; timezone: string }
-const stayWindowOf = (row: StoredStay): StayWindow => ({ id: row.id, product_id: row.product_id, status: row.status, check_in_date: bookingDay(row.starts_at, row.timezone), check_out_date: bookingDay(row.ends_at, row.timezone) })
+type StoredStay = { id: string; product_id: string; status: StayWindow['status']; starts_at: string; ends_at: string; actual_check_out_date: string | null; timezone: string }
+const stayWindowOf = (row: StoredStay): StayWindow => ({ id: row.id, product_id: row.product_id, status: row.status, check_in_date: bookingDay(row.starts_at, row.timezone), check_out_date: row.actual_check_out_date ?? bookingDay(row.ends_at, row.timezone) })
 
 function nextTurnoverArrival<T extends Pick<StayWindow, 'id' | 'check_in_date'>>(stay: Pick<StayWindow, 'id' | 'check_out_date'>, confirmed: T[]): T | null {
   return confirmed.reduce<T | null>((next, other) => other.id === stay.id || other.check_in_date < stay.check_out_date
@@ -141,7 +141,7 @@ function storedOn(column: string, date: string, timezone: string): BatchQuery {
 
 /** The batch guard: the turnover statements apply only if the booking is what they were computed for, its ends on these days in its home's clock. */
 function stayIs(organizationId: string, stay: StayWindow, timezone: string): BatchQuery {
-  const starts = storedOn('starts_at', stay.check_in_date, timezone), ends = storedOn('ends_at', stay.check_out_date, timezone)
+  const starts = storedOn('starts_at', stay.check_in_date, timezone), ends = storedOn('COALESCE(actual_check_out_date, ends_at)', stay.check_out_date, timezone)
   return { query: `EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND product_id = ? AND status = ? AND product_session_id IS NULL AND ${starts.query} AND ${ends.query})`,
     params: [organizationId, stay.id, stay.product_id, stay.status, ...starts.params!, ...ends.params!] }
 }
@@ -161,8 +161,8 @@ export function turnoverHomeColumns(checkIn: string): string {
     assigned_member_id: 'b.assigned_member_id',
     // Read one day wider for a checkout instant on a different UTC day than its local day.
     turnover_neighbours: `(SELECT json_group_array(json_object('id', id, 'product_id', product_id, 'status', status,
-      'starts_at', starts_at, 'ends_at', ends_at, 'timezone', timezone))
-      FROM (SELECT id, product_id, status, starts_at, ends_at, timezone FROM bookings
+      'starts_at', starts_at, 'ends_at', ends_at, 'actual_check_out_date', actual_check_out_date, 'timezone', timezone))
+      FROM (SELECT id, product_id, status, starts_at, ends_at, actual_check_out_date, timezone FROM bookings
         WHERE organization_id = c.organization_id AND product_id = c.product_id AND product_session_id IS NULL
           AND status = 'confirmed' AND ends_at >= date(${checkIn}, '-401 days')
         ORDER BY id)) || ''`,
@@ -843,7 +843,7 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
   const statusSql = query.status ? 't.status = ?' : `(t.status = 'open' OR (? = 'today' AND t.status IN ('done', 'skipped') AND t.closed_at >= ?))`
   const statusParams = query.status ? [query.status] : [query.range, closedSince]
   // The tasks and everything their cards show, in one round trip.
-  const listed = { sql: `SELECT t.*, s.ends_at AS checkout_at, s.timezone AS checkout_timezone FROM tasks t
+  const listed = { sql: `SELECT t.*, COALESCE(s.actual_check_out_date, s.ends_at) AS checkout_at, s.timezone AS checkout_timezone FROM tasks t
     LEFT JOIN bookings s ON t.kind = 'turnover' AND t.starts_at IS NULL AND s.organization_id = t.organization_id AND s.id = t.subject_id
     WHERE t.organization_id = ? AND ${scope.sql} AND ${statusSql}${filters.map(sql => ` AND ${sql}`).join('')}`, params: [organizationId, ...scope.params, ...statusParams, ...params] }
   const [read, ...related] = await executeBatch(db, [

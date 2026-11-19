@@ -10,7 +10,7 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required', code: 'VALIDATION_ERROR', field: 'organizationId' }, { status: 400 })
   const { env, session, organization } = await requireOrganizationAccess(event, organizationId)
-  const body = await readBody<{ sync?: unknown; stop?: unknown }>(event)
+  const body = await readBody<{ sync?: unknown; stop?: unknown; stop_listing_ids?: unknown }>(event)
   if (!body || typeof body !== 'object' || Array.isArray(body)) return jsonResponse({ error: 'Send {sync, stop}', code: 'VALIDATION_ERROR', field: 'body' }, { status: 400 })
   const listings = await requestAirbnbSync(env, env.DB, organization.id, session.user.id, body)
   return jsonResponse({ listings }, { status: 202 })

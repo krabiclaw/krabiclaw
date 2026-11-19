@@ -30,7 +30,6 @@
       @choose="choose"
       @act="actOnListing"
       @retry-failed="retryFailed"
-      @disconnect="disconnect"
     >
       <div v-if="!connection" class="space-y-4">
         <p class="text-sm text-muted">
@@ -39,7 +38,39 @@
         <UButton icon="i-simple-icons-airbnb" size="xl" block :loading="starting" @click="startConnection">Connect Airbnb</UButton>
         <p class="text-center text-xs text-dimmed">You can also connect and sync directly within the Blawby app on iOS.</p>
       </div>
+      <template #account>
+        <section class="space-y-3">
+          <h2 class="text-sm font-semibold text-muted">Airbnb accounts</h2>
+          <div v-for="account in connectedAccounts" :key="account.channel_id" class="flex items-center justify-between gap-3">
+            <div>
+              <p class="font-medium">{{ accountsListingName(account.channel_id) }}</p>
+              <p class="text-sm text-muted">{{ account.listing_count }} linked</p>
+              <p v-if="account.disconnect_error" class="text-sm text-error">{{ account.disconnect_error }}</p>
+            </div>
+            <UButton v-if="canManage" color="error" variant="outline" :loading="account.status === 'disconnecting'" :disabled="disconnecting || applying || pending" @click="disconnect(account)">
+              {{ account.disconnect_error ? 'Retry disconnect' : 'Disconnect' }}
+            </UButton>
+          </div>
+          <UButton v-if="canManage && entitled" icon="i-lucide-plus" color="neutral" variant="outline" :loading="starting" @click="startConnection">
+            {{ connected ? 'Connect another Airbnb account' : 'Continue with Airbnb' }}
+          </UButton>
+        </section>
+      </template>
+      <template #disconnect />
       <template #connected>
+        <section v-if="canManage && linkableListings.length && linkedHomes.length" class="space-y-3">
+          <h2 class="text-sm font-semibold text-muted">Share a home’s calendar</h2>
+          <UFormField label="Airbnb listing">
+            <USelect v-model="linkListing" :items="linkableListings" placeholder="Choose a listing" class="w-full" />
+          </UFormField>
+          <UFormField label="Existing home">
+            <USelect v-model="linkHome" :items="linkedHomes" placeholder="Choose a home" class="w-full" />
+          </UFormField>
+          <UButton :disabled="!linkListing || !linkHome || pending || applying || disconnecting" @click="attachListing">
+            Link listing
+          </UButton>
+        </section>
+
         <section v-if="missingListings.length" class="space-y-3">
           <div>
             <h2 class="text-sm font-semibold text-muted">Missing from Airbnb</h2>
@@ -49,7 +80,7 @@
             <NuxtLink :to="`/dashboard/${String(route.params.org_slug)}/products/${listing.product_id}`" class="font-medium text-highlighted underline">
               {{ listing.internal_name }}
             </NuxtLink>
-            <UButton v-if="canManage" color="neutral" variant="outline" :disabled="applying || pending || disconnecting" @click="submitChanges({ stop: [listing.product_id] })">
+            <UButton v-if="canManage" color="neutral" variant="outline" :disabled="applying || pending || disconnecting" @click="submitChanges({ stop_listing_ids: [listing.listing_id] })">
               Stop Airbnb sync
             </UButton>
           </div>
@@ -62,6 +93,7 @@
 <script setup lang="ts">
 import IntegrationLeaf, { type IntegrationLeafConnection, type IntegrationLeafItem, type IntegrationLeafItemsStatus } from '~/components/dashboard/IntegrationLeaf.vue'
 import AirbnbListingDetailsDialog, { type AirbnbListingDetails } from '~/components/dashboard/AirbnbListingDetailsDialog.vue'
+import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { integrationDefinition, itemsApplyLabel } from '~/shared/integrations'
 import { IMPORT_STAGES, importStageTitle, isInterruptedStage, type ImportStage } from '~/shared/airbnb-import'
@@ -82,7 +114,8 @@ definePageMeta({ layout: 'dashboard' })
   until nothing is waiting). A listing Airbnb left details out of gets them in
   its own dialog first.
 */
-interface AirbnbStatus {
+interface AirbnbAccount {
+  channel_id: string | null
   status: 'not_connected' | 'authorizing' | 'connected' | 'disconnecting'
   connected_at: string | null
   listing_count: number
@@ -91,10 +124,12 @@ interface AirbnbStatus {
   disconnect_error: string | null
 }
 
+interface AirbnbStatus extends AirbnbAccount { connections: AirbnbAccount[] }
+
 type ListingImport = { status: 'not_imported' } | { status: 'imported'; product_id: string; stage: ImportStage; syncing: boolean }
-interface AirbnbListing { id: string; title: string; city: string; country_code: string; import: ListingImport }
+interface AirbnbListing { id: string; channel_id: string; title: string; city: string; country_code: string; import: ListingImport }
 interface MissingAirbnbListing { listing_id: string; product_id: string; internal_name: string }
-interface SyncRequest { sync?: Array<{ listing_id: string; details?: Record<string, string> }>; stop: string[] }
+interface SyncRequest { sync?: Array<{ listing_id: string; product_id?: string; details?: Record<string, string> }>; stop_listing_ids: string[] }
 
 interface SyncChange {
   listing_id: string
@@ -115,15 +150,19 @@ const canManage = computed(() => dashboard.organization.value?.role.split(',').s
   return access?.authorize({ integrations: ['update'] }).success === true
 }) ?? false)
 const api = `/api/organizations/${integrations.organizationId}/integrations/airbnb`
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const detailsDialog = useOverlay().create(AirbnbListingDetailsDialog)
 
 const isStage = (value: unknown): value is ImportStage => typeof value === 'string' && (IMPORT_STAGES as readonly string[]).includes(value)
-const isStatus = (value: unknown): value is AirbnbStatus =>
+const isAccount = (value: unknown): value is AirbnbAccount =>
   isRecord(value) && ['not_connected', 'authorizing', 'connected', 'disconnecting'].includes(String(value.status))
   && (value.connected_at === null || typeof value.connected_at === 'string') && typeof value.listing_count === 'number'
+  && (value.channel_id === null || typeof value.channel_id === 'string')
   && (value.disconnect_error === null || typeof value.disconnect_error === 'string')
+const isStatus = (value: unknown): value is AirbnbStatus =>
+  isAccount(value) && 'connections' in value && Array.isArray(value.connections) && value.connections.every(isAccount)
 const isListing = (value: unknown): value is AirbnbListing =>
-  isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string' && isRecord(value.import)
+  isRecord(value) && typeof value.id === 'string' && typeof value.channel_id === 'string' && typeof value.title === 'string' && isRecord(value.import)
   && (value.import.status === 'not_imported' || (value.import.status === 'imported' && typeof value.import.product_id === 'string' && isStage(value.import.stage) && typeof value.import.syncing === 'boolean'))
 const isListings = (value: unknown): value is { listings: AirbnbListing[]; missing_listings: MissingAirbnbListing[] } =>
   isRecord(value) && Array.isArray(value.listings) && value.listings.every(isListing)
@@ -158,6 +197,10 @@ const { data: workspace, error: statusError, pending: listingsPending, refresh: 
 )
 const status = computed(() => workspace.value?.connection)
 const connected = computed(() => status.value?.status === 'connected')
+const connectedAccounts = computed(() => status.value?.connections.flatMap(account => account.channel_id ? [{ ...account, channel_id: account.channel_id }] : []) ?? [])
+function accountsListingName(channelId: string) {
+  return workspace.value?.inventory?.listings.find(listing => listing.channel_id === channelId)?.title ?? 'Airbnb account'
+}
 const listings = computed(() => workspace.value?.inventory?.listings ?? [])
 const missingListings = computed(() => workspace.value?.inventory?.missing_listings ?? [])
 const listingsError = computed(() => workspace.value?.inventory_error ?? null)
@@ -260,6 +303,29 @@ const itemsStatus = computed<IntegrationLeafItemsStatus | null>(() => {
 /** Checked listings that are not syncing yet, or whose sync setup stopped part-way, and have every detail the import asks for. */
 const toSync = computed(() => listings.value.filter(listing => checked.value.includes(listing.id) && (!syncing(listing) || interrupted(listing)) && !needsDetails(listing)))
 /** Syncing listings the host unchecked. */
+const linkListing = ref<string>()
+const linkHome = ref<string>()
+const linkableListings = computed(() => listings.value.filter(listing => listing.import.status === 'not_imported' || listing.import.stage === 'complete' || listing.import.stage === 'draft')
+  .map(listing => ({ label: listing.title, value: listing.id })))
+const linkedHomes = computed(() => {
+  const source = listings.value.find(listing => listing.id === linkListing.value)?.import
+  return [...new Map(listings.value.flatMap(listing =>
+    listing.import.status === 'imported' && listing.import.syncing && (source?.status !== 'imported' || source.product_id !== listing.import.product_id)
+      ? [[listing.import.product_id, { label: listing.title, value: listing.import.product_id }] as const] : [],
+  )).values()]
+})
+watch(linkListing, () => { linkHome.value = undefined })
+async function attachListing() {
+  if (!linkListing.value || !linkHome.value) return
+  const selected = listings.value.find(listing => listing.id === linkListing.value)
+  if (!selected || (selected.import.status === 'imported' && selected.import.product_id === linkHome.value)) return
+  if (selected.import.status === 'imported' && !await confirmDialog.open({
+    title: 'Merge these homes?',
+    description: 'Blawby will move the reservations and guest conversations to the selected home and remove the duplicate home from your calendar and website.',
+    confirmLabel: 'Merge homes', cancelLabel: 'Keep separate',
+  })) return
+  await submitChanges({ sync: [{ listing_id: selected.id, product_id: linkHome.value }], stop_listing_ids: [] })
+}
 const toStop = computed(() => listings.value.filter(listing => !checked.value.includes(listing.id) && syncing(listing)))
 const applyLabel = computed(() => connected.value && !pending.value ? itemsApplyLabel(integrationDefinition('airbnb').items!, toSync.value.length, toStop.value.length) : null)
 
@@ -350,7 +416,7 @@ function apply() {
   if (!applyLabel.value) return
   return submitChanges({
     sync: toSync.value.map(listing => ({ listing_id: listing.id, ...(entered.value[listing.id] ? { details: entered.value[listing.id] } : {}) })),
-    stop: toStop.value.map(listing => (listing.import as { product_id: string }).product_id),
+    stop_listing_ids: toStop.value.map(listing => listing.id),
   })
 }
 
@@ -399,14 +465,14 @@ async function retryFailed() {
     }
     // What is sent is the batch the host saw, as it stands now: a listing or home gone meanwhile is left out,
     // and a change that failed meanwhile waits for its own Retry, since its details were not asked for.
-    const asked = { sync: new Set(batch.sync.map(job => job.listing_id)), stop: new Set(batch.stop.map(job => job.product_id)) }
-    const current = { sync: retryBatch.value.sync.filter(job => asked.sync.has(job.listing_id)), stop: retryBatch.value.stop.filter(job => asked.stop.has(job.product_id)) }
+    const asked = { sync: new Set(batch.sync.map(job => job.listing_id)), stop: new Set(batch.stop.map(job => job.listing_id)) }
+    const current = { sync: retryBatch.value.sync.filter(job => asked.sync.has(job.listing_id)), stop: retryBatch.value.stop.filter(job => asked.stop.has(job.listing_id)) }
     if (!current.sync.length && !current.stop.length) return
     changes.value = await dashboardApi(`${api}/sync`, {
       method: 'POST',
       body: {
         sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
-        stop: current.stop.map(job => job.product_id),
+        stop_listing_ids: current.stop.map(job => job.listing_id),
       },
       validate: isChanges,
     })
@@ -453,7 +519,7 @@ async function startConnection() {
   starting.value = true
   failure.value = ''
   try {
-    const started = await dashboardApi(`${api}/start`, { method: 'POST', validate: isStart })
+    const started = await dashboardApi(`${api}/start?client=web`, { method: 'POST', validate: isStart })
     window.location.href = started.authorization_url
   } catch (cause) {
     failure.value = getErrorMessage(cause, 'Could not start the Airbnb connection.')
@@ -461,11 +527,30 @@ async function startConnection() {
   }
 }
 
-async function disconnect() {
+onMounted(async () => {
+  const { success, token, channel_id: channelId, ...rest } = route.query
+  if (success === undefined && token === undefined && channelId === undefined) return
+  await navigateTo({ path: route.path, query: rest }, { replace: true })
+  if (success !== 'true' || typeof token !== 'string' || typeof channelId !== 'string') {
+    failure.value = 'Airbnb didn’t authorize this connection.'
+    return
+  }
+  try {
+    await dashboardApi(`${api}/complete`, {
+      method: 'POST', body: { token, channel_id: channelId },
+      validate: (value: unknown): value is { connected: true } => isRecord(value) && value.connected === true,
+    })
+    await Promise.all([refreshStatus(), integrations.refresh()])
+  } catch (cause) {
+    failure.value = getErrorMessage(cause, 'Could not finish the Airbnb connection.')
+  }
+})
+
+async function disconnect(account: AirbnbAccount & { channel_id: string }) {
   failure.value = ''
   try {
     const result = await dashboardApi(`${api}/disconnect`, {
-      method: 'POST', body: { retry: Boolean(status.value?.disconnect_error) }, validate: isDisconnect,
+      method: 'POST', body: { channel_id: account.channel_id, retry: Boolean(account.disconnect_error) }, validate: isDisconnect,
     })
     if (result.disconnected) await Promise.all([refreshStatus(), integrations.refresh()])
     else await watchDisconnect()
@@ -487,7 +572,7 @@ async function watchDisconnect() {
       if (!first) await new Promise(resolve => setTimeout(resolve, 2000))
       if (!watching) return
       await refreshStatus()
-      if (status.value?.status !== 'disconnecting') break
+      if (!connectedAccounts.value.some(account => account.status === 'disconnecting')) break
     }
     await integrations.refresh()
     if (status.value?.disconnect_error) failure.value = `Disconnecting failed: ${status.value.disconnect_error}`
@@ -497,7 +582,7 @@ async function watchDisconnect() {
   }
 }
 onMounted(() => {
-  if (status.value?.status === 'disconnecting') watchDisconnect().catch((cause) => { failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.') })
+  if (connectedAccounts.value.some(account => account.status === 'disconnecting')) watchDisconnect().catch((cause) => { failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.') })
 })
 onBeforeUnmount(() => { watching = false })
 </script>

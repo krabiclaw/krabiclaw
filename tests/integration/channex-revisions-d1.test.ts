@@ -4,11 +4,13 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { Miniflare } from 'miniflare'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, cancelStay, createStay, getStay, setStayNights, updateStay } from '../../server/domain/stays.ts'
+import { applyChannelBooking, cancelStay, createStay, getStay, releaseStayNights, setStayNights, updateStay } from '../../server/domain/stays.ts'
 import { applyBookingRevision } from '../../server/integrations/channex/booking-revisions.ts'
 import { ChannexConnection } from '../../server/integrations/channex/channel-connection.ts'
 import { startVrboSetup, vrboHomes } from '../../server/integrations/channex/hosted-channel.ts'
 import { captureEvents } from './support/events.ts'
+import { countActiveHomes } from '../../server/utils/billing.ts'
+import { addLocalDays, localDateAt } from '../../utils/timezone.ts'
 import { applySchema } from './support/schema.ts'
 
 // Airbnb bookings landing as channel stays: acknowledged only after they
@@ -105,8 +107,12 @@ async function boot(mapped = true) {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-owner' },
     } })
-    if (mapped) await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
-      VALUES (?, ?, 'channex', 'listing-1', 'chan-1', 'prop-1', 'room-1', 'rate-1', 'complete', 1)`).bind(ORG, home.id).run()
+    if (mapped) {
+      await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, property_id, room_type_id, rate_plan_id, import_stage, enabled)
+      VALUES (?, ?, 'channex', 'prop-1', 'room-1', 'rate-1', 'complete', 1)`).bind(ORG, home.id).run()
+      await db.prepare(`INSERT INTO product_airbnb_listings (organization_id, product_id, listing_id, channel_id, import_stage, enabled)
+      VALUES (?, ?, 'listing-1', 'chan-1', 'complete', 1)`).bind(ORG, home.id).run()
+    }
     return { runtime, db, env, queue, productId: home.id }
   } catch (error) {
     await runtime.dispose()
@@ -374,7 +380,7 @@ test('a standalone home provisions one Channex inventory and opens Vrbo only aft
     assert.ok('url' in ready)
     assert.equal(new URL(ready.url).searchParams.get('property_id'), 'standalone-property')
     assert.deepEqual(created, ['/groups', '/properties', '/room_types', '/rate_plans'])
-    assert.deepEqual(await db.prepare('SELECT listing_id, channel_id, property_id, import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), {
+    assert.deepEqual(await db.prepare('SELECT NULL AS listing_id, NULL AS channel_id, property_id, import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), {
       listing_id: null, channel_id: null, property_id: 'standalone-property', import_stage: 'complete', enabled: 0,
     })
     assert.ok(Object.keys(inventory.availability).length > 300)
@@ -396,6 +402,43 @@ test('a standalone home provisions one Channex inventory and opens Vrbo only aft
     const reopened = await startVrboSetup(db, env, ORG, productId, OWNER, 'Owner')
     assert.ok('url' in reopened)
     assert.deepEqual(created, ['/groups', '/properties', '/room_types', '/rate_plans'])
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('early Airbnb checkout releases room availability and keeps the provider stay through a later revision', { timeout: 120_000 }, async () => {
+  const { runtime, db, env, queue, productId } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    await db.prepare(`INSERT INTO product_airbnb_listings (organization_id, product_id, listing_id, channel_id, rate_plan_id, import_stage, enabled)
+      VALUES (?, ?, 'listing-2', 'chan-2', 'rate-2', 'complete', 1)`).bind(ORG, productId).run()
+    assert.equal(await countActiveHomes(db, ORG), 2)
+    const today = localDateAt(new Date(), 'America/Denver')
+    const arrival = addLocalDays(today, -2)
+    const departure = addLocalDays(today, 2)
+    const booking: Booking = { id: 'bk-release', property_id: 'prop-1', status: 'new', arrival, departure, amount: '600.00', revision: 'release-first' }
+    channex.revise('release-first', booking, '2026-10-15T01:00:00Z')
+    const landed = await applyBookingRevision(db, env, 'release-first')
+    assert.equal(landed.status, 'acknowledged')
+    if (landed.status !== 'acknowledged') throw new Error('Airbnb revision must be acknowledged')
+    await queue.drain(env, 'stay.changed')
+    assert.ok(channex.availability.some(entry => entry.date_from === today && entry.date_to === addLocalDays(today, 1) && entry.availability === 0))
+    const access = { organizationId: ORG, actorId: OWNER, manage: true } as const
+    await releaseStayNights(db, env, access, landed.booking_id, { version: 1, actual_check_out_date: today })
+    await queue.drain(env, 'stay.changed')
+    const saved = await getStay(db, access, landed.booking_id)
+    assert.deepEqual([saved.check_out_date, saved.actual_check_out_date, saved.status, saved.total_minor], [departure, today, 'confirmed', 60_000])
+    assert.deepEqual(await nights(db, landed.booking_id), [arrival, addLocalDays(today, -1)])
+    assert.ok(channex.availability.some(entry => entry.date_from === today && entry.date_to === addLocalDays(today, 1) && entry.availability === 1))
+    channex.revise('release-modified', { ...booking, status: 'modified', amount: '610.00' }, '2026-10-15T01:01:00Z')
+    await applyBookingRevision(db, env, 'release-modified')
+    assert.deepEqual(await nights(db, landed.booking_id), [arrival, addLocalDays(today, -1)])
+    const revised = await getStay(db, access, landed.booking_id)
+    assert.deepEqual([revised.actual_check_out_date, revised.check_out_date, revised.total_minor], [today, departure, 61_000])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

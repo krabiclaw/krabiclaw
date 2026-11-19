@@ -792,6 +792,9 @@ const reservationActions = computed<PanelAction[]>(() => {
         actions.push({ label: 'Cancel reservation', icon: 'i-lucide-ban', run: () => void cancelStay(), testid: 'stay-cancel' })
       }
     }
+    if (!props.personalScope && manage.value && hostActions.value.includes('release_nights')) {
+      actions.push({ label: 'Release remaining nights', icon: 'i-lucide-calendar-minus', run: () => void releaseRemainingNights(), testid: 'stay-early-checkout' })
+    }
     if (itinerary.value) actions.push(itineraryAction)
     return actions
   }
@@ -1071,6 +1074,26 @@ async function changeStay(input: { check_in_date: string; check_out_date: string
     data.value = { ...current, booking: { ...current.booking, ...saved } }
     realtime.savedReservation.value = saved
   }
+}
+
+async function releaseRemainingNights() {
+  const value = detail.value
+  if (!value || !hostActions.value.includes('release_nights')) return
+  if (!await confirmDialog.open({
+    title: 'Has the guest checked out?',
+    description: 'The calendar releases the remaining nights starting today. The Airbnb reservation keeps its original dates.',
+    confirmLabel: 'Release remaining nights', cancelLabel: 'Keep nights blocked',
+  })) return
+  await run('move', async () => {
+    const checkout = localDateAt(new Date(), value.timezone)
+    const { booking: saved } = await dashboardApi(`${dashboardBookingPath(value.booking_id)}/early-checkout`, {
+      method: 'POST', validate: isNightBooking, body: { version: value.version, actual_check_out_date: checkout },
+    })
+    if (saved.actual_check_out_date !== checkout || saved.check_out_date !== value.check_out_date) {
+      throw new Error('The server did not confirm the early checkout.')
+    }
+    await refreshDetails()
+  }, 'The remaining nights could not be released', false)
 }
 
 async function cancelStay() {
