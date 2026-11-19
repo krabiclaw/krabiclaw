@@ -676,10 +676,11 @@ async function savePrivateNote(input: { id: string; version: number; text: strin
       && value.booking.private_notes === (input.text.trim() || null) && value.booking.version === input.version + 1,
   })
   const current = data.value
-  if (accessChangeRevision !== revision || !isDashboardBooking(current) || current.booking.booking_id !== input.id) {
+  const currentNote = note.value
+  if (accessChangeRevision !== revision || !isDashboardBooking(current) || currentNote?.id !== input.id) {
     throw new Error('Reservation access changed while saving the note.')
   }
-  if (current.booking.version !== null && current.booking.version > saved.version) return
+  if (currentNote.version > saved.version) return
   const updated = { ...current, booking: { ...current.booking, ...saved } }
   if (!isDashboardBooking(updated)) throw new Error('The reservation could not be updated with the saved note.')
   data.value = updated
