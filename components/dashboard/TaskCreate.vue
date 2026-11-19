@@ -102,6 +102,9 @@ watch(open, (isOpen) => {
   idempotencyKey.value = crypto.randomUUID()
 }, { immediate: true })
 
+// Options belong to one organization.
+watch(() => props.organizationId, () => { options.value = null })
+
 // Where a repair can be sent and who can do it, read when the sheet becomes a maintenance job.
 watch([open, maintenance], async ([isOpen, isMaintenance]) => {
   if (!isOpen || !isMaintenance) return
@@ -121,6 +124,7 @@ watch([open, maintenance], async ([isOpen, isMaintenance]) => {
 }, { immediate: true })
 
 async function save() {
+  const draft = idempotencyKey.value
   busy.value = true
   failure.value = null
   try {
@@ -135,9 +139,12 @@ async function save() {
             ...(claimRole.value ? { claim_role: claimRole.value, product_id: listingId.value } : {}) }),
       idempotency_key: idempotencyKey.value,
     } })
+    // A draft opened since this request was sent stays open.
+    if (draft !== idempotencyKey.value) return
     emit('created', result.task)
     open.value = false
   } catch (cause) {
+    if (draft !== idempotencyKey.value) return
     failure.value = getErrorMessage(cause, maintenance.value ? 'The maintenance job could not be created' : 'The task could not be added')
   } finally {
     busy.value = false

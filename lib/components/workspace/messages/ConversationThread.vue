@@ -527,6 +527,7 @@ const chosen = useMessagePhotoDraft()
 const reporting = ref<MessageItem | null>(null)
 /** The guest's message a maintenance job is being made from. */
 const repairing = ref<MessageItem | null>(null)
+watch(() => props.threadId, () => { repairing.value = null })
 const reportSaving = ref(false)
 const reportError = ref<string | null>(null)
 const reportKeys = new Map<string, string>()

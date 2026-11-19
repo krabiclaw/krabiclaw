@@ -789,8 +789,8 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       break
     }
     case 'maintenance': {
+      // The guest's words are context: a job whose report left with its conversation is still the job.
       const report = row.subject_type === 'message' ? context.reports.get(row.subject_id!) : undefined
-      if (row.subject_type === 'message' && !report) throw new Error(`Maintenance job ${row.id} has no reporting message`)
       title = row.title!
       status_line = ['Maintenance', place].filter(Boolean).join(' · ')
       // What the guest said, by first name: the job's people read it without the guest's conversation.
@@ -1006,9 +1006,9 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
           AND ${taskScopeSql('t', () => viewer)}) x
       LEFT JOIN bookings b ON b.organization_id = x.organization_id AND b.id = x.booking_id
       LEFT JOIN products p ON p.organization_id = x.organization_id AND p.id = COALESCE(b.product_id, x.product_id)
-      LEFT JOIN product_stay_configs sc ON b.product_session_id IS NULL AND sc.organization_id = b.organization_id AND sc.product_id = b.product_id
+      LEFT JOIN product_stay_configs sc ON (b.id IS NULL OR b.product_session_id IS NULL) AND sc.organization_id = x.organization_id AND sc.product_id = COALESCE(b.product_id, x.product_id)
       LEFT JOIN business_locations l ON l.organization_id = x.organization_id
-        AND l.id = COALESCE(b.location_id, sc.location_id, CASE WHEN x.kind = 'maintenance' THEN x.location_id END)
+        AND l.id = COALESCE(b.location_id, CASE WHEN x.kind = 'maintenance' THEN x.location_id END, sc.location_id)
       LEFT JOIN conversations r ON r.organization_id = b.organization_id AND r.booking_id = b.id AND r.kind = 'booking'
      WHERE x.kind IN ('message_delivery', 'booking_change') OR COALESCE(x.starts_at, x.due_at, ${UNTIMED_JOB_DAY_SQL}, '') <= ?
      ORDER BY COALESCE(x.starts_at, x.due_at, ${UNTIMED_JOB_DAY_SQL}), x.id`,
@@ -1182,7 +1182,8 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
     [organizationId, productId, roleVertical ?? null, roleVertical ?? null])
     if (!listing) fail(422, 'INVALID_TASK_CLAIM_ROLE', 'Choose an eligible role and listing for available work', 'claim_role')
   }
-  const dedupeKey = `${kind}:${organizationId}:${key}`
+  // One namespace per key, whatever the kind: a key reused for another kind replays or conflicts, never makes a second task.
+  const dedupeKey = `custom:${organizationId}:${key}`
   const eventKey = creationDedupeKey('task', organizationId, key)
   const requestHash = await creationRequestHash({ actorId, title, notes, startsAt, dueAt, productId, locationId, assignedMemberId, ...(claimRole ? { claim_role: claimRole } : {}),
     ...(maintenance ? { kind, source_message_id: sourceMessageId } : {}) })

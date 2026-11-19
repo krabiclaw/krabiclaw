@@ -193,7 +193,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
       // A booking may have changed while loading the card. Re-read on the
       // next queue delivery instead of using a new client's card in an old thread.
-      if (prep && view && view.version !== task.version) throw new Error(`Prep task ${task.id} changed while its job was being posted`)
+      if ((prep || task.kind === 'maintenance') && view && view.version !== task.version) throw new Error(`Task ${task.id} changed while its job was being posted`)
       if (prep && view && view.booking_id !== (subject?.id ?? null)) throw new Error(`Prep task ${task.id} does not match its booking conversation`)
       const about = subject?.unit === 'nights' || subject?.unit === 'location' ? 'at' : 'with'
       const targetKey = roster && subject ? await jobThreadParticipantsKey(subject, roster.seats) : null
