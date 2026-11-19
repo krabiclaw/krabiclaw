@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { KRABICLAW_REPOSITORY_URL } from '~/shared/open-source'
+import { BLAWBY_REPOSITORY_URL } from '~/shared/open-source'
 
 const COLUMNS = [
   {
@@ -67,7 +67,7 @@ const COLUMNS = [
     links: [
       { label: 'Docs', to: '/docs' },
       { label: 'Help center', to: '/help' },
-      { label: 'GitHub', to: KRABICLAW_REPOSITORY_URL },
+      { label: 'GitHub', to: BLAWBY_REPOSITORY_URL },
     ],
   },
 ] as const

@@ -1,7 +1,7 @@
+import { LEGACY_PLATFORM_THEME_STORAGE_KEY, PLATFORM_THEME_STORAGE_KEY } from '~/shared/platform-theme'
+
 export type PlatformThemePreference = 'system' | 'light' | 'dark'
 export type PlatformThemeValue = 'light' | 'dark'
-
-const STORAGE_KEY = 'krabiclaw-theme'
 
 export function usePlatformTheme() {
   const preference = useState<PlatformThemePreference>('platform-theme-preference', () => 'system')
@@ -22,7 +22,7 @@ export function usePlatformTheme() {
     preference.value = nextPreference
     if (import.meta.client) {
       try {
-        localStorage.setItem(STORAGE_KEY, nextPreference)
+        localStorage.setItem(PLATFORM_THEME_STORAGE_KEY, nextPreference)
       } catch {
         // Theme preference remains in memory when browser storage is unavailable.
       } finally {
@@ -35,7 +35,14 @@ export function usePlatformTheme() {
     if (import.meta.server) return
     let stored: string | null = null
     try {
-      stored = localStorage.getItem(STORAGE_KEY)
+      stored = localStorage.getItem(PLATFORM_THEME_STORAGE_KEY)
+      if (stored === null) {
+        stored = localStorage.getItem(LEGACY_PLATFORM_THEME_STORAGE_KEY)
+        if (stored === 'system' || stored === 'light' || stored === 'dark') {
+          localStorage.setItem(PLATFORM_THEME_STORAGE_KEY, stored)
+          localStorage.removeItem(LEGACY_PLATFORM_THEME_STORAGE_KEY)
+        }
+      }
     } catch {
       // System preference remains authoritative when browser storage is unavailable.
     }
