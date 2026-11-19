@@ -90,7 +90,7 @@ export async function mcpRequest(
         // ListToolsRequestParams — the SDK validates that against the spec's
         // schema (only cursor/_meta) and silently drops anything else, so it
         // has to travel as a header instead of a JSON-RPC param.
-        ...(options.organizationId ? { 'x-krabiclaw-organization-id': options.organizationId } : {}),
+        ...(options.organizationId ? { 'x-blawby-organization-id': options.organizationId } : {}),
         ...(options.extraHeaders ?? {}),
         'x-request-id': requestId,
       },

@@ -7,12 +7,18 @@ test('reconciliation removes duplicate GA senders and gates pageviews without a 
     AllPageviews: { actionType: 'pageview', enabled: true, firingTriggers: ['Pageview'] },
     AllTracks: { actionType: 'event', enabled: true, firingTriggers: ['AllTracks'] },
   } }
-  const config: ZarazConfig = { tools: { 'ga-platform': tool, 'ga-tenant-platform': structuredClone(tool), 'unrelated-ga': structuredClone(tool) },
-    triggers: { AllTracks: { loadRules: [] } }, historyChange: true }
+  const config: ZarazConfig = { tools: { 'ga-platform': tool, 'ga-tenant-platform': structuredClone(tool), 'unrelated-ga': {
+    ...tool,
+    actions: {
+      AllPageviews: { ...tool.actions.AllPageviews, firingTriggers: ['krabiclaw-native-pageview'] },
+      AllTracks: { ...tool.actions.AllTracks, blockingTriggers: ['krabiclaw-native-pageview'] },
+    },
+  } },
+    triggers: { AllTracks: { loadRules: [] }, 'krabiclaw-native-pageview': { loadRules: [] } }, historyChange: true }
   const input = { platformOrigin: 'https://example.com', tenants: [{ organizationId: 'platform', measurementId: 'G-TEST', hostnames: ['example.com'] }] }
   assert.equal(reconcileZarazAnalyticsConfig(config, input).removedAnalyticsTools, 1)
   assert.equal(config.historyChange, false)
-  assert.deepEqual(config.tools['unrelated-ga'], tool)
+  assert.deepEqual(config.tools['unrelated-ga']!.settings, tool.settings)
   assert.match(config.consent!.consentModalIntroHTML!, /https:\/\/example\.com\/policies\/privacy/)
   assert.deepEqual(config.tools['ga-tenant-platform']!.actions.AllPageviews!.firingTriggers, ['ga-tenant-platform'])
   assert.deepEqual(config.tools['ga-tenant-platform']!.actions.AllTracks!.firingTriggers, ['ga-tenant-platform-tracks'])
@@ -22,7 +28,10 @@ test('reconciliation removes duplicate GA senders and gates pageviews without a 
     { id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'EQUALS', value: 'krabiclaw_native_pageview' },
     { id: 'kc-tenant-hostname', match: '{{ system.page.url.hostname }}', op: 'MATCH_REGEX', value: '^(example\\.com)$' },
   ])
-  assert.equal(config.triggers['krabiclaw-native-pageview']!.system, undefined)
+  assert.equal(config.triggers['blawby-native-pageview']!.system, undefined)
+  assert.equal(config.triggers['krabiclaw-native-pageview'], undefined)
+  assert.deepEqual(config.tools['unrelated-ga']!.actions.AllPageviews!.firingTriggers, ['blawby-native-pageview'])
+  assert.deepEqual(config.tools['unrelated-ga']!.actions.AllTracks!.blockingTriggers, ['blawby-native-pageview'])
   assert.deepEqual(config.triggers.AllTracks!.loadRules, [{ id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^krabiclaw_native_pageview$' }])
   assert.equal(reconcileZarazAnalyticsConfig(config, input).updated, false)
 })
