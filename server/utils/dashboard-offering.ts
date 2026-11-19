@@ -1,9 +1,9 @@
 import type { Product } from '~/server/types/products'
 import type { CatalogRow, CatalogScreen } from '~/shared/catalog-screen'
-import type { requireProductAccess } from '~/server/utils/location-access'
+import type { ProductEditorContext } from '~/server/utils/dashboard-editor-resources'
 import { prepareDashboardLocations } from '~/server/utils/dashboard-context'
 import { prepareCollectionList } from '~/server/utils/product-management'
-import { isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
+import { BATCH_VIEWER, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { PRODUCT_KIND_LABELS, productDetailFields } from '~/shared/product-details'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -11,35 +11,35 @@ import { formatMinorAmount, selectPrice } from '~/shared/prices'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { HTTPError } from 'nitro'
+import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import type { BatchQuery } from '~/server/db'
 
-export async function prepareDashboardOffering(
-  context: Pick<Awaited<ReturnType<typeof requireProductAccess>>, 'env' | 'db' | 'organization'>,
-  productId: string,
-) {
-  const { env, organization } = context
-  const userId = organization.user_id
-  const principal = memberAccessPrincipal(organization.membership, { env })
-  const missing = (message: string): never => { throw new HTTPError({ statusCode: 404, message }) }
-  const manages = await roleAllows({ ...principal, permissions: { products: ['update'] } })
-  const wide = isOrganizationWideRole(organization.member_role)
-  const currency = organization.default_currency
-  if (!isCurrencyCode(currency)) throw new Error('Unsupported organization currency')
-  const readsCatalog = await roleAllows({ ...principal, permissions: { products: ['read'] } })
-  const locationPlan = prepareDashboardLocations(organization.id, readsCatalog ? undefined : userId, true)
-  const collectionPlan = prepareCollectionList({ organizationId: organization.id,
-    assignedUserId: manages ? undefined : userId, collectionIds: { query: 'SELECT collection_id FROM collection_products WHERE organization_id = ? AND product_id = ?', params: [organization.id, productId] } })
-  const readMembers = await roleAllows({ ...principal, permissions: { members: ['read'] } })
+export function prepareDashboardOffering(organizationId: string | { sql: string }, productId: string) {
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const params = typeof organizationId === 'string' ? [organizationId] : []
+  const assignment = (action: 'read' | 'update') => ({ user: BATCH_VIEWER.user, unrestricted: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: [action] })) })
+  const locationPlan = prepareDashboardLocations(organizationId, assignment('read'), true)
+  const collectionPlan = prepareCollectionList({ organizationId, assignedUserId: assignment('update'),
+    collectionIds: { query: `SELECT collection_id FROM collection_products WHERE organization_id = ${organization} AND product_id = ?`, params: [...params, productId] } })
+  const readMembers = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ members: ['read'] }))
   const queries: BatchQuery[] = [...locationPlan.queries, ...collectionPlan.queries, {
     query: `SELECT ${MEMBER_NAME_SQL} AS name FROM member m JOIN user u ON u.id = m.userId
       LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId
-      WHERE m.organizationId = ? AND m.id IN (SELECT assigned_member_id FROM product_booking_configs WHERE organization_id = m.organizationId AND product_id = ? AND unit = 'slot') AND (? = 1 OR m.userId = ?)`,
-    params: [organization.id, productId, Number(readMembers), userId],
+      WHERE m.organizationId = ${organization} AND m.id IN (SELECT assigned_member_id FROM product_booking_configs WHERE organization_id = m.organizationId AND product_id = ?) AND (${readMembers} OR m.userId = ${BATCH_VIEWER.user})`,
+    params: [...params, productId],
   }]
-  return { queries, read(rows: D1Result[], product: Product, locationId: string | null) {
-    const { locations } = locationPlan.read(rows.slice(0, locationPlan.queries.length))
+  return { queries, async read(rows: D1Result[], product: Product, locationId: string | null, context: Pick<ProductEditorContext, 'env' | 'organization'>) {
+    const { env, organization } = context
+    const principal = memberAccessPrincipal(organization, { env })
+    const manages = await roleAllows({ ...principal, permissions: { products: ['update'] } })
+    const wide = isOrganizationWideRole(organization.role)
+    const currency = organization.default_currency
+    if (!isCurrencyCode(currency)) throw new Error('Unsupported organization currency')
+    const missing = (message: string): never => { throw new HTTPError({ statusCode: 404, message }) }
+    const { locations } = locationPlan.read(rows.slice(0, locationPlan.queries.length), context.organization.id)
     const collections = collectionPlan.read(rows.slice(locationPlan.queries.length, -1))
-    if (product.kind === 'stay') return { locations, collections, offering: null }
+    const assigned = (rows.at(-1)!.results as { name: string }[])[0]?.name ?? null
+    if (product.kind === 'stay') return { locations, collections, offering: null, assigned_member_name: assigned }
     const location = locationId ? locations.find(place => place.id === locationId && product.locations.some(binding => binding.location_id === place.id)) ?? missing('Offering not found at this location') : null
     const service = product.kind === 'service'
     const dish = product.kind === 'dish'
@@ -77,7 +77,6 @@ export async function prepareDashboardOffering(
     const photo = leaf('photo', 'Media', product.gallery.length || product.image ? 'View media' : 'Add media', { readonly: !wide })
     photo.image = mediaStillUrl(product.image)
     const definitions = productDetailFields(product.kind).filter(definition => !['pricing_note', 'tagline'].includes(definition.key))
-    const assigned = (rows.at(-1)!.results as { name: string }[])[0]?.name ?? null
     const offering: CatalogScreen = { title, fields: [], rows: [
       ...(wide && !service ? [photo] : []),
       leaf('name', 'Name', product.name),
@@ -102,6 +101,6 @@ export async function prepareDashboardOffering(
       leaf('order-url', dish ? 'Ordering link' : service ? 'External consultation link' : 'External booking link', product.order_url ?? undefined),
       ...(manages ? [leaf('kind', 'Type', PRODUCT_KIND_LABELS[product.kind])] : []),
     ] }
-    return { locations, collections, offering }
+    return { locations, collections, offering, assigned_member_name: assigned }
   } }
 }

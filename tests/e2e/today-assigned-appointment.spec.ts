@@ -156,9 +156,8 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const forbiddenPage = await memberContext.request.get(new URL(`${EDITOR}/pages/${product.page!.id}`, baseURL!).toString())
     expect(forbiddenPage.status(), await forbiddenPage.text()).toBe(404)
     expect(await forbiddenPage.json()).not.toHaveProperty('preview_token')
-    // Dashboard documents serve the client-only shell; the real boundary is
-    // the protected API and the hydrated screen, rather than that shell's 200.
-    expect((await memberPage.goto(new URL(`${productPath}/page`, baseURL!).toString()))?.status()).toBe(200)
+    // Server-rendered editors return the access decision in the document response.
+    expect((await memberPage.goto(new URL(`${productPath}/page`, baseURL!).toString()))?.status()).toBe(404)
     await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
     await expect(memberPage.getByRole('link', { name: 'Edit page content', exact: true })).toHaveCount(0)
     expect((await memberPage.goto(new URL(`${productPath}/description?editMode=preview&previewViewport=desktop`, baseURL!).toString()))?.status()).toBe(200)

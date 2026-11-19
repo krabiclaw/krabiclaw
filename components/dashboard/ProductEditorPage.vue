@@ -583,16 +583,11 @@ const saveError = ref<string | null>(null)
 const photoError = ref<string | null>(null)
 const saving = ref(false)
 
-watch(editorKey, () => {
-  if (!stayEditor.value && product.value) loadForm(product.value)
-  saveError.value = null
-  photoError.value = null
-})
-
 const isOne = (value: unknown): value is { success: true, product: Product } =>
   isRecord(value) && value.success === true && isRecord(value.product) && typeof value.product.id === 'string' && Boolean(value.product.id.trim())
-const isProductRead = (value: unknown): value is { success: true; product: Product; collections: Collection[]; preview_token: string | null; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[] } =>
-  isOne(value) && 'locations' in value && Array.isArray(value.locations)
+const isProductRead = (value: unknown): value is { success: true; product: Product; collections: Collection[]; preview_token: string | null; public_url: string | null; public_urls: Record<string, string>; preview_url: string | null; host_profile_published: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[]; assigned_member_name: string | null } =>
+  isOne(value) && 'assigned_member_name' in value && (value.assigned_member_name === null || typeof value.assigned_member_name === 'string')
+  && 'locations' in value && Array.isArray(value.locations)
   && value.locations.every(location => isRecord(location) && typeof location.id === 'string' && typeof location.slug === 'string')
   && 'offering' in value && (value.offering === null || isRecord(value.offering) && Array.isArray(value.offering.rows))
   && 'collections' in value && Array.isArray(value.collections)
@@ -607,7 +602,7 @@ const isMutation = (value: unknown): value is { success: true; product: ProductM
 
 // The product in this scope, read before the level renders. Keyed by location
 // and product, so a scope change reads that location's prices and settings.
-type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; previewUrl: string | null; publicUrl: string | null; publicUrls: Record<string, string>; hostProfilePublished: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[] } | null
+type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; previewUrl: string | null; publicUrl: string | null; publicUrls: Record<string, string>; hostProfilePublished: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[]; assignedMemberName: string | null } | null
 const productReadKey = computed(() => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`)
 const { data: loaded, error: loadFailure, refresh } = await useWebsiteIndexData<ProductEditorRead>(
   productReadKey,
@@ -617,7 +612,7 @@ const { data: loaded, error: loadFailure, refresh } = await useWebsiteIndexData<
     const path = `/api/editor/organizations/${organizationId}${id ? `/locations/${encodeURIComponent(id)}` : ''}/products/${encodeURIComponent(productId.value)}`
     const response = await dashboardApi(path, { validate: isProductRead, signal, query: { editor: '1' } })
     if (locationScope.value === 'online' && !response.product.booking?.held_online) throw createError({ statusCode: 404, statusMessage: 'This product is not held online' })
-    return { collections: response.collections, product: response.product, previewToken: response.preview_token, previewUrl: response.preview_url, publicUrl: response.public_url, publicUrls: response.public_urls, hostProfilePublished: response.host_profile_published, offering: response.offering, locations: response.locations }
+    return { collections: response.collections, product: response.product, previewToken: response.preview_token, previewUrl: response.preview_url, publicUrl: response.public_url, publicUrls: response.public_urls, hostProfilePublished: response.host_profile_published, offering: response.offering, locations: response.locations, assignedMemberName: response.assigned_member_name }
   },
 
 )
@@ -770,11 +765,6 @@ const savedSafety = computed(() => product.value?.kind === 'stay' ? [
   ...staySafetyLines(product.value.details, { includeNo: true }),
   ...stayAlarmLines(product.value.stay!.amenity_answers, product.value.details),
 ] : [])
-// A product that is not there is not a page. A request that failed is a state
-// this level shows, because the product may well still exist.
-watchEffect(() => {
-  if (loadFailure.value && isNotFoundError(loadFailure.value)) showError(createError({ statusCode: 404, statusMessage: `${itemLabel.value} not found` }))
-})
 /**
  * A place to stay always has its stay settings. Missing or malformed ones are a
  * read that failed, never times and nights to make up.
@@ -809,7 +799,7 @@ async function patchProduct(body: Record<string, unknown>, idempotencyKey?: stri
     ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     validate: (value): value is { success: true; product: ProductMutation;
       collections: Collection[]; preview_token: string | null; preview_url: string | null; public_url: string | null;
-      public_urls: Record<string, string>; host_profile_published: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[] } => isProductRead(value) && isMutation(value),
+      public_urls: Record<string, string>; host_profile_published: boolean | null; offering: CatalogScreen | null; locations: DashboardLocation[]; assigned_member_name: string | null } => isProductRead(value) && isMutation(value),
   })
 }
 
@@ -832,7 +822,7 @@ const isRuleList = (value: unknown): value is { success: true; rules: SavedRule[
 const scheduleUrl = () => `/api/editor/organizations/${organizationId}/products/${productId.value}/availability`
 /** Weekly times belong to a location. Online, the provider's working hours are the schedule, so there are none to read. */
 const scheduleUnplaced = computed(() => Boolean(product.value?.booking) && !locationId.value && !product.value?.booking?.held_online)
-const scheduleReadable = computed(() => Boolean(product.value?.booking) && Boolean(locationId.value))
+const scheduleReadable = computed(() => detailKey.value === 'booking' && Boolean(product.value?.booking) && Boolean(locationId.value))
 // The start times in this scope, read before the level renders, beside the
 // product they belong to. A product without a booking calendar, or an online
 // one without a time zone, has none; the key says which, so the read follows
@@ -893,10 +883,8 @@ const draft = useState<ProductForm>(draftKey, () => ({
 }))
 const form = reactive(draft.value)
 
-// A home's cost on the plan. A new home is a free draft; a draft's line is what
-// publishing it would cost, from the quote the publish is decided by; a live
-// home's is its share of the homes billed now.
-const homeQuoted = computed(() => !isNew.value && product.value?.kind === 'stay')
+// The publication concern reads the quote the activation write requires.
+const homeQuoted = computed(() => !isNew.value && product.value?.kind === 'stay' && detailKey.value === 'publication')
 const homeLive = computed(() => product.value?.stay?.live === true)
 const stayHasNightlyPrice = computed(() => {
   const row = product.value
@@ -997,6 +985,16 @@ watch(product, (row) => {
   }
 }, { immediate: true })
 
+watch(editorKey, () => {
+  if (!stayEditor.value && product.value) loadForm(product.value)
+  saveError.value = null
+  photoError.value = null
+})
+
+// A missing product 404s; a failed read keeps its error state.
+watchEffect(() => {
+  if (loadFailure.value && isNotFoundError(loadFailure.value)) showError(createError({ statusCode: 404, statusMessage: `${itemLabel.value} not found` }))
+})
 function loadForm(row: Product) {
   editVersion.value = row.updated_at
   form.kind = row.kind
@@ -1163,6 +1161,7 @@ function checkInWindowValid(): boolean {
 const stayHostProfilePublished = computed(() => loaded.value?.hostProfilePublished === true)
 function stayAssigneeSummary(): string {
   if (!form.stay_member_id) return 'Unassigned'
+  if (form.stay_member_id === product.value?.stay?.assigned_member_id) return loaded.value?.assignedMemberName ?? 'Assigned member not found in this business'
   if (schedulingMembersError.value) return 'Team members could not be loaded'
   if (!schedulingMembers.value) return 'Loading team members…'
   return schedulingMembers.value.members.find(candidate => candidate.id === form.stay_member_id)?.name ?? 'Assigned member not found in this business'
@@ -1181,9 +1180,9 @@ function roomsSummary(): string {
 if (isNew.value && !form.stay_location_id && locationId.value) form.stay_location_id = locationId.value
 
 // ── The index ─────────────────────────────────────────────
-// Dishes and practice areas without consultations have no assignment to draw.
+// The saved assignee comes from the product read; assignment controls load their choices.
 const { data: schedulingMembers, error: schedulingMembersError } = useMemberSchedulingList(() =>
-  product.value?.booking || stayEditor.value || isNew.value && form.kind === 'stay' ? organizationId : null)
+  isNew.value && form.kind === 'stay' || ['booking', 'team'].includes(detailKey.value ?? '') ? organizationId : null)
 /** The assignee by its loaded name; a read failure, a pending read or an unknown id says so. */
 function assignmentSummary(): string {
   const assignment = isNew.value ? form : product.value?.booking
@@ -1767,7 +1766,7 @@ async function commit(concern?: ProductConcern) {
       const saved = savedEditor.product
       loaded.value = { product: saved, collections: savedEditor.collections, previewToken: savedEditor.preview_token,
         previewUrl: savedEditor.preview_url, publicUrl: savedEditor.public_url,
-        publicUrls: savedEditor.public_urls, hostProfilePublished: savedEditor.host_profile_published, offering: savedEditor.offering, locations: savedEditor.locations }
+        publicUrls: savedEditor.public_urls, hostProfilePublished: savedEditor.host_profile_published, offering: savedEditor.offering, locations: savedEditor.locations, assignedMemberName: savedEditor.assigned_member_name }
       applyProduct(saved)
       editVersion.value = saved.updated_at
       const held = realtime.held.begin(`website:${productReadKey.value}`, businessChanged)

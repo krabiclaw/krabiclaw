@@ -78,7 +78,7 @@ export function organizationSocialMediaFromJson(mediaJson: string) {
 }
 
 export function preparePublicSocialMedia(
-  organizationId: string,
+  organization: string | { sql: string },
   ownerType: MediaPlacementOwnerType,
   ownerIds: readonly string[],
 ) {
@@ -87,13 +87,15 @@ export function preparePublicSocialMedia(
   // the picture of an owner that has none of its own — never its logo.
   return {
     queries: [
-      mediaPlacementsQuery({ organizationId, ownerType, owners: uniqueOwnerIds, includeOrganizationFallback: true }),
+      mediaPlacementsQuery({ organizationId: organization, ownerType, owners: uniqueOwnerIds, includeOrganizationFallback: true }),
       ...(ownerType === 'business_location' ? [{ query: `
         SELECT bl.id, ${publicLocationProtectedSql('bl')} AS is_stay_location FROM business_locations bl
-         WHERE bl.organization_id = ? AND bl.id IN (SELECT value FROM json_each(?))
-      `, params: [organizationId, d1JsonStringSet(uniqueOwnerIds)] }] : []),
+         WHERE bl.organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND bl.id IN (SELECT value FROM json_each(?))
+      `, params: [...(typeof organization === 'string' ? [organization] : []), d1JsonStringSet(uniqueOwnerIds)] }] : []),
     ],
-    read([placements, privacy]: D1Result[]): Map<string, PublicSocialMedia> {
+    read([placements, privacy]: D1Result[], resolvedId?: string): Map<string, PublicSocialMedia> {
+      const organizationId = resolvedId ?? (typeof organization === 'string' ? organization : null)
+      if (!organizationId) throw new Error('Media read requires its resolved organization')
       const ownerPlacements = groupMediaPlacements(placements!.results)
       const organizationMedia = (ownerPlacements.get(organizationId) ?? []).filter(item => item.owner_type === 'organization')
       const locationPrivacy = new Map((privacy?.results as { id: string; is_stay_location: number }[] | undefined ?? [])

@@ -267,7 +267,7 @@ export interface TenantPageScope {
 }
 
 function pageRepresentationQuery(
-  target: string | { path: string; locale: string | { sql: string }; preview: boolean },
+  target: string | (({ path: string } | { product_id: string }) & { locale: string | { sql: string; params?: unknown[] }; preview: boolean }),
   organization?: string | { sql: string }, editor = false,
 ): BatchQuery {
   const scope = typeof organization === 'string' ? '?' : organization?.sql
@@ -277,7 +277,7 @@ function pageRepresentationQuery(
         AND (v.row_role = 'root' OR l.status = 'published'))
       THEN v.path END AS public_path` : ''
   const where = typeof target === 'string' ? 'v.id = ?'
-    : `v.path = ? AND v.locale = ${typeof target.locale === 'string' ? '?' : target.locale.sql}
+    : `${'product_id' in target ? 'p.product_id' : 'v.path'} = ? AND v.locale = ${typeof target.locale === 'string' ? '?' : target.locale.sql}
         ${target.preview ? '' : `AND ${publicTenantPageSql('p')}`}`
   return {
     query: `SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale, v.path, p.path AS source_path,
@@ -286,7 +286,7 @@ function pageRepresentationQuery(
       FROM content_documents v JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id)
         AND p.row_role = 'root' AND p.kind = 'page' AND p.organization_id = v.organization_id
       WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND ${where} ${scope ? `AND v.organization_id = ${scope}` : ''} LIMIT 1`,
-    params: [...(typeof target === 'string' ? [target] : [target.path, ...(typeof target.locale === 'string' ? [target.locale] : [])]),
+    params: [...(typeof target === 'string' ? [target] : ['product_id' in target ? target.product_id : target.path, ...(typeof target.locale === 'string' ? [target.locale] : target.locale.params ?? [])]),
       ...(typeof organization === 'string' ? [organization] : [])],
   }
 }
@@ -574,6 +574,18 @@ export async function getTenantPageById(db: DbClient, variantId: string, scope?:
 export async function getPublishedTenantPage(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<TenantPageDto | null> {
   const plan = prepareTenantPageAtPath(organizationId, path, await resolveLocale(db, organizationId, locale))
   return plan.read(await executeBatch(db, plan.queries, { operation: 'Read published page blocks' }))?.page ?? null
+}
+
+export function preparePublishedProductPage(organization: string | { sql: string }, productId: string) {
+  const source = sourceLocaleQuery(organization)
+  const page = pageRepresentationQuery({ product_id: productId,
+    locale: { sql: `(SELECT locale FROM (${source.query}))`, params: source.params }, preview: false }, organization)
+  return { queries: [source, page], read([language, identity]: D1Result[], organizationId: string, path: string) {
+    const expectedPath = normalizeTenantPagePath(path)
+    sourceLocaleFromRows(organizationId, language!.results)
+    const page = identity!.results[0] as PageRepresentationRow | undefined
+    return page?.path === expectedPath ? page : null
+  } }
 }
 
 export async function resolvePublishedTenantPageIdentity(

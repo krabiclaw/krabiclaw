@@ -1,3 +1,4 @@
+import { prepareDashboardProductRead } from '~/server/utils/dashboard-editor-resources'
 import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/edge-cache'
 // Tenant resolution middleware: every host, Blawby's own included, resolves
 // to an organization. The organization's site decides whether it renders as
@@ -51,7 +52,7 @@ import { prepareSocialConnections, presentSocialConnections } from '~/server/uti
 import { preparePost, preparePostList } from '~/server/utils/post-management'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { prepareDashboardQa } from '~/server/utils/location-qa'
-import { rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteQuestion, websiteSocialPost } from '~/utils/dashboard-document'
+import { dashboardProductId, rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteQuestion, websiteSocialPost } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -387,9 +388,12 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       admin: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ members: ['read'] })) }),
   ] : null
   const query = getQuery(event)
+  const productId = dashboardProductId(panel)
+  const product = productId ? prepareDashboardProductRead(productId) : null
+  if (product && query.location_id !== undefined && typeof query.location_id !== 'string') throw new HTTPError({ statusCode: 400, message: 'Invalid location scope' })
   const website = rendersWebsiteDocument(panel, query) ? prepareWebsiteSettings(managedOrg, env) : null
   const websitePanel = website ? panel.split('/')[2] : undefined
-  const websiteList = prepareWebsitePanel(managedOrg, websitePanel, query, websiteQuestion(panel))
+  const websiteList = prepareWebsitePanel(websitePanel === 'posts' ? { sql: BATCH_VIEWER.organization } : managedOrg, websitePanel, query, websiteQuestion(panel))
   const variantId = websitePageVariant(panel)
   const websiteEditor = variantId && variantId !== 'new' ? prepareTenantPageEditor(variantId) : null
   const postId = website && websiteSocialPost(panel)
@@ -438,6 +442,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(connections?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(google?.map(query => withViewer(membership, query)) ?? []),
     ...(catalog?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(product?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(booking?.queries ?? []),
     ...(calendar ? [calendar, ...agenda?.queries ?? []] : []),
     ...(earnings?.queries ?? []),
@@ -467,6 +472,12 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       if (google) await readCalendarSettingsDocument(event, slug, calendarSettingsFromRows(panelRows.slice(connections.queries.length)))
     }
     if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
+    if (product && productId) {
+      const locationId = typeof query.location_id === 'string' && query.location_id !== 'online' ? query.location_id : null
+      event.context.dashboardProduct = { organization_id: organization.id,
+        path: `${locationId ? `locations/${encodeURIComponent(locationId)}/` : ''}products/${encodeURIComponent(productId)}`,
+        resource: await product.read(panelRows, { env, db, organization }, locationId) }
+    }
     if (booking && bookingId) await readDashboardBookingDocument(event, { orgSlug: slug, bookingId }, [viewerResult!, ...panelRows])
     if (calendar) {
       event.context.dashboardCalendarPresence = { slug, has_places: (panelRows[0]!.results[0] as { has_places: number }).has_places === 1 }
@@ -474,7 +485,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     }
     if (earnings && panelRows[2]?.results.length) earnings.apply(event, panelRows, organization)
     const wholeWorkspace = (viewer as { organization_wide: number }).organization_wide === 1
-    if (website && (wholeWorkspace || websitePanel === 'qa' && typeof query.location_id === 'string')) {
+    if (website && (wholeWorkspace || ['qa', 'posts'].includes(websitePanel ?? '') && typeof query.location_id === 'string')) {
       const content = new Map<string, unknown>()
       let offset = website.queries.length
       if (websiteList) {
@@ -523,9 +534,10 @@ function prepareWebsitePanel(organization: { sql: string }, panel: string | unde
     return { queries: list.queries, read: (rows: D1Result[], id: string) => ({ endpoint: 'blog/posts', value: list.read(rows, { resource: `blog-posts:${id}::` }) }) }
   }
   if (panel === 'posts') {
-    const list = preparePostList(organization, {}, mcpPageWindow({}, { resource: '' }))
+    const locationId = typeof query.location_id === 'string' && query.location_id.trim() ? query.location_id.trim() : null
+    const list = preparePostList(organization, { locationId }, mcpPageWindow({}, { resource: '' }), BATCH_VIEWER)
     return { queries: list.queries, read: (rows: D1Result[], id: string) => ({
-      endpoint: 'posts', value: { success: true, ...list.read(rows, { resource: `posts:${id}::` }) },
+      endpoint: 'posts', value: { success: true, ...list.read(rows, { resource: `posts:${id}::${locationId ?? ''}` }) },
     }) }
   }
   if (panel === 'qa' && qaId !== 'new') {

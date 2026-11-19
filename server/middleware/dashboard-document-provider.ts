@@ -1,4 +1,4 @@
-import { getDashboardContext } from '~/server/utils/dashboard-context'
+import { getDashboardContext, getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { readDashboardAgenda } from '~/server/utils/dashboard-agenda-reader'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { readDashboardEarnings, readDashboardPayoutsDocument } from '~/server/utils/dashboard-earnings'
@@ -54,8 +54,10 @@ export default defineHandler(event => {
             return readCalendarSettingsDocument(event, orgSlug)
           default:
             if (resource.startsWith('/api/editor/')) {
-              const { organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
+              const { organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
               const prefix = `/api/editor/organizations/${organization.id}/`
+              const product = event.context.dashboardProduct as { organization_id: string; path: string; resource: unknown } | undefined
+              if (product?.organization_id === organization.id && resource === `${prefix}${product.path}`) return product.resource
               const content = resource.startsWith(prefix) ? website?.content.get(resource.slice(prefix.length)) : null
               if (!content) throw new HTTPError({ statusCode: 404, message: 'Website content was not read for this document' })
               return content

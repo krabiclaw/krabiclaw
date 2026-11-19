@@ -51,12 +51,12 @@ export function publicTenantVisibilitySql(alias: string, previewAuthorized: bool
 }
 
 /** A saved public address exists only while the tenant and its canonical domain are public. */
-export function preparePublicTenantOrigin(organizationId: string) {
+export function preparePublicTenantOrigin(organizationId: string | { sql: string }) {
   return {
     queries: [{ query: `SELECT o.subdomain, d.domain AS canonical_domain
       FROM organization o
       JOIN organization_domains d ON d.organization_id = o.id AND d.role = 'canonical' AND d.status = 'active'
-      WHERE o.id = ? AND ${publicTenantVisibilitySql('o', false)} LIMIT 1`, params: [organizationId] }],
+      WHERE o.id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND ${publicTenantVisibilitySql('o', false)} LIMIT 1`, params: typeof organizationId === 'string' ? [organizationId] : [] }],
     read(rows: D1Result[], env: CloudflareEnv): string | null {
       const organization = rows[0]!.results[0] as { subdomain: string; canonical_domain: string } | undefined
       if (!organization) return null

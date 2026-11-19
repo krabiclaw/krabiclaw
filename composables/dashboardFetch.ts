@@ -1,4 +1,4 @@
-import { rendersWebsiteDocument, websiteBlogPost, websiteSocialPost } from '~/utils/dashboard-document'
+import { dashboardProductId, rendersWebsiteDocument, websiteBlogPost, websiteSocialPost } from '~/utils/dashboard-document'
 import type { FetchOptions } from 'ofetch'
 import type { MaybeRefOrGetter } from 'vue'
 import { $fetch } from 'ofetch'
@@ -93,7 +93,9 @@ export async function dashboardFetch<T>(
     return websiteSocialPost(panel) && rendersWebsiteDocument(panel, Object.fromEntries(url.searchParams))
   })()
   if (import.meta.server && (!options.method || options.method === 'GET') && (
-    request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
+    (/^\/api\/editor\/organizations\/[^/]+\/(?:locations\/[^/]+\/)?products\/[^/]+$/.test(request)
+      && Boolean(dashboardProductId(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
+    || request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
     || (request === '/api/dashboard/payments' && (options.query?.view === 'performance' || options.query?.view === 'payouts'))
     || (request === '/api/dashboard/settings' && (options.query?.connections === '1' || options.query?.view === 'website'))

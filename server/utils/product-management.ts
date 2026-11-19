@@ -16,7 +16,7 @@ import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
+import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, preparePublishedProductPage, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationSite } from '~/server/utils/content/publishing'
 import { publishAccessInvalidation, publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, pendingConnectedChannelCalendarQuery, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
@@ -311,7 +311,7 @@ function prepareProductRelations(organization: string | { sql: string }, selecti
   }
 }
 
-function prepareProductRead(organizationId: string, records: BatchQuery) {
+function prepareProductRead(organizationId: string | { sql: string }, records: BatchQuery) {
   const relations = prepareProductRelations(organizationId, { query: `SELECT id FROM (${records.query})`, params: records.params })
   return {
     queries: [records, ...relations.queries],
@@ -435,9 +435,9 @@ export async function hydrateProductMedia(db: DbClient, organizationId: string, 
 // Reads
 // ---------------------------------------------------------------------------
 
-export function prepareOrganizationProduct(organizationId: string, productId: string) {
+export function prepareOrganizationProduct(organizationId: string | { sql: string }, productId: string) {
   return prepareProductRead(organizationId, {
-    query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.id = ?`, params: [organizationId, productId],
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND p.id = ?`, params: [...(typeof organizationId === 'string' ? [organizationId] : []), productId],
   })
 }
 
@@ -448,29 +448,33 @@ export async function getProduct(db: DbClient, organizationId: string, productId
 }
 
 /** Publication links participate in the caller's product batch. Readiness retains its domain check. */
-export function prepareProductPublicPresentation(organizationId: string, productId: string) {
-  const originPlan = preparePublicTenantOrigin(organizationId)
+export function prepareProductPublicPresentation(organization: string | { sql: string }, productId: string) {
+  const originPlan = preparePublicTenantOrigin(organization)
+  const pagePlan = preparePublishedProductPage(organization, productId)
   return {
     queries: [{
       query: `SELECT p.id FROM products p
         JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-        WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`,
-      params: [organizationId, productId],
+        WHERE p.organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`,
+      params: [...(typeof organization === 'string' ? [organization] : []), productId],
     }, ...originPlan.queries, {
       query: `SELECT l.id, l.slug FROM business_locations l
         JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
         JOIN products p ON p.organization_id = pl.organization_id AND p.id = pl.product_id
-        WHERE l.organization_id = ? AND pl.product_id = ? AND p.kind = 'dish' AND l.status = 'active' AND pl.published = 1`,
-      params: [organizationId, productId],
-    }],
-    async read([published, originRow, locations]: D1Result[], db: DbClient, env: CloudflareEnv, product: Product, organizationCurrency?: string | null) {
+        WHERE l.organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND pl.product_id = ? AND p.kind = 'dish' AND l.status = 'active' AND pl.published = 1`,
+      params: [...(typeof organization === 'string' ? [organization] : []), productId],
+    }, bookingScheduleScopesQuery(organization, { query: 'SELECT ?', params: [productId] }),
+    checkoutSellerQuery(typeof organization === 'string' ? { query: '?', params: [organization] } : { query: organization.sql, params: [] }), ...pagePlan.queries],
+    async read([published, originRow, locations, schedules, seller, ...pageRows]: D1Result[], db: DbClient, env: CloudflareEnv, product: Product, organizationCurrency?: string | null) {
+      const organizationId = product.organization_id
       const siteProduct = product.kind === 'experience' || product.kind === 'stay'
       const path = siteProduct ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
-      const [readiness, page] = await Promise.all([
-        product.kind === 'experience' || product.kind === 'stay' || product.booking
-          ? productBookingReadiness(db, organizationId, product, { env, ...(organizationCurrency === undefined ? {} : { currency: checkedOrganizationCurrency(organizationId, organizationCurrency) }) }) : null,
-        !siteProduct && product.page ? resolvePublishedTenantPageIdentity(db, organizationId, product.page.path) : null,
-      ])
+      const scheduledScopes = scheduleScopesFromRows(schedules!.results as BookingScheduleScopeRow[]).get(productId) ?? new Set<string | null>()
+      const readiness = product.kind === 'experience' || product.kind === 'stay' || product.booking
+        ? await productBookingReadiness(db, organizationId, product, { env, scheduledScopes,
+          paymentSetup: () => readStripeCheckoutSetup(db, organizationId, env, checkoutSellerFromRows(seller!.results)),
+          ...(organizationCurrency === undefined ? {} : { currency: checkedOrganizationCurrency(organizationId, organizationCurrency) }) }) : null
+      const page = !siteProduct && product.page ? pagePlan.read(pageRows, organizationId, product.page.path) : null
       const origin = published!.results.length ? originPlan.read([originRow!], env) : null
       const publicPath = siteProduct ? path && (!readiness || readiness.ready) ? path : null
         : page && page.id === product.page?.id && page.product_id === product.id ? page.path : null
@@ -1871,7 +1875,10 @@ async function planProductUpdate(db: DbClient, input: {
   if ((current.kind === 'stay') !== (merged.kind === 'stay')) invalid('A place to stay keeps its kind, and another kind cannot become one; create a new place to stay instead')
   const planned = await planProduct(db, organizationId, merged, {
     organizationId: input.organizationId, existingId: productId, existingSlug: current.slug, defaultCurrency: input.defaultCurrency,
-    takenSlugs: input.takenSlugs, idOwners: input.idOwners, knownSlugs: input.knownSlugs,
+    takenSlugs: input.takenSlugs,
+    idOwners: input.idOwners ?? (variants.every(variant => !variant.id || current.variants.some(saved => saved.id === variant.id))
+      ? new Map(current.variants.map(variant => [variant.id, `${organizationId}:${current.id}`])) : undefined),
+    knownSlugs: input.knownSlugs,
     stayResponsibility: current.stay ? { assigned_member_id: current.stay.assigned_member_id } : undefined,
   })
   planned.source = current.source
@@ -2110,7 +2117,12 @@ export async function updateProduct(db: DbClient, input: {
   const earlier = await replay()
   if (earlier) return complete(earlier)
   if (input.booking && !dedupeKey) invalid('An idempotency key is required when configuring bookable sessions')
-  const current = await getProduct(db, input.organizationId, input.productId)
+  const currentPlan = prepareOrganizationProduct(input.organizationId, input.productId)
+  const currentRows = await executeBatch(db, [...currentPlan.queries, {
+    query: 'SELECT default_currency FROM organization WHERE id = ?', params: [input.organizationId],
+  }], { operation: 'Read product update facts' })
+  const current = currentPlan.read(currentRows.slice(0, currentPlan.queries.length))[0] ?? notFound()
+  const defaultCurrency = checkedOrganizationCurrency(input.organizationId, (currentRows.at(-1)!.results[0] as { default_currency: string } | undefined)?.default_currency ?? null)
   const roomChanged = (): never => {
     throw new HTTPError({ statusCode: 409, statusMessage: 'The room or listing changed while you were editing. Nothing was changed; reload the room and try again.', data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version', product_id: input.productId } })
   }
@@ -2148,8 +2160,8 @@ export async function updateProduct(db: DbClient, input: {
   // guard. Only room amenity assignments also author the Product's global set.
   const plan = roomUpdate && roomUpdate.amenities === undefined ? null : await planProductUpdate(db, {
     organizationId: input.organizationId, current, patch, actor: input.actor, now,
-    env: input.env, booking: input.booking?.data, additionalChangedFields,
-    cacheInvalidations: roomUpdate ? [publicResourceCacheInvalidationQuery(input.organizationId, 'stay-photo-room-details')] : await productCacheInvalidations(db, input.organizationId, input.productId, 'product_updated'),
+    env: input.env, booking: input.booking?.data, additionalChangedFields, defaultCurrency,
+    cacheInvalidations: roomUpdate ? [publicResourceCacheInvalidationQuery(input.organizationId, 'stay-photo-room-details')] : [publicResourceCacheInvalidationQuery(input.organizationId, 'product_updated')],
   })
   settings = plan?.airbnbSettings ?? null
   reprice = input.patch.variants !== undefined || settings?.availability === true
@@ -2246,7 +2258,8 @@ export async function updateProduct(db: DbClient, input: {
 
   // A variant anything was ever booked on is not removed by an edit. Stopping
   // the sale of an option is `active`, not deletion.
-  const booked = await bookedRemovals(db, input.organizationId, [{ productId: input.productId, keptVariants }])
+  const removesVariants = plan !== null && current.variants.some(variant => !plan.product.variants.some(kept => kept.id === variant.id))
+  const booked = removesVariants ? await bookedRemovals(db, input.organizationId, [{ productId: input.productId, keptVariants }]) : []
   if (booked.length > 0) {
     conflict(`${booked.join(', ')} ${booked.length > 1 ? 'have' : 'has'} bookings, so ${booked.length > 1 ? 'they cannot be removed' : 'it cannot be removed'}. Turn ${booked.length > 1 ? 'them' : 'it'} off instead.`)
   }
@@ -2272,6 +2285,7 @@ export async function updateProduct(db: DbClient, input: {
       const configurationError = bookingConfigurationWriteError(error)
       if (configurationError !== error) throw configurationError
     }
+    if (!removesVariants) throw error
     const raced = await bookedRemovals(db, input.organizationId, [{ productId: input.productId, keptVariants }])
     if (raced.length === 0) throw error
     conflict(`${raced.join(', ')} was booked while you were editing, so nothing was changed. Turn it off instead of removing it.`)
@@ -2310,7 +2324,6 @@ export async function deleteProduct(db: DbClient, input: {
     conflict('An automatic message is sent for this home. Remove the home from that message before deleting it.')
   }
   const pages = await Promise.all(bound.map(page => prepareTenantPageDelete(db, page.id, { scope: { organizationId: input.organizationId }, expectedUpdatedAt: page.updated_at })))
-  const invalidations = await productCacheInvalidations(db, input.organizationId, input.productId, 'product_deleted')
   // A home deleted is one fewer home, and its location, if still active, is a
   // location again: guarded as one, since Basic may already have the locations it includes.
   await executeProductWrites(db, input.env, input.organizationId, [
@@ -2320,7 +2333,7 @@ export async function deleteProduct(db: DbClient, input: {
       OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
-    ...invalidations,
+    publicResourceCacheInvalidationQuery(input.organizationId, 'product_deleted'),
     // Its pictures go with it; the assets stay in the library.
     deleteProductMediaPlacementsQuery(input.organizationId, [input.productId]),
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
@@ -2329,22 +2342,6 @@ export async function deleteProduct(db: DbClient, input: {
     throw error
   })
   await publishStayProducts(input.env, [product])
-}
-
-/**
- * Invalidate every site projection this product appears in.
- *
- * A product published on two sites has two projections; invalidating only the
- * site the editor happened to be looking at is how one of them goes stale
- * while looking correct.
- */
-async function productCacheInvalidations(db: DbClient, organizationId: string, productId: string, reason: string): Promise<BatchQuery[]> {
-  const organizations = await queryAll<{ organization_id: string }>(db, `
-    SELECT organization_id FROM product_publications WHERE organization_id = ? AND product_id = ?
-    UNION
-    SELECT organization_id FROM content_documents WHERE organization_id = ? AND product_id = ?
-  `, [organizationId, productId, organizationId, productId])
-  return organizations.map(row => publicResourceCacheInvalidationQuery(row.organization_id, reason))
 }
 
 // ---------------------------------------------------------------------------

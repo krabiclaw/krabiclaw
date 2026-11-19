@@ -1,3 +1,5 @@
+import type { CloudflareEnv } from '~/server/utils/auth'
+import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { prepareDashboardOffering } from '~/server/utils/dashboard-offering'
 import { publishedHostProfilesQuery } from '~/server/utils/public-provider'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
@@ -7,10 +9,14 @@ import type { H3Event } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
 import { qaEditQuery, updateQa } from '~/server/utils/location-qa'
 import { jsonResponse } from '~/server/utils/api-response'
-import { executeBatch, queryFirst, type DbClient } from '~/server/db'
-import { requireOrganizationAccess, requireProductAccess } from '~/server/utils/location-access'
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { requireOrganizationAccess, type OrganizationAccessRow } from '~/server/utils/location-access'
 import {
   BATCH_VIEWER,
+  assignedOfferingCondition,
+  assertRoleAllows,
+  withViewer,
+  type ResolvedMembership,
   resourceLocationScopeSql,
   assertLocationAccess,
   assertResourceAccess,
@@ -228,53 +234,81 @@ export async function loadDashboardBlogPosts(
   return list.read(await executeBatch(db, list.queries, { operation: 'Read blog index' }), resource)
 }
 
+export type ProductEditorContext = {
+  env: CloudflareEnv
+  db: DbClient
+  organization: Omit<OrganizationAccessRow, 'membership' | 'user_id' | 'member_role'> & ResolvedMembership
+}
+
 export async function loadDashboardProduct(
   event: H3Event, organizationId: string, locationId: string | null, productId: string, editor = false,
 ) {
-  const context = await requireProductAccess(event, organizationId, productId)
-  const record = prepareOrganizationProduct(context.organization.id, productId)
-  const metadata = await prepareDashboardProductMetadata(context, productId, editor)
-  const rows = await executeBatch(context.db, [...record.queries, ...metadata.queries], { operation: 'Read product editor' })
-  const product = record.read(rows.slice(0, record.queries.length))[0]
-  if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
-  return metadata.read(rows.slice(record.queries.length), product, locationId)
+  const plan = prepareDashboardProductRead(productId, editor)
+  const context = await readWebsiteMember(event, organizationId, plan.queries)
+  return plan.read(context.rows, context, locationId)
 }
 
 export async function presentDashboardProduct(
-  context: Pick<Awaited<ReturnType<typeof requireProductAccess>>, 'env' | 'db' | 'organization'>,
+  context: Omit<ProductEditorContext, 'organization'> & { organization: OrganizationAccessRow },
   product: Product, locationId: string | null, editor = false,
 ) {
-  const plan = await prepareDashboardProductMetadata(context, product.id, editor)
-  return plan.read(await executeBatch(context.db, plan.queries, { operation: 'Read saved product editor' }), product, locationId)
+  const organization = { ...context.organization, ...context.organization.membership }
+  const viewer = { query: 'SELECT ? AS organization_id, ? AS user_id, ? AS member_id, ? AS role, ? AS organization_wide',
+    params: [organization.id, organization.userId, organization.memberId, organization.role, Number(isOrganizationWideRole(organization.role))] }
+  const plan = prepareDashboardProductRead(product.id, editor, product)
+  return plan.read(await executeBatch(context.db, plan.queries.map(query => withViewer(viewer, query)), { operation: 'Read saved product editor' }),
+    { ...context, organization }, locationId)
 }
 
-async function prepareDashboardProductMetadata(
-  context: Pick<Awaited<ReturnType<typeof requireProductAccess>>, 'env' | 'db' | 'organization'>,
-  productId: string, editor: boolean,
-) {
-  const { env, db, organization } = context
-  const organizationId = organization.id
-  const canPreview = await roleAllows({ organizationId, role: organization.member_role, permissions: { content: ['read'] } })
+/** The same authorized product read joins either the document batch or its direct API batch. */
+export function prepareDashboardProductRead(productId: string, editor = true, saved?: Product) {
+  const assignment = assignedOfferingCondition({ user: BATCH_VIEWER.user, unrestricted: '0' })
+  const update = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: ['update'] }))
+  const assigned = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: ['assigned'] }))
+  const selected: BatchQuery = { query: `SELECT p.id, p.organization_id FROM products p
+    WHERE p.organization_id = ${BATCH_VIEWER.organization} AND p.id = ? AND (${update} OR (${assigned} AND (${assignment.sql})))`, params: [productId] }
+  const organization = { sql: '(SELECT organization_id FROM editor_product)' }
+  const record = saved ? null : prepareOrganizationProduct(organization, productId)
+  const metadata = prepareDashboardProductMetadata(organization, productId, editor)
+  const recordQueries = record?.queries ?? [{ query: 'SELECT id FROM editor_product', params: [] }]
+  const queries = [...recordQueries, ...metadata.queries].map((statement): BatchQuery => {
+    const query = statement.query.trimStart()
+    return { query: `WITH editor_product AS (${selected.query})${/^WITH\s/i.test(query) ? `, ${query.slice(5)}` : ` ${query}`}`,
+      params: [...selected.params ?? [], ...statement.params ?? []] }
+  })
+  return { queries, async read(rows: D1Result[], context: ProductEditorContext, locationId: string | null) {
+    if (!await roleAllows({ ...context.organization, permissions: { products: ['update'] } })) await assertRoleAllows({ ...context.organization, permissions: { products: ['assigned'] } })
+    if (saved && rows[0]!.results.length !== 1) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+    const product = saved ?? record!.read(rows.slice(0, recordQueries.length))[0]
+    if (!product || product.organization_id !== context.organization.id) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+    return metadata.read(rows.slice(recordQueries.length), product, locationId, context)
+  } }
+}
+
+function prepareDashboardProductMetadata(organizationId: string | { sql: string }, productId: string, editor: boolean) {
   const media = preparePublicSocialMedia(organizationId, 'product', [productId])
   const links = prepareProductPublicPresentation(organizationId, productId)
-  const navigation = editor ? await prepareDashboardOffering(context, productId) : null
+  const navigation = editor ? prepareDashboardOffering(organizationId, productId) : null
   const mediaEnd = media.queries.length
   const linksEnd = mediaEnd + links.queries.length
   const navigationEnd = linksEnd + (navigation?.queries.length ?? 0)
   return {
     queries: [...media.queries, ...links.queries, ...navigation?.queries ?? [], publishedHostProfilesQuery(organizationId, {
-      query: "SELECT assigned_member_id FROM product_booking_configs WHERE organization_id = ? AND product_id = ? AND unit = 'nights'",
-      params: [organizationId, productId],
+      query: `SELECT assigned_member_id FROM product_booking_configs WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND product_id = ? AND unit = 'nights'`,
+      params: [...(typeof organizationId === 'string' ? [organizationId] : []), productId],
     })],
-    async read(rows: D1Result[], product: Product, locationId: string | null) {
+    async read(rows: D1Result[], product: Product, locationId: string | null, context: ProductEditorContext) {
+      const { env, db, organization } = context
+      const organizationId = organization.id
+      const canPreview = await roleAllows({ organizationId, role: organization.role, permissions: { content: ['read'] } })
       if (locationId !== null && !product.locations.some(entry => entry.location_id === locationId)) {
         throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found at this location' })
       }
-      const [hydrated] = await hydrateProductMedia(db, organizationId, [product], media.read(rows.slice(0, mediaEnd)))
+      const [hydrated] = await hydrateProductMedia(db, organizationId, [product], media.read(rows.slice(0, mediaEnd), organizationId))
       const { publicUrl, publicUrls } = await links.read(rows.slice(mediaEnd, linksEnd), db, env, product, organization.default_currency)
-      const details = navigation?.read(rows.slice(linksEnd, navigationEnd), hydrated!, locationId)
+      const details = await navigation?.read(rows.slice(linksEnd, navigationEnd), hydrated!, locationId, context)
       const hostProfilePublished = product.stay ? rows[navigationEnd]!.results.length > 0 : null
-      const previewToken = editor && canPreview && isOrganizationWideRole(organization.member_role) && ['dish', 'experience', 'service'].includes(product.kind)
+      const previewToken = editor && canPreview && isOrganizationWideRole(organization.role) && ['dish', 'experience', 'service'].includes(product.kind)
         ? await editorPreviewToken(env.PREVIEW_SECRET, organizationId) : null
       let previewUrl: string | null = null
       if (product.kind === 'stay' && organization.subdomain && canPreview) {
@@ -286,7 +320,7 @@ async function prepareDashboardProductMetadata(
         previewUrl = url.toString()
       }
       return { success: true as const, product: hydrated!,
-        ...(editor ? { collections: product.stay ? details!.collections : [], preview_token: previewToken, locations: details!.locations } : {}),
+        ...(editor ? { collections: product.stay ? details!.collections : [], preview_token: previewToken, locations: details!.locations, assigned_member_name: details!.assigned_member_name } : {}),
         public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished,
         offering: details?.offering ?? null }
     },

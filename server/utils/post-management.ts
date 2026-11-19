@@ -317,17 +317,28 @@ function postListQuery(organizationId: string | { sql: string }, filter: PostLis
     ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?`, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(filter.status ? [filter.status] : []), ...(filter.locationId ? [filter.locationId] : []), window.limit + 1, window.offset] }
 }
 
-export function preparePostList(organizationId: string | { sql: string }, filter: PostListFilter, window: { limit: number; offset: number }) {
-  const list = postListQuery(organizationId, filter, window)
+export function preparePostList(organizationId: string | { sql: string }, filter: PostListFilter, window: { limit: number; offset: number }, viewer: ViewerTerms) {
+  const scope: BatchQuery = {
+    query: `SELECT target.organization_id FROM (SELECT ${typeof organizationId === 'string' ? '?' : organizationId.sql} AS organization_id, ? AS location_id) target
+      WHERE target.organization_id IS NOT NULL AND ${resourceLocationScopeSql(viewer, 'target')}`,
+    params: [...(typeof organizationId === 'string' ? [organizationId] : []), filter.locationId ?? null],
+  }
+  const organization = '(SELECT organization_id FROM post_scope)'
+  const list = postListQuery({ sql: organization }, filter, window)
   const owners = { sql: `SELECT id FROM (${list.query}) LIMIT ${window.limit}`, params: list.params ?? [] }
-  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
-  return {
-    queries: [list, mediaPlacementsQuery({ organizationId, ownerType: 'content_document', owners, slot: 'cover' }), {
+  const queries: BatchQuery[] = [list, mediaPlacementsQuery({ organizationId: { sql: organization }, ownerType: 'content_document', owners, slot: 'cover' }), {
       query: `SELECT post_id, channel, state FROM post_publications
         WHERE organization_id = ${organization} AND state = 'published' AND post_id IN (${owners.sql}) ORDER BY post_id, channel`,
-      params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...owners.params],
-    }],
-    read([listed, covers, published]: D1Result[], resource: { resource: string }) {
+      params: owners.params,
+    }]
+  return {
+    queries: [{ query: scope.query, params: scope.params }, ...queries.map(statement => {
+      const query = statement.query.trimStart()
+      return { query: `WITH post_scope AS (${scope.query})${/^WITH\s/i.test(query) ? `, ${query.slice(5)}` : ` ${query}`}`,
+        params: [...scope.params ?? [], ...statement.params ?? []] }
+    })],
+    read([access, listed, covers, published]: D1Result[], resource: { resource: string }) {
+      if (access!.results.length !== 1) throw new HTTPError({ statusCode: 404, message: 'Posts not found or access denied' })
       const rows = listed!.results as PostRow[]
       const media = groupMediaPlacements(covers!.results)
       const publications = new Map<string, Array<{ channel: string; state: string }>>()
