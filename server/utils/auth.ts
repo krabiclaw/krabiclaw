@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { APIError, betterAuth, type Account, type BetterAuthPlugin } from 'better-auth'
-import { createAuthMiddleware, getOAuthState, isAPIError, setShouldSkipSessionRefresh } from 'better-auth/api'
+import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
@@ -568,10 +568,6 @@ function buildAuth(env: CloudflareEnv) {
     ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path === '/get-session' && dashboardAuthRead.getStore()) {
-          // A document reads the session. Better Auth still renews it on its own endpoint.
-          await setShouldSkipSessionRefresh(true)
-        }
         if (ctx.path === '/phone-number/verify' && ctx.body?.updatePhoneNumber !== true) {
           throw new APIError('BAD_REQUEST', { message: 'A phone number is verified from your account profile, not used to sign in.' })
         }

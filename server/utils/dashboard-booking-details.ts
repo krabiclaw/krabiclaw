@@ -322,12 +322,15 @@ function bookingDetailFacts(source: BatchQuery, staff: boolean, buyerUserId?: st
   // A table may move to the business's tables at any of its locations.
   const places = `SELECT DISTINCT l.id, l.title
     FROM business_locations l JOIN selected_booking selection ON l.organization_id = selection.organization_id
-    WHERE (selection.product_kind <> 'table' AND l.id = selection.location_id)
-       OR (selection.product_kind = 'table' AND EXISTS (
+    WHERE l.id = selection.location_id
+       OR (selection.product_kind = 'table' AND l.status='active' AND EXISTS (
          SELECT 1 FROM product_locations pl
          JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id AND p.kind = 'table'
          JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
          WHERE pl.organization_id = l.organization_id AND pl.location_id = l.id
+           AND pl.active=1 AND pl.published=1 AND p.active=1 AND c.duration_minutes>0
+           AND EXISTS (SELECT 1 FROM product_publications pub
+             WHERE pub.organization_id=p.organization_id AND pub.product_id=p.id AND pub.published=1)
        ))`
   return [
     { query: `${places} ORDER BY l.title` },

@@ -1218,9 +1218,13 @@ export async function listScheduleSessions(db: DbClient, input: SlotRange & { en
 export async function getScheduleSession(db: DbClient, env: CloudflareEnv, input: SessionSelector): Promise<SessionAvailability> {
   const now = input.now ?? new Date().toISOString()
   const calendar = await calendarAtOpening(db, env, input, await readSavedBookingOpening(db, input), now, 'editor')
-  const places = await calendar?.places()
-  const opening = calendar && openingInCalendar(calendar, input.sessionId, now)
-  const session = places && (places.recorded.find(row => row.id === input.sessionId) ?? (opening && places.place(opening.session)))
+  if (!calendar) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
+  const opening = openingInCalendar(calendar, input.sessionId, now)
+  if (!opening && !calendar.stored.some(row => row.id === input.sessionId)) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
+  }
+  const places = await calendar.places()
+  const session = places.recorded.find(row => row.id === input.sessionId) ?? (opening && places.place(opening.session))
   if (!session) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
   return session as SessionAvailability
 }

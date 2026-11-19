@@ -71,7 +71,7 @@ export async function readCheckoutHold(db: DbClient, payment: Payment) {
 
 /** Provider retrieval, account/mode and frozen money checks precede every conversion. */
 export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,reported:Stripe.PaymentIntent, env:CloudflareEnv, knownHold?: CheckoutHold | null,
- receiptQueries: BatchQuery[] = [], guard?: BatchQuery):Promise<PaymentReconciliation> {
+ receiptQueries: BatchQuery[] = [], guard?: BatchQuery, scheduleRefreshed = false):Promise<PaymentReconciliation> {
   if (reported.livemode !== Boolean(payment.livemode) || reported.currency.toUpperCase() !== payment.currency || stripeMetadataId('payment', reported.metadata) !== payment.id || payment.stripe_payment_intent_id !== reported.id) throw new Error('Stripe PaymentIntent financial identity mismatch')
   // The intent is the one this purchase opened, on this account and mode; what it charged is Stripe's.
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
@@ -195,12 +195,13 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
       bookingId = conversion.bookingId
     } catch (error) {
       if (!isStayNightConflict(error) && !bookingBatchWriteRefused(error) && !(error instanceof CapacityUnavailableError)) throw error
-      if (capturedVisit) {
+      if (hold.session_id) {
         // A schedule edit can also invalidate the prepared visit. Re-read
         // those facts before deciding that the paid visit needs a refund.
         const currentHold = await readCheckoutHold(db, payment)
         if (currentHold?.status === 'active' && JSON.stringify(currentHold.session_allocation) !== JSON.stringify(hold.session_allocation)) {
-          return reconcilePaymentIntent(db, stripe, payment, intent, env, currentHold, undefined, guard)
+          if (scheduleRefreshed) throw new Error('The visit schedule changed during payment settlement', { cause: error })
+          return reconcilePaymentIntent(db, stripe, payment, intent, env, currentHold, receiptQueries, guard, true)
         }
       }
       const [, current] = (await executeBatch(db, [

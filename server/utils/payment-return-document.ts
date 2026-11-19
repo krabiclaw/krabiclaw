@@ -1,4 +1,4 @@
-import { EncryptJWT, errors, jwtDecrypt } from 'jose'
+import { symmetricDecodeJWT, symmetricEncodeJWT } from 'better-auth/crypto'
 import type { BatchQuery } from '~/server/db'
 import { tokenHash } from '~/server/domain/payments/buyer'
 import type { CheckoutHold } from '~/server/domain/payments/events'
@@ -6,14 +6,7 @@ import type { CheckoutPayment } from '~/server/domain/payments/intent'
 import { isRecord } from '~/server/utils/type-guards'
 
 const PURPOSE = 'blawby-payment-return'
-
-async function documentKey(secret: string) {
-  const encoder = new TextEncoder()
-  const material = await crypto.subtle.importKey('raw', encoder.encode(secret), 'HKDF', false, ['deriveBits'])
-  return new Uint8Array(await crypto.subtle.deriveBits({
-    name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: encoder.encode(PURPOSE),
-  }, material, 256))
-}
+const DOCUMENT_SECONDS = 120
 
 type ReceiptLanguage = { locale: string; source: boolean }
 type ReturnDocument = { payment: CheckoutPayment; language: ReceiptLanguage }
@@ -28,29 +21,17 @@ export async function sealPaymentReturnDocument(secret: string, host: string, cl
   // The SSR snapshot contains private purchase data. Only the same site's
   // claim holder can return it, and settlement still checks the live rows.
   const payment = { ...row, return_token: null }
-  return new EncryptJWT({ payment, language, host })
-    .setProtectedHeader({ alg: 'dir', enc: 'A256GCM', typ: 'JWT' })
-    .setAudience(PURPOSE)
-    .setSubject(row.id)
-    .setExpirationTime('2m')
-    .encrypt(await documentKey(secret))
+  return symmetricEncodeJWT({ payment, language, host }, secret, PURPOSE, DOCUMENT_SECONDS)
 }
 
 export async function openPaymentReturnDocument(secret: string, host: string, id: string, claim: string, encrypted: string): Promise<ReturnDocument | null> {
   if (!secret || encrypted.length > 65_536 || !/^[a-f0-9-]{72}$/u.test(claim)) return null
-  try {
-    const { payload } = await jwtDecrypt(encrypted, await documentKey(secret), {
-      audience: PURPOSE, subject: id, keyManagementAlgorithms: ['dir'], contentEncryptionAlgorithms: ['A256GCM'],
-      requiredClaims: ['exp'],
-    })
-    const { host: issuedHost, payment, language } = payload as unknown as ReturnDocument & { host: string }
-    if (issuedHost !== host || payment.return_token_hash !== await tokenHash(claim)
-      || payment.return_expires_at <= new Date().toISOString()) return null
-    return { payment, language }
-  } catch (error) {
-    if (error instanceof errors.JOSEError) return null
-    throw error
-  }
+  const document = await symmetricDecodeJWT<ReturnDocument & { host: string; exp: number }>(encrypted, secret, PURPOSE)
+  if (!document || !Number.isFinite(document.exp) || document.exp * 1000 <= Date.now()) return null
+  const { payment, language, host: issuedHost } = document
+  if (issuedHost !== host || payment.id !== id || payment.return_token_hash !== await tokenHash(claim)
+    || payment.return_expires_at <= new Date().toISOString()) return null
+  return { payment, language }
 }
 
 /** Resolve today's host and payment inside the same transaction that uses the snapshot. */
