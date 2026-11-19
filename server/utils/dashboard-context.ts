@@ -214,13 +214,19 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
   const activeId = typeof sessionRecord.activeOrganizationId === 'string' ? sessionRecord.activeOrganizationId : null
   const membership = slug ? membershipBySlugQuery(slug, context.userId)
     : activeId ? membershipByIdQuery(activeId, context.userId) : null
-  let row = membership && await queryFirst(context.db, membership.query, membership.params)
+  let row = membership && await (slug && event.req.method === 'GET'
+    ? oncePerRequest(event, `dashboard-membership:${slug}`, () => queryFirst(context.db, membership.query, membership.params))
+    : queryFirst(context.db, membership.query, membership.params))
   if (!row && options.requireOrganization === false && slug && activeId) {
     const activeMembership = membershipByIdQuery(activeId, context.userId)
     row = await queryFirst(context.db, activeMembership.query, activeMembership.params)
   }
   if (!row && options.requireOrganization === false) return { ...context, organization: null }
   return { ...context, organization: dashboardOrganizationFrom(row) }
+}
+
+export function getDashboardSession(event: H3Event, env: ReturnType<typeof cloudflareEnv>) {
+  return oncePerRequest(event, 'dashboard-session', () => timeRequestPhase(event, 'auth_session', () => getAuthSession(event, env)))
 }
 
 async function dashboardSessionContext(event: H3Event) {
@@ -231,7 +237,7 @@ async function dashboardSessionContext(event: H3Event) {
     throw new HTTPError({ statusCode: 503, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
   }
 
-  const session = await oncePerRequest(event, 'dashboard-session', () => timeRequestPhase(event, 'auth_session', () => getAuthSession(event, env)))
+  const session = await getDashboardSession(event, env)
   if (!session?.user?.id) {
     throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
   }

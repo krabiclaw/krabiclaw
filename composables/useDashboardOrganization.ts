@@ -149,7 +149,7 @@ export function useDashboardContext(scope: DashboardRequestScope) {
     dashboardContextKey(scope),
     async (_nuxtApp, { signal }) => {
       if (import.meta.server) {
-        const provider = useRequestEvent()?.context.dashboardReservationProvider as { context: (orgSlug: string) => Promise<unknown> } | undefined
+        const provider = useRequestEvent()?.context.dashboardDocumentProvider as { context: (orgSlug: string) => Promise<unknown> } | undefined
         const payload = await provider?.context(scope.orgSlug)
         if (!isDashboardContextResponse(payload)) throw createError({ statusCode: 502, statusMessage: 'Invalid dashboard context' })
         return payload
