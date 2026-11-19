@@ -159,7 +159,7 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
     throw new HTTPError({ statusCode: refusal.status, statusMessage: refusal.data.error, data: { ...refusal.data, quote: await homesQuote(env, db, organizationId, adding - leaving) } })
   }
 
-  const queued = [...items.map(item => ({ listing: item.listing_id, product: item.product_id ?? productOf(item.listing_id) ?? null, action: 'sync' as const, details: item.details ? JSON.stringify(item.details) : null })),
+  const queued = [...items.map(item => ({ listing: item.listing_id, product: item.product_id ?? null, action: 'sync' as const, details: item.details ? JSON.stringify(item.details) : null })),
     ...stopped.map(mapping => ({ listing: mapping.listing_id, product: mapping.product_id, action: 'stop' as const, details: null }))]
   await queueJobs(db, env, organizationId, userId, queued)
   const named = new Set(queued.map(job => job.listing))
@@ -209,12 +209,12 @@ export async function stopAirbnbSyncForPlanEnd(db: DbClient, env: CloudflareEnv,
 
 /** Every listing this organization asked to sync or stop, with where each stands. */
 export async function readAirbnbSync(db: DbClient, organizationId: string): Promise<AirbnbSyncListing[]> {
-  const rows = await queryAll<JobRow & { stage: ImportStage | null }>(db, `SELECT j.*, m.import_stage AS stage FROM airbnb_sync_jobs j
+  const rows = await queryAll<JobRow & { stage: ImportStage | null; mapped_product_id: string | null }>(db, `SELECT j.*, m.import_stage AS stage, m.product_id AS mapped_product_id FROM airbnb_sync_jobs j
     LEFT JOIN ${AIRBNB_MAPPINGS} m ON m.organization_id = j.organization_id AND m.provider = 'channex' AND m.listing_id = j.listing_id
     WHERE j.organization_id = ? ORDER BY j.created_at, j.listing_id`, [organizationId])
   return rows.map(row => ({
     listing_id: row.listing_id,
-    product_id: row.product_id,
+    product_id: row.state === 'failed' ? row.product_id : row.product_id ?? row.mapped_product_id,
     action: row.action,
     status: row.state === 'done' ? 'done' : row.state === 'failed' ? 'failed'
       : row.stage !== null && row.stage !== 'draft' && row.stage !== 'complete' ? 'running' : 'queued',
@@ -245,15 +245,9 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow): Promise<Step
       await connection.attach(job.listing_id, job.product_id)
       return 'continue'
     }
-    if (mapping && mapping.product_id !== job.product_id) {
-      await execute(db, 'UPDATE airbnb_sync_jobs SET product_id = ? WHERE id = ?', [mapping.product_id, job.id])
-      job.product_id = mapping.product_id
-    }
     if (!mapping || mapping.channel_id !== mapping.connected_channel_id) {
-      // The fields Airbnb leaves out come from the request's details, contact details from the organization; anything still missing fails this listing with its field.
-      const prepared = await connection.prepare(job.listing_id, { missingDetails: job.details ? JSON.parse(job.details) as Record<string, string> : {} })
-      await execute(db, 'UPDATE airbnb_sync_jobs SET product_id = ? WHERE id = ?', [prepared.product_id, job.id])
-      job.product_id = prepared.product_id
+      // Prepare creates the mapping; the job retains only the host's explicitly requested destination.
+      await connection.prepare(job.listing_id, { missingDetails: job.details ? JSON.parse(job.details) as Record<string, string> : {} })
       return 'continue'
     }
     if (mapping.import_stage === 'complete' && mapping.enabled === 1) {

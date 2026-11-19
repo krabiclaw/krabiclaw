@@ -114,13 +114,13 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
   ])
   const channelOwned = isChannelManagedStay(stay)
   const [available_actions, pending_changes] = await Promise.all([
-    stay.request_status
+    canReleaseStayNights(stay) ? ['release_nights'] : stay.request_status
       ? conversation.then(async thread => {
           const record = await getThreadOperationalRecord(db, thread.id, thread)
           if (!record) throw new Error('The conversation has no booking')
           return requestActions(record, new Date().toISOString())
         })
-      : canReleaseStayNights(stay) ? ['release_nights'] : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel'],
+      : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel'],
     stay.channel === 'airbnb' && channelOwned
       ? pendingStayChanges(db, { bookingId, conversationId: booking.conversation_id, organizationId: organization.id, userId })
       : [],

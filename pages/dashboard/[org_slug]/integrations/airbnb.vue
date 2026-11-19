@@ -450,7 +450,7 @@ async function retryFailed() {
     for (const job of batch.sync) {
       // Listings may have been read again while an earlier dialog was open.
       const listing = listings.value.find(candidate => candidate.id === job.listing_id)
-      if (!listing || listing.import.status !== 'not_imported') continue
+      if (!listing || job.product_id || listing.import.status !== 'not_imported') continue
       // A detail the server refused is corrected in the same dialog; details still held are otherwise sent as they are.
       if (entered.value[listing.id] && job.error?.code !== 'INVALID_DETAIL') continue
       try {
@@ -471,7 +471,7 @@ async function retryFailed() {
     changes.value = await dashboardApi(`${api}/sync`, {
       method: 'POST',
       body: {
-        sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
+        sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(job.product_id ? { product_id: job.product_id } : {}), ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
         stop_listing_ids: current.stop.map(job => job.listing_id),
       },
       validate: isChanges,

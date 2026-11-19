@@ -584,6 +584,7 @@ export class ChannexConnection {
     if (existing && (existing.organization_id !== this.organizationId || existing.channel_id !== row.channel_id || !['complete', 'draft'].includes(existing.import_stage))) {
       fail(409, 'LISTING_ALREADY_MAPPED', 'Finish the existing listing’s setup before merging its home.')
     }
+    if (existing && await this.hasOtherChannel(existing)) fail(409, 'HOME_HAS_OTHER_LISTINGS', 'Disconnect the source home’s other listings before merging it.')
     const inventory = await queryFirst<InventoryMapping>(this.db, `SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ?
       AND provider = 'channex' AND import_stage = 'complete'`, [this.organizationId, productId])
     if (!inventory) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'Choose a home that already syncs with Channex.')
@@ -623,7 +624,6 @@ export class ChannexConnection {
       return
     }
 
-    if (await this.hasOtherChannel(existing)) fail(409, 'HOME_HAS_OTHER_LISTINGS', 'Disconnect the source home’s other listings before merging it.')
     const sourceId = existing.product_id
     const timestamp = now()
     const merge = await mergeStayHomeQueries(this.db, this.manager(), sourceId, home, timestamp)

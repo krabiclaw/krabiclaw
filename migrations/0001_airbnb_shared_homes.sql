@@ -148,3 +148,7 @@ CREATE UNIQUE INDEX `channel_threads_conversation_unique` ON `channel_threads` (
 CREATE UNIQUE INDEX `channel_threads_booking_unique` ON `channel_threads` (`provider`,`external_booking_id`) WHERE external_booking_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `channel_threads_org_idx` ON `channel_threads` (`organization_id`);--> statement-breakpoint
 DROP TABLE `__saved_channel_threads`;
+
+--> statement-breakpoint
+-- Existing sync jobs never accepted an explicit destination. Their mapped home remains on the listing.
+UPDATE airbnb_sync_jobs SET product_id = NULL WHERE action = 'sync';
