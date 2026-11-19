@@ -37,7 +37,7 @@ import {
 import { recordRequestPhase } from "~/server/utils/request-metrics";
 import { isNonProductionHost } from "~/server/utils/tenant-hosts";
 import { loadPublicBase } from "~/server/utils/public-base";
-import { appendPublicShellQueries, buildPublicShellPayload } from "~/server/utils/public-shell-query";
+import { appendPublicShellQueries, buildPublicShellPayload, readPublicExperiences } from "~/server/utils/public-shell-query";
 import { publicLocationSql } from "~/server/utils/public-locations";
 import { isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
@@ -463,11 +463,26 @@ async function loadPublicPageSource(
     [localizedLocale ?? 'en', organizationId, ...(locationId ? [locationId] : [])],
   );
 
-  // Single D1 round trip
   options.signal?.throwIfAborted();
-  const batchResults = batchStmts.length > 0
-    ? await executeBatch(db, batchStmts)
-    : [];
+  const experiences = readPublicExperiences(event, db, orgId, env)
+  const [batchResults, shellExperiences, canonical, sourceCollections] = await Promise.all([
+    executeBatch(db, batchStmts),
+    experiences,
+    includeProducts
+      ? (productKind === 'experience'
+          ? experiences
+          : listOrganizationProducts(db, { organizationId: orgId, kind: productKind, publishedOnly: !previewMenu, env }))
+        .then(products => products.map(publicProduct))
+      : [],
+    includeProducts
+      ? locationId
+        ? Promise.all([
+            listCollections(db, { organizationId: orgId, locationId: null }),
+            listCollections(db, { organizationId: orgId, locationId }),
+          ]).then(collections => collections.flat())
+        : listCollections(db, { organizationId: orgId })
+      : [],
+  ])
   options.signal?.throwIfAborted();
 
   // Extract batch results by tracked index
@@ -510,18 +525,6 @@ async function loadPublicPageSource(
     preview: isPreviewAuthorized,
     localizations: localizedLocale ? publicLocalizations : null,
   }
-  // One page, one read. The home route used to read the About page as well, to
-  // pull a story teaser out of it; the home document carries its own
-  // image-with-text block now, so the extra D1 round trip on every home
-  // request is gone with it.
-  //
-  // The page document, the shell, the catalog and the collections depend on
-  // the resolved tenant and locale, not on one another, so they are read
-  // together. Serial D1 round trips made a full menu exceed the public request
-  // deadline even though its SQL completed quickly.
-  const tenantPagePromise = contentPagePath
-    ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions)
-    : Promise.resolve(null)
   const postRow = idxBlogPost >= 0
     ? (batchResults[idxBlogPost] as { results: ApiRecord[] })?.results?.[0]
     : undefined
@@ -549,24 +552,14 @@ async function loadPublicPageSource(
     resource: representationResource,
     documentId: representationDocumentId,
     publishedLocaleRoute: !representationResource && !representationDocumentId && Boolean(routePagePath),
+    sourceLocale: source,
   })
-  const [tenantPage, sourceShell, canonical, sourceCollections, ownRepresentations] = await Promise.all([
-    tenantPagePromise,
-    buildPublicShellPayload(db, organization, batchResults, shellIndexes, env, undefined, { localizations: localizedLocale ? publicLocalizations : undefined }),
-    includeProducts
-      ? listOrganizationProducts(db, { organizationId: orgId, kind: productKind, publishedOnly: !previewMenu, env }).then(products => products.map(publicProduct))
-      : [],
-    includeProducts
-      ? locationId
-        ? Promise.all([
-            listCollections(db, { organizationId: orgId, locationId: null }),
-            listCollections(db, { organizationId: orgId, locationId }),
-          ]).then(collections => collections.flat())
-        : listCollections(db, { organizationId: orgId })
-      : [],
+  const sourceShell = buildPublicShellPayload(organization, batchResults, shellIndexes, shellExperiences, { localizations: localizedLocale ? publicLocalizations : undefined })
+  const [tenantPage, ownRepresentations] = await Promise.all([
+    contentPagePath ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions) : null,
     // A location or article route names its own representations; a page
     // document route reads them off the document once it has loaded.
-    representationResource ? readLocaleRepresentations() : null,
+    representationResource || !contentPagePath ? readLocaleRepresentations() : null,
   ])
   // These complete built-in routes may display an optional CMS content overlay.
   // The route remains valid when that optional overlay has no translated page.

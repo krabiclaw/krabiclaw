@@ -9,7 +9,7 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { executeBatch, queryAll, type BatchQuery } from '~/server/db'
 import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
-import { appendPublicShellQueries, buildPublicShellPayload } from '~/server/utils/public-shell-query'
+import { appendPublicShellQueries, buildPublicShellPayload, readPublicExperiences } from '~/server/utils/public-shell-query'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 import { getOptionalPublicConsultationSettings, getPublicCompliance } from '~/server/utils/professional-services'
 import { listPublishedTenantPagePaths } from '~/server/utils/content/pages'
@@ -104,7 +104,7 @@ export async function loadPublicShellSource(
   ] = await Promise.all([
     assertPublicOrganizationLanguage(db, organization.id, locale ?? sourceLocale, source),
     executeBatch(db, shellQueries),
-    listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, env }),
+    readPublicExperiences(event, db, organization.id, env),
     // Only a legal practice books consultations; a venue's site has no schedule page.
     isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) ? getOptionalPublicConsultationSettings(db, organization.id) : null,
     getPublicCompliance(db, organization.id),
@@ -138,13 +138,13 @@ export async function loadPublicShellSource(
   const localizations = locale && locale !== sourceLocale ? indexStoredPublicLocalizations(localizedRows) : undefined
   const payload = {
     success: true,
-    ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env, experiences, {
+    ...buildPublicShellPayload(organization, shellResults, shellIndexes, experiences, {
       consultation: sourceConsultation,
       can_schedule,
       compliance: sourceCompliance,
       page_links,
       localizations,
-    })),
+    }),
     count: shellResults[shellIndexes.locations]?.results?.length ?? 0,
     platform_messages: language.platform_messages,
   }

@@ -1,3 +1,4 @@
+import type { H3Event } from 'nitro'
 import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import type { BatchQuery, DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
@@ -7,6 +8,7 @@ import { projectExactLocalizedCollection, type ExactPublicLocalization } from '~
 import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSection, type PublicShellPayload, type PublicSiteSection } from '~/utils/public-resource-contracts'
 import { listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import type { Product } from '~/server/types/products'
+import { oncePerRequest } from '~/server/utils/request-scope'
 import { productSurfaceOf } from '~/utils/product-presentation'
 import { publicLocationSql } from '~/server/utils/public-locations'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -166,14 +168,16 @@ export function appendPublicShellQueries(
   }
 }
 
-export async function buildPublicShellPayload(
-  db: DbClient,
+export function readPublicExperiences(event: H3Event, db: DbClient, organizationId: string, env: CloudflareEnv): Promise<Product[]> {
+  return oncePerRequest(event, `public-experiences:${organizationId}`, () =>
+    listOrganizationProducts(db, { organizationId, kind: 'experience', publishedOnly: true, env }))
+}
+
+export function buildPublicShellPayload(
   organization: PublicBase['organization'],
   results: BatchResult[],
   indexes: PublicShellQueryIndexes,
-  env?: CloudflareEnv,
-  /** The bookable experiences, when the caller read them beside the shell rows. */
-  experiences?: Product[],
+  experiences: Product[],
   extra?: {
     consultation?: PublicConsultationSettings | null
     can_schedule?: boolean
@@ -181,7 +185,7 @@ export async function buildPublicShellPayload(
     page_links?: PublicPageLink[]
     localizations?: readonly ExactPublicLocalization[]
   },
-): Promise<PublicShellPayload> {
+): PublicShellPayload {
   const rawLocations = (results[indexes.locations]?.results ?? []) as Record<string, unknown>[]
   const placements = (results[indexes.media]?.results ?? []) as Array<PublicMediaPlacement & { owner_type: string; owner_id: string }>
   const organizationMedia = placements.filter(item => item.owner_type === 'organization')
@@ -189,7 +193,6 @@ export async function buildPublicShellPayload(
   const organizationSocialMedia = publicSocialMediaFromPlacements('organization', organizationMedia, organizationMedia)
   // The catalog sections follow the published catalog the section pages list,
   // through the same call, so the navigation cannot offer an empty page.
-  experiences ??= await listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, env })
   const sections = publicSections(organization.vertical,
     [...(results[indexes.catalog]?.results ?? []) as PublicCatalogRow[], ...productCatalogRows(experiences)],
     publicContentSectionRows(section => (results[indexes.content[section]]?.results ?? []) as PublicContentSectionRow[]),

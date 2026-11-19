@@ -2,7 +2,7 @@ import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { HTTPError } from 'nitro'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { queryAll, type DbClient } from '~/server/db'
-import { assertOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
+import { getPersistedSourceLocale, type OrganizationLocaleRecord } from '~/server/utils/localization'
 import { platformLocale } from '~/shared/platform-locales'
 import { RESOURCE_LOCALIZATION_REGISTRY, type LocalizedResourceType } from '~/server/utils/localization-registry'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
@@ -16,6 +16,7 @@ interface RepresentationInput {
   resource?: { type: LocalizedResourceType; id: string; routeSuffix?: string }
   documentId?: string
   publishedLocaleRoute?: boolean
+  sourceLocale?: OrganizationLocaleRecord
 }
 
 export async function resolvePublicLocalizationSourcePath(
@@ -62,22 +63,12 @@ export async function listPublicResourceLocaleRepresentations(
   })
 }
 
-function isUnavailableRepresentation(error: unknown): boolean {
-  if (!(error instanceof HTTPError)) return false
-  const code = error.data && typeof error.data === 'object' && 'code' in error.data
-    ? error.data.code
-    : null
-  return code === 'LANGUAGE_NOT_ENABLED'
-    || code === 'LANGUAGE_NOT_PUBLISHED'
-    || code === 'PLATFORM_LOCALE_UNAVAILABLE'
-}
-
 export async function listPublicLocaleRepresentations(
   _env: CloudflareEnv,
   db: DbClient,
   input: RepresentationInput,
 ): Promise<PublicLocaleRepresentation[]> {
-  const sourceLocale = await getPersistedSourceLocale(db, input.organizationId)
+  const sourceLocale = input.sourceLocale ?? await getPersistedSourceLocale(db, input.organizationId)
   const sourceCatalog = platformLocale(sourceLocale.locale)
   if (!sourceCatalog) throw new HTTPError({ statusCode: 500, statusMessage: 'Organization primary language catalog is unavailable' })
   const representations: PublicLocaleRepresentation[] = [{
@@ -123,14 +114,8 @@ export async function listPublicLocaleRepresentations(
         : []
 
   for (const candidate of candidates) {
-    try {
-      await assertOrganizationLanguage(db, input.organizationId, candidate.locale)
-    } catch (error) {
-      if (isUnavailableRepresentation(error)) continue
-      throw error
-    }
     const catalog = platformLocale(candidate.locale)
-    if (!catalog) throw new HTTPError({ statusCode: 500, statusMessage: 'Published language catalog is unavailable' })
+    if (!catalog) continue
     representations.push({
       locale: candidate.locale,
       label: catalog.label,
