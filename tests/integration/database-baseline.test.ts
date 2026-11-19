@@ -26,10 +26,10 @@ test('moving free sites preserves existing links and custom primary domains', ()
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
-    const { entries } = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const { entries } = JSON.parse(readFileSync('migrations-history/v27/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
     const migration = '0021_move_free_sites_to_blawby'
     for (const { tag } of entries.slice(0, entries.findIndex(({ tag }) => tag === migration))) {
-      database.exec(readFileSync(`migrations/${tag}.sql`, 'utf8'))
+      database.exec(readFileSync(`migrations-history/v27/${tag}.sql`, 'utf8'))
     }
     database.exec(`
       INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone)
@@ -40,7 +40,7 @@ test('moving free sites preserves existing links and custom primary domains', ()
                ('custom-site', 'custom', 'custom.krabiclaw.com', 'subdomain', 'secondary', 'active', 'krabiclaw.com'),
                ('www', 'custom', 'www.example.com', 'custom', 'canonical', 'active', 'customers.krabiclaw.com');
     `)
-    database.transaction(() => database.exec(readFileSync(`migrations/${migration}.sql`, 'utf8')))()
+    database.transaction(() => database.exec(readFileSync(`migrations-history/v27/${migration}.sql`, 'utf8')))()
     assert.deepEqual(database.prepare(`SELECT id, domain, role, dns_target FROM organization_domains
       WHERE status = 'active' ORDER BY id`).all(), [
       { id: 'custom-site', domain: 'custom.blawby.com', role: 'secondary', dns_target: 'blawby.com' },
@@ -99,9 +99,9 @@ test('standalone Channex homes migration preserves calendar delivery and channel
   database.pragma('foreign_keys = ON')
   try {
     const migration = '0017_standalone_channex_homes'
-    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const journal = JSON.parse(readFileSync('migrations-history/v27/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
     for (const { tag } of journal.entries.slice(0, journal.entries.findIndex(entry => entry.tag === migration))) {
-      database.exec(readFileSync(`migrations/${tag}.sql`, 'utf8'))
+      database.exec(readFileSync(`migrations-history/v27/${tag}.sql`, 'utf8'))
     }
     database.exec(`
       INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('tenant', 'Tenant', 'tenant', 'USD', 'America/Denver');
@@ -124,7 +124,7 @@ test('standalone Channex homes migration preserves calendar delivery and channel
     `)
     const read = (table: string) => database.prepare(`SELECT rowid, * FROM ${table}`).all()
     const before = ['product_channel_mappings', 'channel_night_pushes', 'channel_threads'].map(read)
-    database.transaction(() => database.exec(readFileSync(`migrations/${migration}.sql`, 'utf8')))()
+    database.transaction(() => database.exec(readFileSync(`migrations-history/v27/${migration}.sql`, 'utf8')))()
     assert.deepEqual(['product_channel_mappings', 'channel_night_pushes', 'channel_threads'].map(read), before)
     assert.deepEqual(database.pragma('foreign_key_check'), [])
   } finally {
@@ -135,8 +135,8 @@ test('standalone Channex homes migration preserves calendar delivery and channel
 test('the stay-night migration and database transfer preserve both bookings when a channel sells an occupied night', async () => {
   const { writePayload } = await import('../../scripts/transfer-database-export.mjs')
   const migration = '0020_record_every_confirmed_stay_night'
-  const { entries } = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
-  const schema = entries.map(({ tag }) => readFileSync(`migrations/${tag}.sql`, 'utf8'))
+  const { entries } = JSON.parse(readFileSync('migrations-history/v27/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+  const schema = entries.map(({ tag }) => readFileSync(`migrations-history/v27/${tag}.sql`, 'utf8'))
   const database = new Database(':memory:')
   const directory = mkdtempSync(join(tmpdir(), 'blawby-stay-nights-transfer-'))
   try {
