@@ -1,4 +1,4 @@
-// Serves R2 objects for media.krabiclaw.com.
+// Serves R2 objects for the public media hosts.
 // Must run before tenant-resolution (filename prefix "00." ensures alphabetical priority).
 // Handles range requests so video seeking works in browsers.
 
@@ -8,14 +8,14 @@ import {  sendStream, setHeader, setResponseStatus } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 
-const MEDIA_HOST = 'media.krabiclaw.com'
+const MEDIA_HOSTS = new Set(['media.blawby.com', 'media.krabiclaw.com'])
 const WORKER_MEDIA_PREFIX = '/__media/'
 
-// Non-production environments have no separate media.krabiclaw.com host, so
+// Non-production environments have no separate media host, so
 // their canonical public media URLs use /__media on the app origin. The host
 // boundary is the authorization boundary here: staging and local hosts may
 // serve public media, while production tenant/platform
-// hosts cannot use this path and continue through media.krabiclaw.com.
+// hosts use the dedicated media host.
 function isWorkerMediaPathAllowed(event: Parameters<typeof getHeader>[0]): boolean {
   if (import.meta.dev) return true
   const hostname = ((event.req.headers.get('host')) || '').split(':')[0] ?? ''
@@ -51,7 +51,7 @@ function mediaResponse(
 export default defineHandler(async (event) => {
   const host = ((event.req.headers.get('host')) || '').split(':')[0]
   const url = event.url
-  const isMediaHost = host === MEDIA_HOST
+  const isMediaHost = MEDIA_HOSTS.has(host)
   const isWorkerMediaPath = url.pathname.startsWith(WORKER_MEDIA_PREFIX) && isWorkerMediaPathAllowed(event)
   if (!isMediaHost && !isWorkerMediaPath) return
   if (isWorkerMediaPath) isolateWorkerMediaResponse(event)
