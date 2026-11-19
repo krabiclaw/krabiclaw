@@ -3,9 +3,14 @@ import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { HTTPError } from 'nitro';
 
 import type { H3Event } from 'nitro'
+import { getRouterParam, readBody } from 'nitro/h3'
+import { qaEditQuery, updateQa } from '~/server/utils/location-qa'
+import { jsonResponse } from '~/server/utils/api-response'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { requireOrganizationAccess, requireProductAccess } from '~/server/utils/location-access'
 import {
+  BATCH_VIEWER,
+  resourceLocationScopeSql,
   assertLocationAccess,
   assertResourceAccess,
   memberAccessPrincipal,
@@ -17,7 +22,7 @@ import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { parseLocationPayload } from '~/server/utils/location-payload'
 import { getProduct, hydrateProductMedia, listCollections, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
-import { requireWebsiteAccess } from '~/server/utils/tenant-pages-api'
+import { readWebsiteMember, requireWebsiteAccess } from '~/server/utils/tenant-pages-api'
 import { prepareBlogList } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
@@ -36,6 +41,24 @@ async function editorPreviewToken(secret: unknown, organizationId: string) {
     throw new HTTPError({ statusCode: 500, statusMessage: 'PREVIEW_SECRET is required for editor previews' })
   }
   return await createPreviewToken(secret, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
+}
+
+export async function saveDashboardQa(event: H3Event) {
+  const organizationId = getRouterParam(event, 'organization_id')
+  const qaId = getRouterParam(event, 'qa_id')
+  const locationId = getRouterParam(event, 'location_id') ?? null
+  if (!organizationId || !qaId) throw new HTTPError({ statusCode: 400, message: 'Missing params' })
+  const raw = await readBody<Record<string, unknown>>(event)
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HTTPError({ statusCode: 400, message: 'Invalid request body' })
+  const { page_path: pagePath = null, ...changes } = raw
+  if (locationId && pagePath !== null) throw new HTTPError({ statusCode: 400, message: 'Pass location_id or page_path, not both' })
+  if (pagePath !== null && typeof pagePath !== 'string') throw new HTTPError({ statusCode: 400, message: 'page_path must be a string or null' })
+  const snapshot = qaEditQuery({ sql: BATCH_VIEWER.organization }, qaId, locationId, pagePath)
+  snapshot.query += ` AND ${resourceLocationScopeSql(BATCH_VIEWER, 'content_documents')}`
+  const { db, organization, session, rows } = await readWebsiteMember(event, organizationId, [snapshot])
+  const current = rows[0]!.results[0] as Parameters<typeof updateQa>[5] | undefined
+  if (!current) throw new HTTPError({ statusCode: 404, message: 'Q&A not found' })
+  return jsonResponse(await updateQa(db, { organizationId: organization.id, locationId, pagePath }, qaId, changes, session.user, current))
 }
 
 export interface DashboardMediaFilters {

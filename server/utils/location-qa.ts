@@ -278,18 +278,32 @@ export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInpu
   return { status: 201, data: { ...document, created: true } }
 }
 
-export async function updateQa(db: DbClient, scope: QaScope, qaId: string, input: UpdateQaInput, actor: AuthUserIdentity | null) {
-  await assertQaScope(db, scope)
+type QaEditRow = { id: string; organization_id: string; location_id: string | null; scope_path: string | null;
+  title: string; summary: string | null; status: string; sort_order: number; metadata_json: string; updated_at: string }
+
+export function qaEditQuery(organization: string | { sql: string }, qaId: string, locationId: string | null, pagePath?: string | null): BatchQuery {
+  const scoped = scopeSql(locationId, pagePath)
+  return {
+    query: `SELECT id, organization_id, location_id, scope_path, title, summary, status, sort_order, metadata_json, updated_at
+      FROM content_documents WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual'
+        AND id = ? AND organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND ${scoped.clause}`,
+    params: [qaId, ...(typeof organization === 'string' ? [organization] : []), ...scoped.params],
+  }
+}
+
+export async function updateQa(db: DbClient, scope: QaScope, qaId: string, input: UpdateQaInput, actor: AuthUserIdentity | null, snapshot?: QaEditRow) {
+  if (!snapshot) await assertQaScope(db, scope)
   const updates = normalizeQaInput(input)
   if (actor !== null && (!actor || typeof actor.id !== 'string' || !actor.id.trim() || typeof actor.name !== 'string')) badQaInput('actor must be the authenticated identity or explicitly null')
   const actorId = actor?.id ?? null
   const actorName = actor?.name ?? null
   const scoped = scopeSql(scope.locationId, scope.pagePath)
-  const current = await queryFirst<{ title: string; summary: string | null; status: string; sort_order: number; metadata_json: string; updated_at: string }>(db,
-    `SELECT title, summary, status, sort_order, metadata_json, updated_at FROM content_documents
-      WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND id = ? AND organization_id = ? AND ${scoped.clause}`,
-    [qaId, scope.organizationId, ...scoped.params])
-  if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Q&A not found' })
+  const read = qaEditQuery(scope.organizationId, qaId, scope.locationId, scope.pagePath)
+  const current = snapshot ?? await queryFirst<QaEditRow>(db, read.query, read.params)
+  if (!current || current.id !== qaId || current.organization_id !== scope.organizationId
+    || current.location_id !== scope.locationId || current.scope_path !== (scope.locationId ? null : normalizePagePath(scope.pagePath))) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Q&A not found' })
+  }
   const fields = ['question', 'answer', 'question_author', 'is_owner_answer', 'status', 'sort_order'] as const
   if (!fields.some(field => updates[field] !== undefined)) badQaInput('No update fields provided')
   const metadata = JSON.parse(current.metadata_json) as Record<string, unknown>
