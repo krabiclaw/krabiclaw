@@ -279,7 +279,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       metadata,
       // Stripe reports, per card, whether a surcharge may apply and how much at most; the amount is set when the buyer confirms.
       ...(surcharge !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
-    } as Stripe.PaymentIntentCreateParams, { stripeAccount: connected.stripe_account_id, idempotencyKey: key }))
+    } as Stripe.PaymentIntentCreateParams, { stripeAccount, idempotencyKey: key }))
     if (intent.livemode !== connected.livemode || !intent.client_secret) throw new Error('Stripe returned a PaymentIntent outside the connected mode')
     const linked = await execute(db, 'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=? AND organization_id=?', [intent.id, new Date().toISOString(), id, input.organizationId])
     if (linked.meta.changes !== 1) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
