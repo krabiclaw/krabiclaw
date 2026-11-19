@@ -141,7 +141,7 @@ During an incident, use Cloudflare's deployment history to restore the last
 known-good production deployment without changing D1 data. Then land the source
 fix through `staging` and `main`.
 
-Production secrets live in Cloudflare → Workers & Pages → krabiclaw → Settings →
+Production secrets live in Cloudflare → Workers & Pages → blawby → Settings →
 Variables. `CRON_SECRET` protects internal scheduled endpoints:
 
 ```bash
