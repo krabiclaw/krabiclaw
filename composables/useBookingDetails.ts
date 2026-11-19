@@ -22,15 +22,16 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   const orgSlug = computed(() => personalScope ? 'account' : String(route.params.org_slug || ''))
   const purchase = bookingType === 'payment'
   const dashboardRecord = !personalScope && !purchase
-  const key = dashboardRecord ? dashboardBookingKey(orgSlug.value, bookingId) : `dashboard-booking:${orgSlug.value}:${bookingType}:${bookingId}`
-  const { data, error, refresh: reread, clear } = await useAsyncData<DashboardBooking | AccountNightBooking | { booking: DashboardBookingDetails }>(key, (_app, { signal }) => {
-    if (dashboardRecord) return dashboardApi(dashboardBookingPath(bookingId), { signal, validate: isDashboardBooking })
+  const request = dashboardRecord ? useDashboardReservation({ orgSlug: orgSlug.value }, bookingId)
+    : useAsyncData<AccountNightBooking | { booking: DashboardBookingDetails }>(`dashboard-booking:${orgSlug.value}:${bookingType}:${bookingId}`, (_app, { signal }) => {
     if (!purchase) return applicationFetch(`/api/account/bookings/${encodeURIComponent(bookingId)}?lookup=conversation`, {
       signal,
       validate: (value): value is AccountNightBooking | { booking: DashboardBookingDetails } => isAccountNightBooking(value) || isBookingDetailsResponse(value),
     })
     return dashboardApi(`/api/${personalScope ? 'account' : 'dashboard'}/bookings/${bookingType}/${encodeURIComponent(bookingId)}`, { signal, validate: isBookingDetailsResponse })
   })
+  const { data: result, error, refresh: reread, clear } = await request
+  const data: Ref<DashboardBooking | AccountNightBooking | { booking: DashboardBookingDetails } | undefined> = result
   const booking = computed(() => isBookingDetailsResponse(data.value) ? data.value.booking : null)
 
   // The one vocabulary. `resolveBookingPresentation` refuses a missing vertical

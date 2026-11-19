@@ -147,7 +147,15 @@ function dashboardContextKey(scope: DashboardRequestScope | null) {
 export function useDashboardContext(scope: DashboardRequestScope) {
   return useAsyncData<DashboardContextResponse>(
     dashboardContextKey(scope),
-    async (_nuxtApp, { signal }) => dashboardFetch('/api/dashboard/context', scope, { signal, validate: isDashboardContextResponse }),
+    async (_nuxtApp, { signal }) => {
+      if (import.meta.server) {
+        const provider = useRequestEvent()?.context.dashboardReservationProvider as { context: (orgSlug: string) => Promise<unknown> } | undefined
+        const payload = await provider?.context(scope.orgSlug)
+        if (!isDashboardContextResponse(payload)) throw createError({ statusCode: 502, statusMessage: 'Invalid dashboard context' })
+        return payload
+      }
+      return dashboardFetch('/api/dashboard/context', scope, { signal, validate: isDashboardContextResponse })
+    },
     { dedupe: 'defer' },
   )
 }

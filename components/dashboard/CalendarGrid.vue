@@ -107,12 +107,16 @@
                   v-for="bar in row.bars"
                   :key="bar.key"
                   :to="bar.to"
+                  :prefetch="Boolean(bar.stayId)"
+                  prefetch-on="interaction"
                   class="z-10 mx-0.5 mt-1 flex h-5 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white sm:mt-1.5 sm:h-7"
                   :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}`, backgroundColor: STAY_CHANNEL_COLORS[bar.channel ?? 'direct'] }"
-                  :title="bar.title"
+                  :title="reservationRead.error.value?.bookingId === bar.stayId ? reservationRead.error.value?.message : bar.title"
                   :data-stay="bar.stayId"
                   :data-channel="bar.channel"
                   :data-booked="bar.date"
+                  @pointerenter="reservationRead.prefetch(bar.stayId)"
+                  @focus="reservationRead.prefetch(bar.stayId)"
                 >
                   <ChannelMark v-if="bar.channel" :channel="bar.channel" class="size-4 shrink-0 rounded-none! border-0!" />
                   <span class="truncate">{{ bar.label }}</span>
@@ -601,9 +605,24 @@ watch([() => rows.value.length, windowDays], ([rowCount, days]) => {
 watch([search, () => editor.busy.value], ([value, busy]) => { if (!busy) appliedSearch.value = value })
 watch(() => route.query[words.rows] === undefined ? null : `${String(route.query[words.rows])}|${String(route.query[words.span])}`, () => editor.edit('summary'))
 
+const reservationRead = useDashboardReservationPrefetch()
 const realtime = useDashboardInvalidations()
+watch(realtime.savedReservation, saved => {
+  const payload = homesData.value
+  if (!saved || !payload?.manage) return
+  if (!payload.homes.some(({ home }) => home.product_id === saved.product_id)) return
+  const entry = payload.bookings.find(booking => booking.booking_id === saved.booking_id)
+  if (entry) data.value = {
+    ...payload,
+    bookings: payload.bookings.map(booking => booking === entry ? {
+      ...booking, guest_name: saved.guest_name, adults: saved.adults, children: saved.children,
+      check_in_date: saved.check_in_date, check_out_date: saved.check_out_date, status: saved.status,
+    } : booking),
+  }
+  if (entry || (saved.check_in_date < payload.to && saved.check_out_date > payload.from)) void refresh({ dedupe: 'defer' })
+})
 watch(realtime.event, event => {
-  if (homesView && (event?.type === 'stay.changed' || event?.type === 'nights.changed') && !editor.busy.value) void refresh()
+  if (homesView && (event?.type === 'stay.changed' || event?.type === 'nights.changed') && !editor.busy.value) void refresh({ dedupe: 'defer' })
 })
 watch(realtime.reconnectEpoch, epoch => { if (epoch > 0 && !editor.busy.value) void refresh() })
 </script>
