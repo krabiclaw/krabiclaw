@@ -138,7 +138,7 @@ export function useDashboardReservation(scope: DashboardRequestScope, bookingId:
   const reads = import.meta.client ? useDashboardReservationReads(scope) : undefined
   return useAsyncData(dashboardBookingKey(scope.orgSlug, bookingId), async (_app, { signal }) => {
     if (import.meta.server) {
-      const provider = useRequestEvent()?.context.dashboardReservationProvider as {
+      const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
         booking: (orgSlug: string, bookingId: string) => Promise<unknown>
       } | undefined
       const payload = await provider?.booking(scope.orgSlug, bookingId)

@@ -65,6 +65,11 @@ interface CatalogView {
   can_create: boolean
   has_stays: boolean
 }
+function isCatalogView(value: unknown): value is CatalogView {
+  return isRecord(value) && isRecord(value.screen) && Array.isArray(value.screen.rows) && Array.isArray(value.filters)
+    && typeof value.kind === 'string' && typeof value.can_create === 'boolean' && typeof value.has_stays === 'boolean'
+}
+
 const level = useRouteLevel()
 const route = useRoute()
 const router = useRouter()
@@ -77,10 +82,17 @@ const kind = computed({
 })
 const { data: catalog, error: catalogError } = await useAsyncData(
   () => `dashboard-catalog:${organizationId}:${kind.value}`,
-  () => dashboardApi('/api/dashboard/catalog', {
-    query: { kind: kind.value },
-    validate: (value): value is CatalogView => isRecord(value) && isRecord(value.screen) && Array.isArray(value.screen.rows) && Array.isArray(value.filters) && typeof value.can_create === 'boolean' && typeof value.has_stays === 'boolean',
-  }),
+  async () => {
+    if (import.meta.server) {
+      const scope = useDashboardRouteScope().value
+      if (!scope) throw createError({ statusCode: 400, statusMessage: 'Catalog organization is required' })
+      const provider = useRequestEvent()?.context.dashboardDocumentProvider as { catalog: (orgSlug: string) => Promise<unknown> } | undefined
+      const payload = await provider?.catalog(scope.orgSlug)
+      if (!isCatalogView(payload)) throw createError({ statusCode: 502, statusMessage: 'Invalid dashboard catalog' })
+      return payload
+    }
+    return dashboardApi('/api/dashboard/catalog', { query: { kind: kind.value }, validate: isCatalogView })
+  },
 )
 const loadError = computed(() => catalogError.value ? getErrorMessage(catalogError.value, 'The catalog could not be loaded') : null)
 const kindFilters = computed(() => catalog.value?.filters ?? [])
@@ -117,7 +129,7 @@ const { data: setup, error: setupError, pending: setupPending } = await useAsync
         },
       })
     : Promise.resolve({ first_home_setup: null, resume_home_setup: null }),
-  { watch: [kind, showFirstHomeSetup] },
+  { server: false, watch: [kind, showFirstHomeSetup] },
 )
 const firstHomeSetup = computed(() => setup.value?.first_home_setup)
 const firstHomeChoices = computed(() => firstHomeSetup.value ? [
