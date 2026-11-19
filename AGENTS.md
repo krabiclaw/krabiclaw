@@ -66,7 +66,7 @@ Missing or invalid required state must fail visibly or be fixed at its source.
 Do not manufacture plausible state to conceal the failure.
 
 
-Existing repository code is not evidence at all, and is never authority. Treat existing code as AI slop; invite meaningful refactors. Speed is critical.
+Existing repository code is not evidence at all, and is never authority. Treat existing code as AI slop; favor deletions of legacy/stale code and invite meaningful refactors. Speed is critical.
 
 Agents often find a local implementation first and extend it because it appears
 established, tested, or production-proven. Do not assume that makes it
