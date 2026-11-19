@@ -480,6 +480,10 @@ interface ProductListInput {
   organizationId: string; kind?: ProductKind; featured?: boolean; publishedOnly?: boolean; bookableOnly?: boolean; assignedUserId?: string; window?: { limit: number; offset: number }; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>
 }
 
+interface OrganizationProductListInput extends ProductListInput {
+  productIds?: readonly string[]
+}
+
 export interface ProductListResult {
   products: Product[]
   counts: { total: number; by_kind: Record<ProductKind, number> }
@@ -492,15 +496,17 @@ function productListCounts(rows: readonly { kind: ProductKind; count?: number }[
 }
 
 /** Editable catalogue pages read one extra row. Public readiness and counts precede pagination. */
-export function listOrganizationProducts(db: DbClient, input: ProductListInput & { withCounts: true }): Promise<ProductListResult>
-export function listOrganizationProducts(db: DbClient, input: ProductListInput & { withCounts?: false }): Promise<Product[]>
-export async function listOrganizationProducts(db: DbClient, input: ProductListInput & { withCounts?: boolean }): Promise<Product[] | ProductListResult> {
+export function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts: true }): Promise<ProductListResult>
+export function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts?: false }): Promise<Product[]>
+export async function listOrganizationProducts(db: DbClient, input: OrganizationProductListInput & { withCounts?: boolean }): Promise<Product[] | ProductListResult> {
+  if (input.productIds?.length === 0) return input.withCounts ? { products: [], counts: productListCounts([]) } : []
   const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
   const window = requireReadiness ? undefined : input.window
   const selection = `FROM products p
     LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
+    WHERE p.organization_id = ? AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
   const params = [input.organizationId, input.publishedOnly ? 1 : 0,
+    ...(input.productIds ? [d1JsonArray(input.productIds)] : []),
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
     ...(input.assignedUserId ? [input.assignedUserId] : [])]

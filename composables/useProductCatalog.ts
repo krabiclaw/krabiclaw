@@ -20,7 +20,7 @@ import { getErrorMessage } from '~/utils/errors'
  * The level that opens the catalog awaits `load`, so it renders complete; the
  * levels below it share the loaded entry.
  */
-export function useProductCatalog(organizationId: string, locationId: Ref<string | null>) {
+export function useProductCatalog(organizationId: string, locationId: Ref<string | null>, immediate = true) {
   const dashboardApi = useDashboardApi()
   const isCollectionList = (value: unknown): value is { collections: Collection[] } =>
     isRecord(value) && Array.isArray(value.collections)
@@ -37,6 +37,7 @@ export function useProductCatalog(organizationId: string, locationId: Ref<string
       return { collections: collectionResponse.collections, products: productResponse.products }
     },
     {
+      immediate,
       getCachedData(cacheKey, nuxtApp, ctx) {
         if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
         return nuxtApp.payload.data[cacheKey] as { collections: Collection[]; products: Product[] } | undefined
@@ -45,7 +46,7 @@ export function useProductCatalog(organizationId: string, locationId: Ref<string
   )
   const { data, pending, error } = load
 
-  if (import.meta.client) {
+  if (import.meta.client && immediate) {
     onMounted(() => {
       if (useNuxtApp().payload.data[`product-catalog:${organizationId}`]) {
         void load.refresh()

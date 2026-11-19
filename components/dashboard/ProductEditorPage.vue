@@ -502,7 +502,8 @@ function sectionPath(section: string) {
 }
 
 const organizationId = useDashboardOrganizationId()
-const { refresh: refreshCatalog, collectionProductIds, setCollectionProducts } = useProductCatalog(organizationId, ref(null))
+const { refresh: refreshCatalog, collectionProductIds, setCollectionProducts } = useProductCatalog(organizationId, ref(null), false)
+const catalogViews = ['all', 'stay'].map(kind => useNuxtData<{ screen: CatalogScreen }>(`dashboard-catalog:${organizationId}:${kind}`).data)
 const dashboard = useDashboardOrganization()
 // The context mints a site-wide preview token. Assigned Product access alone
 // does not authorize unpublished content elsewhere in the organization.
@@ -1697,6 +1698,7 @@ async function commit(concern?: ProductConcern) {
   saving.value = true
   saveError.value = null
   try {
+    let savedInternalName: ProductMutation | undefined
     if (!isNew.value && concern === undefined && (!stayEditor.value || editorKey.value === 'description' || editorKey.value === 'attributes' || editorKey.value === 'internal-name' || editorKey.value === 'name')) ordinaryDraft = { version: editVersion.value, values: cloneFnJSON(form) }
     if (isNew.value) {
       // A service is created with the page that shows it, in one write: the
@@ -1780,11 +1782,12 @@ async function commit(concern?: ProductConcern) {
         intent, body: cloneFnJSON({ ...payload(), updated_at: editVersion.value! }), key: crypto.randomUUID(),
       }
       if (attempt) stayDefaultAttempt.value = attempt
-      await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
+      const { product: saved } = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
         method: 'PATCH', body: attempt?.body ?? payload(), validate: isMutation,
         ...(attempt ? { headers: { 'Idempotency-Key': attempt.key } } : {}),
       })
       if (attempt) stayDefaultAttempt.value = null
+      if (editorKey.value === 'internal-name') savedInternalName = saved
     }
     if (removesOnlineScope) {
       const result = await navigateTo({ path: route.path, query: { ...route.query, location_id: undefined }, hash: route.hash }, { replace: true })
@@ -1794,7 +1797,22 @@ async function commit(concern?: ProductConcern) {
         closeTo.value = router.resolve({ path: destination.path, query: { ...destination.query, location_id: undefined }, hash: destination.hash }).fullPath
       }
     }
-    await reload()
+    if (savedInternalName) {
+      const current = loaded.value
+      const { stay, image, gallery, media, social_image } = current?.product ?? {}
+      if (!current || !stay || !savedInternalName.stay || savedInternalName.id !== current.product.id) {
+        throw new Error('The saved listing does not match this editor.')
+      }
+      loaded.value = { ...current, product: { ...savedInternalName, image, gallery, media, social_image } }
+      editVersion.value = savedInternalName.updated_at
+      const { id, stay: { internal_name: label } } = savedInternalName
+      for (const view of catalogViews) {
+        const catalog = view.value
+        if (catalog) view.value = { ...catalog, screen: { ...catalog.screen, rows: catalog.screen.rows.map(row => row.id === id ? { ...row, label } : row) } }
+      }
+    } else {
+      await reload()
+    }
     if (product.value) loadForm(product.value)
     if (concern === 'additional-rules' || concern === 'arrival-time') restoreHouseRules(false)
     // A booking write changes what the schedule is: its start times, whether the
