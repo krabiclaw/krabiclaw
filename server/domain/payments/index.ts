@@ -125,17 +125,23 @@ function mergeRefunds(rows: RecordedRefund[], provider: Stripe.Refund[] | undefi
 }
 
 /** The receipt fields shown for an authorized booking or standalone purchase. */
-export function paymentReceiptsQuery(organizationId: string, scope: { bookingId: string } | { paymentId: string }, buyerUserId?: string) {
+export function paymentReceiptsQuery(organizationId: string | { sql: string }, scope: { bookingId: string | { sql: string } } | { paymentId: string }, buyerUserId?: string) {
   const booking = 'bookingId' in scope
+  const id = booking ? scope.bookingId : scope.paymentId
   return { query: `
     SELECT p.id, p.currency, p.captured_amount, p.refunded_amount, p.surcharge_amount, p.receipt_url,
            p.stripe_account_id, p.livemode, p.stripe_payment_intent_id, p.stripe_charge_id,
            (SELECT json_group_array(json_object('id', f.id, 'amount', f.amount, 'status', f.status,
                'stripe_refund_id', f.stripe_refund_id, 'note', f.note))
             FROM payment_refunds f WHERE f.payment_id = p.id) AS refunds_json
-    FROM payments p WHERE p.organization_id = ? AND ${booking ? "p.subject_type = 'booking' AND p.subject_id" : 'p.id'} = ?
+    FROM payments p WHERE p.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}
+      AND ${booking ? "p.subject_type = 'booking' AND p.subject_id" : 'p.id'} = ${typeof id === 'string' ? '?' : id.sql}
       ${buyerUserId === undefined ? '' : 'AND p.buyer_user_id = ?'}
-    ORDER BY p.created_at, p.id`, params: [organizationId, booking ? scope.bookingId : scope.paymentId, ...(buyerUserId === undefined ? [] : [buyerUserId])] }
+    ORDER BY p.created_at, p.id`, params: [
+      ...(typeof organizationId === 'string' ? [organizationId] : []),
+      ...(typeof id === 'string' ? [id] : []),
+      ...(buyerUserId === undefined ? [] : [buyerUserId]),
+    ] }
 }
 
 export function paymentReceiptsFromRows(env: CloudflareEnv, results: unknown[]) {

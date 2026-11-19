@@ -204,7 +204,8 @@ export function readDashboardMembership(event: H3Event, slug: string, read: () =
 }
 
 export function getDashboardSession(event: H3Event, env: ReturnType<typeof cloudflareEnv>) {
-  return oncePerRequest(event, 'dashboard-session', () => timeRequestPhase(event, 'auth_session', () => getAuthSession(event, env)))
+  return oncePerRequest(event, 'dashboard-session', () => timeRequestPhase(event, 'auth_session', () =>
+    getAuthSession(event, env, { forwardCookies: event.url.pathname.startsWith('/dashboard/') })))
 }
 
 async function dashboardSessionContext(event: H3Event) {

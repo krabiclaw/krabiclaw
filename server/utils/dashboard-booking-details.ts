@@ -4,7 +4,7 @@ import { getGuestRequest, timedBookingActions } from '~/server/domain/requests'
 import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/domain/conversations'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
-import { executeBatch, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { formatBookingPolicySummary, parseBookingPolicy, type FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
@@ -184,7 +184,7 @@ async function bookingContext(event: H3Event, organizationSlug?: string | null):
 type BookingScope = { organizationId: string; buyerUserId?: undefined } | { buyerUserId: string; organizationId?: undefined }
 
 function bookingRowQuery(
-  scope: BookingScope,
+  scope: BookingScope | { organizationId: { sql: string }; buyerUserId?: undefined },
   type: DashboardBookingType,
   bookingId: string,
   lookup: 'booking' | 'conversation' = 'conversation',
@@ -215,7 +215,7 @@ function bookingRowQuery(
     LEFT JOIN member_scheduling ms ON ms.organization_id = record.organization_id AND ms.member_id = record.assigned_member_id
     LEFT JOIN member host_member ON host_member.organizationId = record.organization_id AND host_member.id = record.assigned_member_id
     LEFT JOIN user u ON u.id = host_member.userId
-    WHERE ${lookup === 'booking' ? 'record.id' : 'r.id'} = ? AND record.product_session_id IS NOT NULL AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, params: [bookingId, type, scope.buyerUserId ?? scope.organizationId] }
+    WHERE ${lookup === 'booking' ? 'record.id' : 'r.id'} = ? AND record.product_session_id IS NOT NULL AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : `r.organization_id = ${typeof scope.organizationId === 'object' ? scope.organizationId.sql : '?'}`}`, params: [bookingId, type, ...(typeof scope.organizationId === 'object' ? [] : [scope.buyerUserId ?? scope.organizationId])] }
 }
 
 async function loadBookingRow(db: DbClient, ...input: Parameters<typeof bookingRowQuery>) {
@@ -262,25 +262,26 @@ export async function loadDashboardPurchaseDetails(event: H3Event, paymentId: st
   return composePurchaseDetails(db, env, { organizationId: organization.id }, paymentId)
 }
 
-type BookingDetailScope = Pick<BookingRow, 'booking_id' | 'conversation_id' | 'organization_id' | 'location_id' | 'product_id' | 'product_kind'>
 type BookingDetailReader = { env: CloudflareEnv; canReadPayments: boolean; buyerUserId?: undefined }
   | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined }
 
-export async function loadStaffBookingDetails(context: BookingAccessContext, scope: BookingDetailScope): Promise<DashboardBookingDetails> {
-  const { db, env, organization } = context
-  const canReadPayments = await roleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['read'] } })
-  const reader = { env, canReadPayments }
-  const [primary, ...facts] = await executeBatch(db, [
-    bookingRowQuery({ organizationId: organization.id }, 'booking', scope.booking_id, 'booking'),
-    ...bookingDetailFacts(scope, reader),
-  ], { operation: 'Read the staff reservation' })
-  const row = primary!.results[0] as BookingRow | undefined
-  if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  await assertBookingAccess(context, row)
-  if (row.location_id !== scope.location_id || row.product_id !== scope.product_id || row.product_kind !== scope.product_kind || row.conversation_id !== scope.conversation_id) {
-    throw new HTTPError({ statusCode: 409, message: 'The booking changed while it was being loaded' })
+export function prepareStaffBookingDetails(bookingId: string, source: BatchQuery) {
+  const scoped = (query: BatchQuery): BatchQuery => ({
+    query: `WITH selected_booking AS (${source.query}) ${query.query}`,
+    params: [...source.params ?? [], ...query.params ?? []],
+  })
+  const organization = { sql: '(SELECT organization_id FROM selected_booking)' }
+  const queries = [
+    scoped(bookingRowQuery({ organizationId: organization }, 'booking', bookingId, 'booking')),
+    ...bookingDetailFacts(source, true),
+  ]
+  return { queries, read }
+
+  function read(db: DbClient, env: CloudflareEnv, [primary, ...facts]: D1Result[], canReadPayments: boolean) {
+    const row = primary!.results[0] as BookingRow | undefined
+    if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+    return composeBookingDetails(db, row, 'booking', { env, canReadPayments }, canReadPayments ? facts : facts.slice(0, -1))
   }
-  return composeBookingDetails(db, row, 'booking', reader, facts)
 }
 
 /**
@@ -311,29 +312,36 @@ export async function loadBuyerBookingDetails(
   return composeBookingDetails(db, row, type, { env, buyerUserId: userId })
 }
 
-function bookingDetailFacts(row: BookingDetailScope, reader: BookingDetailReader) {
-  // A table may move to the business's tables at any of its locations; anything else stays where it is.
-  const locationSelection = row.product_kind === 'table' ? {
-    query: `SELECT DISTINCT l.id, l.title
-         FROM business_locations l JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
-         JOIN products p ON p.id = pl.product_id AND p.organization_id = l.organization_id AND p.kind = 'table'
+function bookingDetailFacts(source: BatchQuery, staff: boolean, buyerUserId?: string) {
+  const site = { sql: '(SELECT organization_id FROM selected_booking)' }
+  const bookingId = '(SELECT booking_id FROM selected_booking)'
+  const scope = (query: BatchQuery): BatchQuery => ({
+    query: `WITH selected_booking AS (${source.query}) ${query.query}`,
+    params: [...source.params ?? [], ...query.params ?? []],
+  })
+  // A table may move to the business's tables at any of its locations.
+  const places = `SELECT DISTINCT l.id, l.title
+    FROM business_locations l JOIN selected_booking selection ON l.organization_id = selection.organization_id
+    WHERE (selection.product_kind <> 'table' AND l.id = selection.location_id)
+       OR (selection.product_kind = 'table' AND EXISTS (
+         SELECT 1 FROM product_locations pl
+         JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id AND p.kind = 'table'
          JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-        WHERE l.organization_id = ? ORDER BY l.title`, params: [row.organization_id],
-  } : { query: 'SELECT id, title FROM business_locations WHERE organization_id = ? AND id = ?', params: [row.organization_id, row.location_id] }
-  const resourceId = row.product_kind === 'table' ? row.location_id : row.product_id
-  const canReadPayments = Boolean(reader.buyerUserId || reader.canReadPayments)
+         WHERE pl.organization_id = l.organization_id AND pl.location_id = l.id
+       ))`
   return [
-    locationSelection,
-    mediaPlacementsQuery({ organizationId: row.organization_id, ownerType: 'business_location', includeOrganizationFallback: true,
-      owners: { sql: `SELECT id FROM (${locationSelection.query})`, params: locationSelection.params } }),
-    mediaPlacementsQuery({ organizationId: row.organization_id, ownerType: row.product_kind === 'table' ? 'business_location' : 'product',
-      owners: resourceId ? [resourceId] : [] }),
-    sourceLocaleQuery(row.organization_id),
-    { query: "SELECT * FROM messages WHERE conversation_id=? AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1", params: [row.conversation_id] },
-    { query: 'SELECT first_sent_at, submitted_at, revoked_at, expires_at FROM review_requests WHERE booking_id = ? AND ? = 1 ORDER BY created_at DESC LIMIT 1',
-      params: [row.booking_id, Number(!reader.buyerUserId)] },
-    ...(canReadPayments ? [paymentReceiptsQuery(row.organization_id, { bookingId: row.booking_id }, reader.buyerUserId)] : []),
-  ]
+    { query: `${places} ORDER BY l.title` },
+    mediaPlacementsQuery({ organizationId: site, ownerType: 'business_location', includeOrganizationFallback: true,
+      owners: { sql: `SELECT id FROM (${places})` } }),
+    mediaPlacementsQuery({ organizationId: site,
+      ownerType: { sql: "(SELECT CASE WHEN product_kind = 'table' THEN 'business_location' ELSE 'product' END FROM selected_booking)" },
+      owners: { sql: "SELECT CASE WHEN product_kind = 'table' THEN location_id ELSE product_id END FROM selected_booking" } }),
+    sourceLocaleQuery(site),
+    { query: "SELECT * FROM messages WHERE conversation_id=(SELECT conversation_id FROM selected_booking) AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1" },
+    { query: `SELECT first_sent_at, submitted_at, revoked_at, expires_at FROM review_requests WHERE booking_id = ${bookingId} AND ? = 1 ORDER BY created_at DESC LIMIT 1`,
+      params: [Number(staff)] },
+    paymentReceiptsQuery({ sql: '(SELECT organization_id FROM selected_booking WHERE can_read_payments = 1)' }, { bookingId: { sql: bookingId } }, buyerUserId),
+  ].map(scope)
 }
 
 async function composeBookingDetails(
@@ -352,7 +360,10 @@ async function composeBookingDetails(
 
   const resourceId = row.product_kind === 'table' ? row.location_id : row.product_id
   const [places, placeMedia, photos, locale, proposal, review, receipt] = facts
-    ?? await executeBatch(db, bookingDetailFacts(row, reader), { operation: 'Read reservation locations, media and display facts' })
+    ?? await executeBatch(db, bookingDetailFacts({
+      query: 'SELECT ? AS organization_id, ? AS booking_id, ? AS conversation_id, ? AS product_kind, ? AS product_id, ? AS location_id, 1 AS can_read_payments',
+      params: [row.organization_id, row.booking_id, row.conversation_id, row.product_kind, row.product_id, row.location_id],
+    }, false, reader.buyerUserId), { operation: 'Read reservation locations, media and display facts' })
   const visibleLocations = places!.results as { id: string; title: string }[]
   const locationPictures = ownerPicturesFromRows(row.organization_id, 'business_location', visibleLocations.map(location => location.id), placeMedia!.results)
   const resourcePhotos = resourcePhotoUrls(row.product_kind, resourceId ? groupMediaPlacements(photos!.results).get(resourceId) ?? [] : [])

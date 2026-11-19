@@ -6,7 +6,7 @@ import { readCalendarSettingsDocument } from '~/server/utils/google-calendar'
 import { defineHandler, HTTPError } from 'nitro'
 import { setHeader } from 'nitro/h3'
 import { readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
-import { dashboardBookingCalendar, dashboardBookingDetails } from '~/server/utils/dashboard-bookings'
+import { dashboardBookingCalendar, readCalendarPlacePresence, readDashboardBookingDocument } from '~/server/utils/dashboard-bookings'
 import { loadDashboardContext } from '~/server/utils/dashboard-context-service'
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 import { readDashboardTodayDocument } from '~/server/utils/dashboard-today'
@@ -22,6 +22,7 @@ export default defineHandler(event => {
           case '/api/dashboard/agenda':
             return readDashboardAgenda(event, query, orgSlug)
           case '/api/dashboard/bookings/calendar':
+            if (query.view === 'scope') return readCalendarPlacePresence(event, orgSlug)
             if (query.unit !== 'nights' && query.unit !== 'slot') throw new HTTPError({ statusCode: 400, message: 'Calendar unit is required' })
             return dashboardBookingCalendar(event, query, orgSlug)
           case '/api/dashboard/stay-homes':
@@ -49,7 +50,7 @@ export default defineHandler(event => {
     today: (orgSlug: string) => readDashboardTodayDocument(event, orgSlug),
     booking: (orgSlug: string, bookingId: string) => oncePerRequest(event, `dashboard-reservation:${orgSlug}:${bookingId}`, async () => {
       setHeader(event, 'cache-control', 'private, no-store')
-      return finalizeRequestMetrics(event, 'dashboard-reservation-ssr', await dashboardBookingDetails(event, { orgSlug, bookingId }))
+      return finalizeRequestMetrics(event, 'dashboard-reservation-ssr', await readDashboardBookingDocument(event, { orgSlug, bookingId }))
     }),
   }
 })

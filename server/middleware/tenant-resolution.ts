@@ -5,7 +5,7 @@ import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/e
 
 import { HTTPError, defineHandler  } from 'nitro';
 import type { H3Event } from 'nitro';
-import { getQuery, redirect, setResponseHeader } from 'nitro/h3';
+import { getCookie, getQuery, redirect, setResponseHeader } from 'nitro/h3';
 import { executeBatch, queryFirst, type DbClient } from "~/server/db";
 import { TENANT_TYPES } from "~/utils/tenant-routing";
 import { cloudflareEnv, isInternalSelfFetch } from "../utils/api-response";
@@ -15,7 +15,7 @@ import {
   isPlatformHost,
   usesTenantHeader,
 } from "../utils/tenant-hosts";
-import { clearPreviewAuthorization, previewSecretOf, PUBLIC_WEBSITE_QUERY, resolvePreviewAuthorization } from "../utils/preview-token";
+import { clearPreviewAuthorization, previewSecretOf, PREVIEW_COOKIE_NAME, PREVIEW_TOKEN_QUERY, PUBLIC_WEBSITE_QUERY, resolvePreviewAuthorization } from "../utils/preview-token";
 import { PLATFORM_SITE, resolvePublicSite } from "~/utils/site-routing";
 import { organizationSocialMediaFromJson } from '~/server/utils/public-social-image'
 import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
@@ -37,8 +37,19 @@ import { calendarConnectionQuery, calendarSettingsFromRows, readCalendarSettings
 import { prepareConnectionSummary } from '~/server/utils/organization-settings'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
+import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
+import { prepareDashboardBookingRead, readDashboardBookingDocument } from '~/server/utils/dashboard-bookings'
+import { publicBaseColumns, seedPublicBase, type PublicBase } from '~/server/utils/public-base'
+import { placesPresenceQuery } from '~/server/domain/places'
+import { prepareDashboardAgendaDocument } from '~/server/utils/dashboard-agenda-reader'
+import { isValidCalendarDate } from '~/utils/timezone'
+import { parseDate } from '@internationalized/date'
+import { prepareDashboardEarningsDocument } from '~/server/utils/dashboard-earnings'
+import { PUBLIC_CONFIG_COLUMNS, type PublicConfigRow } from '~/server/utils/organization-config'
+import { publicTenantRedirectQuery, type PublicTenantRedirect } from '~/server/utils/public-redirects'
+import { preparePublicShellRows, type PublicDocumentShell } from '~/server/utils/public-shell-query'
 
-interface TenantRow {
+interface TenantRow extends Omit<PublicBase['organization'], 'theme_id' | 'name'>, Omit<PublicConfigRow, 'default_currency'> {
   id: string;
   public_cache_revision: string | null;
   theme_id: string | null;
@@ -63,6 +74,10 @@ interface TenantRow {
   button_casing: string | null;
   button_color: string | null;
   heading_casing: string | null;
+  source_locale_rows: string;
+  published_locales: string;
+  has_payment_account: number;
+  redirect_json?: string | null;
 }
 
 const TENANT_MEDIA_SELECT_SQL = `(SELECT COALESCE(json_group_array(json_object(
@@ -76,21 +91,64 @@ const TENANT_MEDIA_SELECT_SQL = `(SELECT COALESCE(json_group_array(json_object(
   ORDER BY mp.slot, mp.sort_order, mp.id
 ) ordered)`
 
-const TENANT_SELECT_SQL = `SELECT o.id,
-             ${PUBLIC_CACHE_REVISION_SQL} AS public_cache_revision, o.theme_id, o.subdomain, o.status, o.onboarding_status,
-             o.name, o.brand_description, ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.vertical, o.timezone,
+const TENANT_SELECT_SQL = `SELECT ${publicBaseColumns('o')},
+             ${PUBLIC_CACHE_REVISION_SQL} AS public_cache_revision, o.subdomain, o.status, o.onboarding_status,
+             ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.timezone,
+             EXISTS (SELECT 1 FROM stripe_connected_accounts account WHERE account.organization_id = o.id
+               AND account.stripe_account_id IS NOT NULL) AS has_payment_account,
+             (SELECT json_group_array(json_object('id', src.id, 'organization_id', src.organization_id,
+               'locale', src.locale, 'label', src.label, 'is_source', src.is_source, 'status', src.status,
+               'created_at', src.created_at, 'updated_at', src.updated_at))
+               FROM (${sourceLocaleQuery({ sql: 'o.id' }).query}) src) AS source_locale_rows,
+             (SELECT json_group_array(locale) FROM (SELECT locale FROM organization_locales
+               WHERE organization_id = o.id AND is_source = 0 AND status = 'published' ORDER BY locale)) AS published_locales,
              (SELECT i.target_id FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'facebook') AS facebook_page_id,
              (SELECT i.target_name FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'instagram') AS instagram_username,
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/privacy' AND ${publicTenantPageSql('d')}) AS privacy_policy,
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/terms' AND ${publicTenantPageSql('d')}) AS terms_policy,
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/acceptable-use' AND ${publicTenantPageSql('d')}) AS acceptable_use_policy,
-             o.settings_json ->> '$.config.font_preset' AS font_preset,
-             json_type(o.settings_json, '$.config.font_preset') AS font_preset_type,
-             o.settings_json ->> '$.config.palette' AS palette,
-             o.settings_json ->> '$.config.button_shape' AS button_shape,
-             o.settings_json ->> '$.config.button_casing' AS button_casing,
-             o.settings_json ->> '$.config.button_color' AS button_color,
-             o.settings_json ->> '$.config.heading_casing' AS heading_casing`
+             ${PUBLIC_CONFIG_COLUMNS}`
+
+function tenantSelectFor(event: H3Event) {
+  const path = normalizedPath(event.url.pathname)
+  if (!['GET', 'HEAD'].includes(event.method) || !/^\/(?:[A-Za-z-]+\/)?(?:menu|reviews)$/.test(path)) {
+    return { query: TENANT_SELECT_SQL, params: [] }
+  }
+  const redirect = publicTenantRedirectQuery({ sql: 'o.id' }, path)
+  return { query: `${TENANT_SELECT_SQL}, (SELECT json_object('toPath', toPath, 'statusCode', statusCode, 'behavior', behavior)
+    FROM (${redirect.query})) AS redirect_json`, params: redirect.params }
+}
+
+async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain: string, selection: string, parameters: string[]) {
+  const read = tenantSelectFor(event)
+  const host = { query: `${read.query}, ${canonicalDomain} AS canonical_domain ${selection} LIMIT 1`, params: [...read.params, ...parameters] }
+  const path = normalizedPath(event.url.pathname)
+  const includeMenu = path === '/menu'
+  const includeReviews = path === '/reviews'
+  if (event.method !== 'GET' || (!includeMenu && !includeReviews)
+    || event.url.searchParams.has(PREVIEW_TOKEN_QUERY) || getCookie(event, PREVIEW_COOKIE_NAME)) {
+    return queryFirst<TenantRow>(db, host.query, host.params)
+  }
+
+  const authorized = { query: `SELECT o.id ${selection}
+    AND o.status = 'active' AND o.onboarding_status = 'active' LIMIT 1`, params: parameters }
+  const organization = { sql: '(SELECT id FROM viewer)' }
+  const locale = { sql: `(SELECT locale FROM organization_locales WHERE organization_id = ${organization.sql} AND is_source = 1)` }
+  const plan = preparePublicShellRows(organization, locale, { includeMenu, includeReviews, previewMenu: false })
+  const [hostRows, ...results] = await executeBatch(db, [host, ...plan.queries.map(query => withViewer(authorized, query))], {
+    operation: includeMenu ? 'Read the public Menu document' : 'Read the public Reviews document',
+  })
+  const tenant = hostRows?.results[0] as TenantRow | undefined
+  if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
+    const source = JSON.parse(tenant.source_locale_rows) as { locale: string }[]
+    if (source.length === 1) {
+      event.context.publicDocumentShell = {
+        organizationId: tenant.id, locale: source[0]!.locale, includeMenu, includeReviews, plan, results,
+      } satisfies PublicDocumentShell
+    }
+  }
+  return tenant ?? null
+}
 
 // Blawby's own tenant is the one active organization running the platform
 // site. Platform hosts differ per environment (localhost, staging, the
@@ -113,9 +171,8 @@ async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {
 }
 
 async function resolveDashboardTenant(event: H3Event, slug: string, panel: string) {
-  const { db, env, membership, organizationFrom, userId } = await dashboardMemberQuery(event, slug)
+  const { db, env, membership, organizationFrom, session, userId } = await dashboardMemberQuery(event, slug)
   const host = platformTenantQuery()
-  const locale = sourceLocaleQuery({ sql: '(SELECT id FROM viewer)' })
   const workspace = prepareDashboardWorkspaceAccess({ sql: BATCH_VIEWER.organization }, userId, true)
   const today = panel === '' ? prepareToday(db, {
     slug, userId, now: new Date(), range: event.url.searchParams.get('range') === 'upcoming' ? 'upcoming' : 'today',
@@ -136,17 +193,43 @@ async function resolveDashboardTenant(event: H3Event, slug: string, panel: strin
       organizationId: { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, catalogRoles)} THEN ${BATCH_VIEWER.organization} END` },
       assignedUserId: { user: BATCH_VIEWER.user, unrestricted: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: [...catalogRead.products] })) },
     }, query) : null
-  const [tenantResult, localeResult, viewerResult, ...rest] = await executeBatch(db, [
-    host, withViewer(host, locale), membership,
+  const bookingId = /^\/bookings\/([^/]+)$/.exec(panel)?.[1]
+  const booking = bookingId && bookingId !== 'new' ? prepareDashboardBookingRead(membership, bookingId) : null
+  const calendar = /^\/calendar(?:\/|$)/.test(panel)
+    ? withViewer(membership, placesPresenceQuery({ query: BATCH_VIEWER.organization, params: [] }, userId)) : null
+  const day = /^\/calendar\/(\d{4}-\d{2}-\d{2})$/.exec(panel)?.[1]
+  // Calendar uses the workspace's local month. Before reading its zone the two
+  // UTC offsets bound the possible months, including across New Year's Day.
+  const now = Date.now()
+  const earlyMonth = new Date(now - 12 * 3_600_000).toISOString().slice(0, 7)
+  const lateMonth = new Date(now + 14 * 3_600_000).toISOString().slice(0, 7)
+  const chosenMonth = day?.slice(0, 7) ?? (typeof query.month === 'string' ? query.month : null)
+  const month = day || panel === '/calendar' ? `${chosenMonth ?? earlyMonth}-01` : null
+  const agenda = month && isValidCalendarDate(month) && (!day || isValidCalendarDate(day)) && !query.product_id && query.view !== 'year'
+    ? prepareDashboardAgendaDocument(db, membership, userId, slug, {
+      from: month, to: parseDate(chosenMonth ? month : `${lateMonth}-01`).add({ months: 1 }).subtract({ days: 1 }).toString(),
+      location_id: query.location_id === '__all__' ? undefined : query.location_id,
+      assigned_member_id: query.assigned_member_id === '__all__' ? undefined : query.assigned_member_id,
+      kinds: query.kinds === '__all__' ? undefined : query.kinds,
+    })
+    : null
+  const earningsMonths = new Set([new Date().toISOString().slice(0, 7)])
+  if (panel === '/earnings/performance' && typeof query.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(query.month)) earningsMonths.add(query.month)
+  const earnings = /^\/earnings(?:\/|$)/.test(panel) ? prepareDashboardEarningsDocument(membership, earningsMonths) : null
+  const [tenantResult, viewerResult, ...rest] = await executeBatch(db, [
+    host, membership,
     ...workspace.queries.map(query => withViewer(membership, query)),
     ...(today?.queries.slice(1) ?? []),
     ...(connections?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(google?.map(query => withViewer(membership, query)) ?? []),
     ...(catalog?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(booking?.queries ?? []),
+    ...(calendar ? [calendar, ...agenda?.queries ?? []] : []),
+    ...(earnings?.queries ?? []),
   ], { operation: 'Read the dashboard document' })
   const tenant = tenantResult!.results[0] as TenantRow | undefined
   if (!tenant) return null
-  await readPublicSourceLocale(event, db, tenant.id, localeResult!.results)
+  await readPublicSourceLocale(event, db, tenant.id, JSON.parse(tenant.source_locale_rows) as unknown[])
   const viewer = viewerResult!.results[0]
   const organization = organizationFrom(viewer)
   await readDashboardMembership(event, slug, async () => viewer)
@@ -158,6 +241,14 @@ async function resolveDashboardTenant(event: H3Event, slug: string, panel: strin
     if (google) await readCalendarSettingsDocument(event, slug, calendarSettingsFromRows(panelRows.slice(connections.queries.length)))
   }
   if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
+  if (booking && bookingId) await readDashboardBookingDocument(event, { orgSlug: slug, bookingId }, [viewerResult!, ...panelRows])
+  if (calendar) {
+    event.context.dashboardCalendarPresence = { slug, has_places: (panelRows[0]!.results[0] as { has_places: number }).has_places === 1 }
+    if (agenda) await agenda.apply(event, panelRows.slice(1), { env, organization })
+  }
+  if (earnings && panelRows[2]?.results.length) earnings.apply(event, panelRows, organization)
+  setResponseHeader(event, 'cache-control', 'private, no-store')
+  await setDashboardSocketScope(event, env, { slug, organizationId: organization.id, sessionId: session.session.id, userId })
   return tenant
 }
 
@@ -215,14 +306,11 @@ function requireTenantMetadata(tenant: Pick<TenantRow, 'theme_id' | 'vertical' |
 }
 
 async function resolveRegisteredSubdomainTenant(
+  event: H3Event,
   db: DbClient,
   tenantSlug: string,
 ): Promise<TenantRow | null> {
-  return await queryFirst<TenantRow>(
-    db,
-    `
-      ${TENANT_SELECT_SQL},
-             canonical.domain AS canonical_domain
+  return readTenantFromHost(event, db, 'canonical.domain', `
       FROM organization o
       JOIN organization_domains requested
         ON requested.organization_id = o.id
@@ -233,10 +321,7 @@ async function resolveRegisteredSubdomainTenant(
        AND canonical.role = 'canonical'
        AND canonical.status = 'active'
       WHERE o.subdomain = ?
-      LIMIT 1
-    `,
-    [tenantSlug],
-  )
+    `, [tenantSlug])
 }
 
 /**
@@ -298,6 +383,7 @@ function setResolvedTenantContext(
     vertical: metadata.vertical,
     // The business's own clock: a visit is counted on its local day.
     timezone: tenant.timezone,
+    has_payment_account: tenant.has_payment_account === 1,
     site: resolvedSite,
     fontPreset,
     palette,
@@ -365,7 +451,7 @@ export default defineHandler(async (event) => {
     && await getDashboardSession(event, env)
   const tenant = requestedSlug !== null
     ? env.db && /^[a-z0-9-]+$/.test(requestedSlug)
-      ? await resolveRegisteredSubdomainTenant(env.db, requestedSlug)
+      ? await resolveRegisteredSubdomainTenant(event, env.db, requestedSlug)
       : null
     : isPlatformRequest
       ? workspaceDocument && workspaceSlug ? await resolveDashboardTenant(event, workspaceSlug, tenantPath.slice(`/dashboard/${workspaceSlug}`.length))
@@ -390,6 +476,16 @@ export default defineHandler(async (event) => {
     try {
       await publicCacheRevision(event, env.db!, tenant.id, tenant.public_cache_revision)
       setResolvedTenantContext(event, tenant, host, requestedSlug !== null ? hostnameOf(host) : tenant.canonical_domain)
+      const { id, default_currency, contact_email, contact_phone, vertical, brand_description, seo_title,
+        seo_description, canonical_url, search_console_verification, has_compliance, name } = tenant
+      await seedPublicBase(event, {
+        id, default_currency, contact_email, contact_phone, vertical, brand_description, seo_title, seo_description, canonical_url,
+        search_console_verification, has_compliance, theme_id: tenant.theme_id!, name,
+      }, event.context.previewAuthorized === true)
+      event.context.tenantSourceLocaleRows = { organizationId: tenant.id, rows: JSON.parse(tenant.source_locale_rows) as unknown[],
+        published: JSON.parse(tenant.published_locales) as string[] }
+      event.context.tenantConfigRow = tenant
+      if (tenant.redirect_json !== undefined) event.context.tenantRedirect = tenant.redirect_json ? JSON.parse(tenant.redirect_json) as PublicTenantRedirect : null
     } catch (error) {
       if (HTTPError.isError(error)) throw error
       throw new HTTPError({
@@ -410,7 +506,7 @@ export default defineHandler(async (event) => {
 
 export async function resolveTenant(
   host: string,
-  event: Parameters<typeof cloudflareEnv>[0],
+  event: H3Event,
 ): Promise<TenantRow | SpentSubdomainResolution | null> {
   const runtimeEnv = cloudflareEnv(event);
   const db = runtimeEnv.db;
@@ -421,33 +517,20 @@ export async function resolveTenant(
   // Local development support (e.g., demo.localhost)
   if (hostname.includes(".localhost")) {
     const subdomain = hostname.split(".")[0];
-    return await queryFirst<TenantRow>(
-      db,
-      `
-      ${TENANT_SELECT_SQL},
-             o.subdomain || '.localhost' AS canonical_domain
+    if (!subdomain) return null
+    return await readTenantFromHost(event, db, "o.subdomain || '.localhost'", `
       FROM organization o
       WHERE o.subdomain = ?
-      LIMIT 1
-    `,
-      [subdomain],
-    );
+    `, [subdomain]);
   }
 
-  const tenant = await queryFirst<TenantRow>(
-    db,
-    `
-    ${TENANT_SELECT_SQL},
-           COALESCE(canonical.domain, sd.domain) AS canonical_domain
+  const tenant = await readTenantFromHost(event, db, 'COALESCE(canonical.domain, sd.domain)', `
     FROM organization o
     JOIN organization_domains sd ON o.id = sd.organization_id
     LEFT JOIN organization_domains canonical
       ON canonical.organization_id = o.id AND canonical.role = 'canonical' AND canonical.status = 'active'
     WHERE sd.domain = ? AND sd.type IN ('custom', 'subdomain') AND sd.status = 'active'
-    LIMIT 1
-  `,
-    [hostname],
-  )
+  `, [hostname])
   if (tenant) return tenant
 
   const spent = await queryFirst<{ successor_domain: string | null }>(

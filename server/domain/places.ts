@@ -89,7 +89,17 @@ const KIND_LABELS = { experience: 'Experience', service: 'Consultation' } as con
  */
 export function placesCalendarQueries(organization: BatchQuery, userId: string, window: { from: string; to: string }, only?: { kind: PlaceKind; id: string }): BatchQuery[] {
   const org = organization
-  const assigned = (product: string, location = false) => `EXISTS (SELECT 1 FROM member m
+
+  const products: BatchQuery = {
+    query: `SELECT p.id FROM products p JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+      WHERE p.organization_id = ${org.query} AND ${assignedPlaceSql('p')} AND ${only?.kind === 'location' ? "p.kind = 'table' AND p.id IN (SELECT product_id FROM product_locations WHERE location_id = ?)"
+        : only ? "p.kind IN ('experience', 'service') AND p.id = ?" : "p.kind IN ('experience', 'service', 'table')"}`,
+    params: [...org.params!, userId, ...(only ? [only.id] : [])],
+  }
+  return [...placesIdentityQueries(org, userId, only), ...slotReadQueries({ organization: org, products, ...instants(window), scope: 'editor', now: new Date().toISOString() })]
+}
+
+const assignedPlaceSql = (product: string, location = false) => `EXISTS (SELECT 1 FROM member m
     WHERE m.organizationId = ${product}.organization_id AND m.userId = ? AND (
       ${roleMatchesSql('m.role', workspaceOperationsRoles)}
       OR ${location ? `EXISTS (SELECT 1 FROM product_locations pl JOIN product_booking_configs cfg ON cfg.organization_id = pl.organization_id AND cfg.product_id = pl.product_id
@@ -99,15 +109,11 @@ export function placesCalendarQueries(organization: BatchQuery, userId: string, 
             OR (p.kind = 'table' AND ${listingGrantSql('pl.organization_id', 'pl.product_id', 'm.id', 'calendar', 'm.role')})))`
       : `(${roleMatchesSql('m.role', assignedOperationsRoles)} AND c.assigned_member_id = m.id)
         OR ${listingGrantSql(`${product}.organization_id`, `${product}.id`, 'm.id', 'calendar', 'm.role')}`}))`
-  const products: BatchQuery = {
-    query: `SELECT p.id FROM products p JOIN product_booking_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
-      WHERE p.organization_id = ${org.query} AND ${assigned('p')} AND ${only?.kind === 'location' ? "p.kind = 'table' AND p.id IN (SELECT product_id FROM product_locations WHERE location_id = ?)"
-        : only ? "p.kind IN ('experience', 'service') AND p.id = ?" : "p.kind IN ('experience', 'service', 'table')"}`,
-    params: [...org.params!, userId, ...(only ? [only.id] : [])],
-  }
+
+function placesIdentityQueries(org: BatchQuery, userId: string, only?: { kind: PlaceKind; id: string }): BatchQuery[] {
   return [{
     query: only && only.kind !== 'location' ? 'SELECT NULL WHERE 0' : `
-    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.opening_hours, l.special_hours, l.updated_at, ${assigned('l', true)} AS assigned
+    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.opening_hours, l.special_hours, l.updated_at, ${assignedPlaceSql('l', true)} AS assigned
     FROM business_locations l
     WHERE l.organization_id = ${org.query} AND (? IS NULL OR l.id = ?)
       ${only ? '' : `AND EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
@@ -117,7 +123,7 @@ export function placesCalendarQueries(organization: BatchQuery, userId: string, 
     params: only && only.kind !== 'location' ? [] : [userId, ...org.params!, only?.id ?? null, only?.id ?? null],
   }, {
     query: only && only.kind !== 'offering' ? 'SELECT NULL WHERE 0' : `
-    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id, ${assigned('p')} AS assigned,
+    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id, ${assignedPlaceSql('p')} AS assigned,
            COALESCE((SELECT l.timezone FROM product_locations pl JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = pl.organization_id WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id ORDER BY l.title LIMIT 1),
              (SELECT ms.timezone FROM member_scheduling ms WHERE ms.member_id = c.assigned_member_id AND ms.organization_id = c.organization_id), o.timezone) AS timezone,
            (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id) AS provider_name,
@@ -126,8 +132,15 @@ export function placesCalendarQueries(organization: BatchQuery, userId: string, 
     WHERE p.organization_id = ${org.query} AND p.kind IN ('experience', 'service') AND (? IS NULL OR p.id = ?)
     ORDER BY p.name, p.id`,
     params: only && only.kind !== 'offering' ? [] : [userId, ...org.params!, only?.id ?? null, only?.id ?? null],
-  }, ...slotReadQueries({ organization: org, products, ...instants(window), scope: 'editor', now: new Date().toISOString() })]
+  }]
 }
+
+export function placesPresenceQuery(organization: BatchQuery, userId: string): BatchQuery {
+  const places = placesIdentityQueries(organization, userId)
+  const visible = places.map(place => `EXISTS (SELECT 1 FROM (${place.query}) WHERE assigned = 1)`).join(' OR ')
+  return { query: `SELECT (${visible}) AS has_places`, params: places.flatMap(place => place.params ?? []) }
+}
+
 
 function placeOf(row: LocationRow | OfferingRow): Place {
   if ('title' in row) {

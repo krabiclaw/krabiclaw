@@ -122,9 +122,19 @@ export async function getPersistedSourceLocale(db: DbClient, organizationId: str
   return sourceLocaleFromRows(organizationId, await queryAll(db, query, params))
 }
 
+function publicTenantLocales(event: H3Event, organizationId: string) {
+  const preloaded = event.context.tenantSourceLocaleRows as { organizationId: string; rows: unknown[]; published: string[] } | undefined
+  return preloaded?.organizationId === organizationId ? preloaded : undefined
+}
+
+export function publicTenantLocaleNames(event: H3Event, organizationId: string) {
+  return publicTenantLocales(event, organizationId)?.published
+}
+
 export function readPublicSourceLocale(event: H3Event, db: DbClient, organizationId: string, results?: unknown[]): Promise<OrganizationLocaleRecord> {
+  const rows = results ?? publicTenantLocales(event, organizationId)?.rows
   return oncePerRequest(event, `public-source-locale:${organizationId}`, async () =>
-    results ? sourceLocaleFromRows(organizationId, results) : getPersistedSourceLocale(db, organizationId))
+    rows ? sourceLocaleFromRows(organizationId, rows) : getPersistedSourceLocale(db, organizationId))
 }
 
 export function requireSourceLocale(organizationId: string, locale: string | null, status: string | null): string {

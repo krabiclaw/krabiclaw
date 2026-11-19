@@ -107,7 +107,9 @@ const poweredByUrl = themeSlug && themeSlug !== 'platform'
 // A business site's accepted payments, read after hydration so no page render waits on Stripe.
 type AcceptedPayments = { types: string[]; country: string | null }
 const isAccepted = (value: unknown): value is AcceptedPayments => isRecord(value) && Array.isArray(value.types) && value.types.every(type => typeof type === 'string') && (value.country === null || typeof value.country === 'string')
-const { data: accepted } = useAsyncData('accepted-payments', () => publicApiRequest<AcceptedPayments>('/api/public/payment-methods', { validate: isAccepted }), { server: false, lazy: true, immediate: Boolean(poweredByUrl) })
+const { data: accepted } = useAsyncData('accepted-payments', () => publicApiRequest<AcceptedPayments>('/api/public/payment-methods', { validate: isAccepted }), {
+  server: false, lazy: true, immediate: Boolean(poweredByUrl && organization.has_payment_account !== false),
+})
 // Stripe takes Visa, Mastercard and American Express everywhere it operates, and Discover in the US, Canada and Japan.
 const DISCOVER_COUNTRIES = new Set(['US', 'CA', 'JP'])
 const paymentBadges = computed(() => {

@@ -53,11 +53,14 @@ export interface DashboardLocation {
 }
 
 
+export type DashboardWorkspaceLink = Pick<DashboardOrganization, 'id' | 'name' | 'slug'>
+
 interface DashboardContextResponse {
   success: boolean
   organization: DashboardOrganization
   locations: DashboardLocation[]
   has_unread: boolean
+  workspaces: DashboardWorkspaceLink[]
 }
 
 const isSocialImage = (value: unknown): value is { url: string } | null =>
@@ -113,6 +116,9 @@ const isDashboardContextResponse = (value: unknown): value is DashboardContextRe
   && value.success === true
   && isDashboardOrganization(value.organization)
   && typeof value.has_unread === 'boolean'
+  && Array.isArray(value.workspaces)
+  && value.workspaces.every(workspace => isRecord(workspace)
+    && typeof workspace.id === 'string' && typeof workspace.name === 'string' && typeof workspace.slug === 'string')
   && Array.isArray(value.locations)
   && value.locations.every(isDashboardLocation)
 

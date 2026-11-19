@@ -6,22 +6,24 @@ import { createAuth } from '~/server/utils/auth'
 import { requireFinancialBrowserOrAppRequest } from '~/server/utils/financial-browser'
 import { membershipBySlugQuery } from '~/server/utils/member-access'
 import { queryFirst } from '~/server/db'
+import { readDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
-  const session = await createAuth(env).api.getSession({ headers: event.req.headers, query: { disableCookieCache: true, disableRefresh: true } })
+  const { org, scope } = getQuery(event)
+  const personal = scope === 'account' && org === undefined
+  const slug = scope === undefined && typeof org === 'string' && /^[a-z0-9-]+$/.test(org) ? org : null
+  const startup = slug ? await readDashboardSocketScope(event, env, slug) : null
+  const session = startup?.session ?? await createAuth(env).api.getSession({ headers: event.req.headers, query: { disableCookieCache: true, disableRefresh: true } })
   if (!session) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
   requireFinancialBrowserOrAppRequest(event)
   if (event.req.headers.get('upgrade')?.toLowerCase() !== 'websocket') throw new HTTPError({ statusCode: 426, message: 'Expected WebSocket upgrade' })
   const namespace = env.GUEST_INBOX_HUBS
   if (!namespace) throw new HTTPError({ statusCode: 503, message: 'Dashboard realtime binding is not configured', data: { code: 'REALTIME_CONFIGURATION_REQUIRED', field: 'GUEST_INBOX_HUBS' } })
-
-  const { org, scope } = getQuery(event)
-  const personal = scope === 'account' && org === undefined
-  let organizationId: string | null = null
-  if (!personal) {
-    if (scope !== undefined || typeof org !== 'string' || !org) throw new HTTPError({ statusCode: 400, message: 'A workspace or account scope is required' })
-    const { query, params } = membershipBySlugQuery(org, session.user.id)
+  if (!personal && !slug) throw new HTTPError({ statusCode: 400, message: 'A workspace or account scope is required' })
+  let organizationId = startup?.organizationId ?? null
+  if (slug && !organizationId) {
+    const { query, params } = membershipBySlugQuery(slug, session.user.id)
     const membership = await queryFirst<{ organization_id: string }>(env.DB, query, params)
     if (!membership) {
       throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })

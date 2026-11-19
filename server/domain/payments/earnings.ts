@@ -6,6 +6,7 @@ import { loadOwnerPictures, ownerPicturesFromRows } from '~/server/notifications
 import { mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { roleAllows } from '~/server/utils/member-access'
 import { authorizePayments, type FinancialPrincipal, type Payment, type VisiblePayment } from './index'
 import { channelReservationAmountQuery, channelReservationAmounts } from '~/server/domain/stays'
 
@@ -68,57 +69,75 @@ async function paymentPictures(db: DbClient, organizationId: string, payments: r
 /** Airbnb's Performance: the year by month, and one month by what was sold. */
 export async function paymentPerformance(db: DbClient, principal: FinancialPrincipal, year: number, month: string): Promise<EarningsPerformance> {
   await authorizePayments(principal, 'read')
+  const plan = preparePaymentPerformance(principal.organizationId, year, month, await roleAllows({
+    ...principal, permissions: { payments: ['payouts'] },
+  }))
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read the earnings period' }), principal.organizationId)
+}
+
+export function preparePaymentPerformance(
+  organization: string | { sql: string }, year: number, month: string, payoutAccess: boolean | { sql: string },
+) {
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid year is required', data: { code: 'INVALID_EARNINGS_PERIOD', field: 'year' } })
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !month.startsWith(`${year}-`)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month within the requested year is required', data: { code: 'INVALID_EARNINGS_PERIOD', field: 'month' } })
-  const organizationId = principal.organizationId
+  const org = typeof organization === 'string' ? '?' : organization.sql
+  const orgParams = typeof organization === 'string' ? [organization] : []
+  const payoutGuard = typeof payoutAccess === 'boolean' ? payoutAccess ? '1' : '0' : payoutAccess.sql
   const [monthYear, monthNumber] = month.split('-').map(Number)
   const monthStart = `${month}-01`
   const next = new Date(Date.UTC(monthYear!, monthNumber!, 1)).toISOString()
   const monthEnd = next.slice(0, 10)
   const period = `FROM payments p ${paymentBookingJoin}
-    WHERE p.organization_id = ? AND p.created_at >= ? AND p.created_at < ? AND p.captured_amount > 0`
-  const periodParams = [organizationId, `${monthStart}T00:00:00.000Z`, next]
+    WHERE p.organization_id = ${org} AND p.created_at >= ? AND p.created_at < ? AND p.captured_amount > 0`
+  const periodParams = [...orgParams, `${monthStart}T00:00:00.000Z`, next]
   const imagesFor = (ownerType: 'product' | 'business_location', selection: string) =>
-    mediaPlacementsQuery({ organizationId, ownerType, includeOrganizationFallback: true, owners: { sql: selection, params: periodParams } })
-  const [yearResult, monthResult, organization, channel, productMedia, locationMedia] = await executeBatch(db, [
+    mediaPlacementsQuery({ organizationId: organization, ownerType, includeOrganizationFallback: true, owners: { sql: selection, params: periodParams } })
+  const queries = [
     { query: `SELECT strftime('%Y-%m', created_at) AS month, currency, SUM(captured_amount) AS paid, SUM(refunded_amount) AS refunded
-        FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`,
-      params: [organizationId, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`] },
+        FROM payments WHERE organization_id = ${org} AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`,
+      params: [...orgParams, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`] },
     { query: `SELECT p.id, p.location_id, p.price_snapshot_json, p.captured_amount, p.refunded_amount,
         b.id AS booking_id, b.product_id ${period}`, params: periodParams },
-    { query: 'SELECT default_currency FROM organization WHERE id = ?', params: [organizationId] },
-    channelReservationAmountQuery(organizationId, monthStart, monthEnd),
+    { query: `SELECT o.default_currency, CASE WHEN ${payoutGuard} THEN EXISTS (
+      SELECT 1 FROM stripe_connected_accounts s WHERE s.organization_id = o.id AND s.stripe_account_id IS NOT NULL
+    ) END AS payouts_connected FROM organization o WHERE o.id = ${org}`, params: orgParams },
+    channelReservationAmountQuery(organization, monthStart, monthEnd),
     imagesFor('product', `SELECT b.product_id ${period} AND b.product_id IS NOT NULL`),
     imagesFor('business_location', `SELECT p.location_id ${period} AND b.id IS NULL AND json_type(p.price_snapshot_json, '$.stay') IS NOT NULL`),
-  ], { operation: 'Read the earnings period' })
-  const rows = yearResult!.results as Array<{ month: string; currency: string; paid: number; refunded: number }>
-  const currencies = [...new Set(rows.map(row => row.currency))]
-  if (currencies.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Earnings in more than one currency cannot be charted together', data: { code: 'MULTIPLE_EARNINGS_CURRENCIES', field: 'currency' } })
-  const months = Array.from({ length: 12 }, (_, index) => {
-    const key = `${year}-${String(index + 1).padStart(2, '0')}`
-    const row = rows.find(entry => entry.month === key)
-    return { month: key, paid: row?.paid ?? 0, refunded: row?.refunded ?? 0 }
-  })
-  const payments = monthResult!.results as Array<Pick<Payment, 'id' | 'location_id' | 'price_snapshot_json' | 'captured_amount' | 'refunded_amount'>
-    & { booking_id: string | null; product_id: string | null }>
-  const productIds = payments.flatMap(payment => payment.product_id ? [payment.product_id] : [])
-  const locationIds = payments.flatMap(payment => payment.location_id ? [payment.location_id] : [])
-  const products = ownerPicturesFromRows(organizationId, 'product', productIds, productMedia!.results)
-  const locations = ownerPicturesFromRows(organizationId, 'business_location', locationIds, locationMedia!.results)
-  const byTitle = new Map<string, { title: string; image_url: string | null; paid: number; count: number }>()
-  for (const payment of payments) {
-    const snapshot = paymentSnapshot(payment)
-    const picture = payment.product_id ? products.get(payment.product_id)
-      : !payment.booking_id && 'stay' in snapshot && payment.location_id ? locations.get(payment.location_id) : null
-    const entry = byTitle.get(snapshot.title) ?? { title: snapshot.title, image_url: picture?.imageUrl ?? null, paid: 0, count: 0 }
-    entry.paid += payment.captured_amount - payment.refunded_amount
-    entry.count += 1
-    byTitle.set(snapshot.title, entry)
+  ]
+  return { queries, read }
+
+  function read([yearResult, monthResult, organizationResult, channel, productMedia, locationMedia]: D1Result[], organizationId: string): EarningsPerformance {
+    const rows = yearResult!.results as Array<{ month: string; currency: string; paid: number; refunded: number }>
+    const currencies = [...new Set(rows.map(row => row.currency))]
+    if (currencies.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Earnings in more than one currency cannot be charted together', data: { code: 'MULTIPLE_EARNINGS_CURRENCIES', field: 'currency' } })
+    const months = Array.from({ length: 12 }, (_, index) => {
+      const key = `${year}-${String(index + 1).padStart(2, '0')}`
+      const row = rows.find(entry => entry.month === key)
+      return { month: key, paid: row?.paid ?? 0, refunded: row?.refunded ?? 0 }
+    })
+    const payments = monthResult!.results as Array<Pick<Payment, 'id' | 'location_id' | 'price_snapshot_json' | 'captured_amount' | 'refunded_amount'>
+      & { booking_id: string | null; product_id: string | null }>
+    const productIds = payments.flatMap(payment => payment.product_id ? [payment.product_id] : [])
+    const locationIds = payments.flatMap(payment => payment.location_id ? [payment.location_id] : [])
+    const products = ownerPicturesFromRows(organizationId, 'product', productIds, productMedia!.results)
+    const locations = ownerPicturesFromRows(organizationId, 'business_location', locationIds, locationMedia!.results)
+    const byTitle = new Map<string, { title: string; image_url: string | null; paid: number; count: number }>()
+    for (const payment of payments) {
+      const snapshot = paymentSnapshot(payment)
+      const picture = payment.product_id ? products.get(payment.product_id)
+        : !payment.booking_id && 'stay' in snapshot && payment.location_id ? locations.get(payment.location_id) : null
+      const entry = byTitle.get(snapshot.title) ?? { title: snapshot.title, image_url: picture?.imageUrl ?? null, paid: 0, count: 0 }
+      entry.paid += payment.captured_amount - payment.refunded_amount
+      entry.count += 1
+      byTitle.set(snapshot.title, entry)
+    }
+    const account = organizationResult!.results[0] as { default_currency: string; payouts_connected: number | null } | undefined
+    const currency = currencies[0] ?? account?.default_currency
+    if (!currency) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+    const channel_reservations = channelReservationAmounts(channel!, monthStart, monthEnd)
+    return { currency, payouts_connected: account?.payouts_connected == null ? null : account.payouts_connected === 1, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid), channel_reservations }
   }
-  const currency = currencies[0] ?? (organization!.results[0] as { default_currency: string } | undefined)?.default_currency
-  if (!currency) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  const channel_reservations = channelReservationAmounts(channel!, monthStart, monthEnd)
-  return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid), channel_reservations }
 }
 
 export async function paymentPayouts(db: DbClient, env: CloudflareEnv, principal: FinancialPrincipal, after?: string, withItems = false) {

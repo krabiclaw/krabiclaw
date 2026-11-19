@@ -3684,13 +3684,13 @@ export async function readCheckoutStay(db: DbClient, organizationId: string, sta
 }
 
 /** Channel reservation values by arrival date. A reservation amount is never a bank-transfer record. */
-export function channelReservationAmountQuery(organizationId: string, from: string, until: string): BatchQuery {
+export function channelReservationAmountQuery(organizationId: string | { sql: string }, from: string, until: string): BatchQuery {
   // The arrival day is read in each home's clock; SQL narrows by instants a day wider either side.
   return {
     query: `SELECT b.channel, b.currency, b.total_minor, b.starts_at, b.timezone
        FROM bookings b
-      WHERE b.organization_id = ? AND b.owner = 'channel' AND b.status = 'confirmed' AND b.product_session_id IS NULL AND b.starts_at >= ? AND b.starts_at < ?`,
-    params: [organizationId, addDays(from, -1), `${addDays(until, 1)}T14:00:00.000Z`],
+      WHERE b.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND b.owner = 'channel' AND b.status = 'confirmed' AND b.product_session_id IS NULL AND b.starts_at >= ? AND b.starts_at < ?`,
+    params: [...(typeof organizationId === 'string' ? [organizationId] : []), addDays(from, -1), `${addDays(until, 1)}T14:00:00.000Z`],
   }
 }
 

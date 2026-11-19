@@ -22,6 +22,7 @@ export function earningsFigure(summary:EarningsSummary):string {
 /** What `view=performance` answers: the year by month and one month by what was sold. */
 export interface EarningsPerformance {
  currency:string
+ payouts_connected?:boolean|null
  channel_reservations:Array<{channel:string;currency:string;amount:number;count:number}>
  months:Array<{month:string;paid:number;refunded:number}>
  items:Array<{title:string;image_url:string|null;paid:number;count:number}>
@@ -29,6 +30,7 @@ export interface EarningsPerformance {
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value)
 export function isEarningsPerformance(value:unknown):value is EarningsPerformance {
  return record(value)&&isCurrencyCode(value.currency)
+  &&(value.payouts_connected==null||typeof value.payouts_connected==='boolean')
   &&Array.isArray(value.channel_reservations)&&value.channel_reservations.every(row=>record(row)&&['airbnb','booking_com','vrbo'].includes(String(row.channel))&&isCurrencyCode(row.currency)&&Number.isSafeInteger(row.amount)&&Number(row.amount)>=0&&Number.isSafeInteger(row.count)&&Number(row.count)>0)
   &&Array.isArray(value.months)&&value.months.length===12&&value.months.every(row=>record(row)&&typeof row.month==='string'&&/^\d{4}-\d{2}$/.test(row.month)&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.refunded))
   &&Array.isArray(value.items)&&value.items.every(row=>record(row)&&typeof row.title==='string'&&(row.image_url===null||typeof row.image_url==='string')&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.count))

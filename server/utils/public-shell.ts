@@ -9,10 +9,9 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { queryAll } from '~/server/db'
 import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
-import { buildPublicShellPayload, readPublicExperiences, readPublicShellRows } from '~/server/utils/public-shell-query'
+import { buildPublicShellPayload, readPublicShellRows } from '~/server/utils/public-shell-query'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 import { getOptionalPublicConsultationSettings, getPublicCompliance } from '~/server/utils/professional-services'
-import { readPublishedTenantPagePaths } from '~/server/utils/content/pages'
 import { platformLocale } from '~/shared/platform-locales'
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
@@ -94,20 +93,16 @@ export async function loadPublicShellSource(
   // site alone; they were three sequential round trips on every cold shell.
   const [
     language,
-    { results: shellResults, indexes: shellIndexes },
-    experiences,
+    { results: shellResults, indexes: shellIndexes, experiences },
     sourceConsultation,
     sourceCompliance,
-    publishedPages,
     localizedRows,
   ] = await Promise.all([
     resolvedLanguage,
-    readPublicShellRows(event, db, organization.id, previewAuthorized && organization.vertical === 'restaurant'),
-    readPublicExperiences(event, db, organization.id, env),
+    resolvedLanguage.then(language => readPublicShellRows(event, db, organization, language.locale, previewAuthorized && organization.vertical === 'restaurant')),
     // Only a legal practice books consultations; a venue's site has no schedule page.
     isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) ? getOptionalPublicConsultationSettings(db, organization.id) : null,
-    getPublicCompliance(db, organization.id),
-    resolvedLanguage.then(language => readPublishedTenantPagePaths(db, organization.id, language.locale)),
+    organization.has_compliance === 0 ? null : getPublicCompliance(db, organization.id),
     locale && locale !== sourceLocale ? queryAll<StoredPublicLocalizationRow>(db, `
       SELECT resource_type, resource_id, locale, values_json, route_path
        FROM ${RESOURCE_LOCALIZATIONS_SQL}
@@ -125,6 +120,7 @@ export async function loadPublicShellSource(
     can_schedule = Boolean(sourceConsultation.external_url)
   }
 
+  const publishedPages = shellResults[shellIndexes.pageLinks!]!.results as { id: string; path: string; title: string }[]
   const page_links = publishedPages
     .filter(page => page.path !== '/blog' && (page.path !== '/schedule' || can_schedule))
     .map(page => ({ id: page.id, path: page.path, title: page.title }))

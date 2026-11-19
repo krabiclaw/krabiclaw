@@ -11,6 +11,7 @@ import { organizationFeaturesFromRow, organizationFeaturesQuery } from '~/server
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { hasUnreadQuery, presentHasUnread } from '~/server/domain/guest-threads/repository'
+import type { DashboardWorkspaceLink } from '~/composables/useDashboardOrganization'
 
 export function readDashboardWorkspaceAccess(
   event: H3Event,
@@ -32,14 +33,20 @@ export function prepareDashboardWorkspaceAccess(organizationId: string | { sql: 
     queries: [
       plan.query,
       organizationFeaturesQuery(organizationId),
-      ...(locations ? [hasUnreadQuery(organizationId, { userId }, new Date()), ...locations.queries] : []),
+      ...(locations ? [
+        hasUnreadQuery(organizationId, { userId }, new Date()),
+        { query: `SELECT o.id, o.name, o.slug FROM member m JOIN organization o ON o.id = m.organizationId
+          WHERE m.userId = ? ORDER BY o.name, o.id`, params: [userId] },
+        ...locations.queries,
+      ] : []),
     ],
-    read([subscription, featureRows, unread, ...locationRows]: D1Result[], resolvedId: string) {
+    read([subscription, featureRows, unread, workspaces, ...locationRows]: D1Result[], resolvedId: string) {
       return {
         effective_plan: plan.read(subscription!, resolvedId),
         features: organizationFeaturesFromRow(featureRows!.results[0] as Parameters<typeof organizationFeaturesFromRow>[0]),
         locationData: locations?.read(locationRows, resolvedId),
         has_unread: locations ? presentHasUnread(unread) : undefined,
+        workspaces: workspaces?.results as DashboardWorkspaceLink[] | undefined,
       }
     },
   }
@@ -71,7 +78,7 @@ export async function loadDashboardContext(
 
 export function presentDashboardContext(
   organization: DashboardOrganizationRow,
-  { effective_plan, features, locationData, has_unread }: Awaited<ReturnType<typeof readDashboardWorkspaceAccess>>,
+  { effective_plan, features, locationData, has_unread, workspaces }: Awaited<ReturnType<typeof readDashboardWorkspaceAccess>>,
 ) {
   const { locations, media } = locationData!
   const { memberId, ...business } = organization
@@ -80,5 +87,6 @@ export function presentDashboardContext(
     organization: { ...business, effective_plan, media, features, member_id: memberId },
     locations,
     has_unread,
+    workspaces,
   }
 }

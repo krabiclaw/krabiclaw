@@ -130,7 +130,8 @@
 import DashboardTopNav from '~/lib/components/workspace/dashboard/DashboardTopNav.vue'
 import DashboardMenuSlideover from '~/lib/components/workspace/dashboard/DashboardMenuSlideover.vue'
 import type { DashboardScopeHeaderModel } from '~/lib/components/workspace/dashboard/DashboardScopeHeader.vue'
-import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboard/dashboardScopeHeaderContext'
+import { dashboardScopeHeaderModelKey, dashboardWorkspaceLinksKey } from '~/lib/components/workspace/dashboard/dashboardScopeHeaderContext'
+import type { DashboardWorkspaceLink } from '~/composables/useDashboardOrganization'
 import { dashboardSearchOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { authClient } from '~/lib/auth-client'
 import { reconcileAnalyticsConsent } from '~/composables/useAnalyticsConsentReconciliation'
@@ -159,12 +160,6 @@ import { mediaStillUrl } from '~/shared/media-placement-contract'
 //   locationVocabulary, for the children label.
 // ─────────────────────────────────────────────────────────────────────────
 
-interface AuthOrganization {
-  id: string
-  name: string
-  slug: string
-}
-
 const route = useRoute()
 const router = useRouter()
 const session = authClient.useSession()
@@ -192,17 +187,32 @@ onMounted(() => {
 // before the route arrives here, so a scope change keeps the previous screen
 // until the new one can render, and this layout never waits on it.
 const dashboard = useDashboardOrganization()
-const organizationsState = authClient.useListOrganizations()
-// The shell's scope is Better Auth's session and organizations: until both have
-// answered once, no tabs are drawn rather than Personal's for a moment.
-const shellScopeKnown = computed(() => !session.value.isPending && !unref(organizationsState).isPending)
+const userId = computed(() => sessionData.value?.user.id)
+const accountScope = computed(() => dashboard.scope.value === null)
+const accountWorkspaces = useAsyncData('dashboard:account-workspaces', async (_app, { signal }) => {
+  const reader = userId.value
+  if (!reader || !accountScope.value) return null
+  const result = await authClient.organization.list({ fetchOptions: { signal } })
+  if (result.error) throw createError({ statusCode: result.error.status, statusMessage: result.error.message ?? 'Workspaces could not be loaded' })
+  return { user_id: reader, workspaces: result.data }
+}, { immediate: false, server: false })
+if (import.meta.client) {
+  watch([accountScope, userId], ([account, reader]) => {
+    accountWorkspaces.clear()
+    if (account && reader) void accountWorkspaces.execute()
+  }, { immediate: true })
+}
+const accountLinks = computed(() => accountWorkspaces.data.value?.user_id === userId.value ? accountWorkspaces.data.value?.workspaces : undefined)
+const organizations = computed<readonly DashboardWorkspaceLink[]>(() => dashboard.state.value?.workspaces ?? accountLinks.value ?? [])
+provide(dashboardWorkspaceLinksKey, organizations)
+const shellScopeKnown = computed(() => !session.value.isPending && (!accountScope.value || !userId.value || Boolean(accountLinks.value)))
 // What the shell could not load replaces it only when there is nothing to show.
 // Better Auth keeps the session and organizations it already had when a
 // background refetch fails, so that failure is reported over the shell instead.
 const shellError = computed(() =>
   dashboard.error.value
   ?? (session.value.data ? null : session.value.error)
-  ?? (unref(organizationsState).data ? null : unref(organizationsState).error)
+  ?? (accountScope.value && !accountLinks.value ? accountWorkspaces.error.value : null)
   ?? null)
 defineShortcuts({
   meta_k: {
@@ -216,7 +226,7 @@ defineShortcuts({
 })
 const shellRefetchError = computed(() => {
   if (shellError.value) return null
-  const error = session.value.error ?? unref(organizationsState).error
+  const error = session.value.error ?? (accountScope.value ? accountWorkspaces.error.value : null)
   return error ? getErrorMessage(error, 'Your account could not be refreshed') : null
 })
 const platformTheme = usePlatformTheme()
@@ -252,12 +262,11 @@ const dashboardContextRequestId = computed(() =>
 )
 
 async function retryDashboardContext() {
-  await Promise.all([dashboard.refresh(), session.value.refetch(), unref(organizationsState).refetch()])
+  await Promise.all([dashboard.refresh(), session.value.refetch(), accountScope.value ? accountWorkspaces.refresh() : undefined])
 }
 
 const organization = dashboard.organization
 
-const organizations = computed<readonly AuthOrganization[]>(() => unref(organizationsState)?.data ?? [])
 // The shell's scope — the switcher, the tabs, Menu — is read in one place
 // (useDashboardMenu): the organization the route names, otherwise Better Auth's
 // active organization. Personal is neither. Account settings opened from inside
@@ -265,7 +274,7 @@ const organizations = computed<readonly AuthOrganization[]>(() => unref(organiza
 //
 // Setting the active organization belongs to `/api/post-login` and to explicit
 // selection in the scope switcher, never to a side effect of visiting a route.
-const { menuPageTo, personal, organization: scopeOrganization, activeOrganizationId } = useDashboardMenu()
+const { menuPageTo, personal, organization: scopeOrganization, activeOrganizationId } = useDashboardMenu(organizations)
 
 const impersonatedBy = computed(() => {
   const session = sessionData.value?.session as { impersonatedBy?: string } | undefined

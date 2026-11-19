@@ -1148,16 +1148,26 @@ export async function requireIntegrationAccount(
   return account
 }
 
-export async function getAuthSession(event: H3Event, env: CloudflareEnv): Promise<Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>> {
+export async function getAuthSession(
+  event: H3Event,
+  env: CloudflareEnv,
+  options: { forwardCookies?: boolean } = {},
+): Promise<Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>> {
   const headers = event.req.headers
-  if (!isTracingTranscript(event)) return createAuth(env).api.getSession({ headers })
+  const read = async (auth: ReturnType<typeof createAuth>) => {
+    if (!options.forwardCookies) return auth.api.getSession({ headers })
+    const result = await auth.api.getSession({ headers, returnHeaders: true })
+    for (const cookie of result.headers.getSetCookie()) event.res.headers.append('set-cookie', cookie)
+    return result.response
+  }
+  if (!isTracingTranscript(event)) return read(createAuth(env))
 
   const auth = await timeTranscriptPhase(event, 'auth_init', async () => {
     const instance = createAuth(env)
     await instance.$context
     return instance
   })
-  return timeTranscriptPhase(event, 'auth_session', () => auth.api.getSession({ headers }))
+  return timeTranscriptPhase(event, 'auth_session', () => read(auth))
 }
 
 /**

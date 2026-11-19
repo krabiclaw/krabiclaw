@@ -471,7 +471,9 @@ export async function listProducts(db: DbClient, organizationId: string): Promis
  * catalog renders an empty state that says so.
  */
 /** Public experiences use the same readiness check as publication, including sold-out sessions. */
-async function publicProductWindow(db: DbClient, organizationId: string, products: Product[], window?: { limit: number; offset: number }, env?: CloudflareEnv, sharedPaymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>, bookableOnly = false): Promise<Product[]> {
+async function publicProductWindow(db: DbClient, organizationId: string, products: Product[], window?: { limit: number; offset: number }, env?: CloudflareEnv, sharedPaymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>, bookableOnly = false,
+  prepared?: { currency: CurrencyCode | null; scheduledScopes: Map<string, Set<string | null>> },
+): Promise<Product[]> {
   let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
   const requireEnv = () => {
     if (!env) throw new Error('The organization environment is required to assess booking readiness')
@@ -481,8 +483,10 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
   const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) || product.kind === 'stay' : product.kind === 'experience' || product.kind === 'stay' || Boolean(product.booking))
   const [activeLocationIds, currency, scheduledScopes] = await Promise.all([
     bookableOnly ? queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId]).then(rows => new Set(rows.map(location => location.id))) : undefined,
-    needsReadiness.some(product => !product.order_url) ? organizationDefaultCurrency(db, organizationId) : undefined,
-    bookingScheduleScopes(db, organizationId, needsReadiness.filter(product => !product.order_url && product.booking?.duration_minutes).map(product => product.id)),
+    needsReadiness.some(product => !product.order_url)
+      ? prepared ? checkedOrganizationCurrency(organizationId, prepared.currency) : organizationDefaultCurrency(db, organizationId)
+      : undefined,
+    prepared?.scheduledScopes ?? bookingScheduleScopes(db, organizationId, needsReadiness.filter(product => !product.order_url && product.booking?.duration_minutes).map(product => product.id)),
   ])
   const readiness = (product: Product, extra: { requireActive?: boolean; activeLocationIds?: ReadonlySet<string> } = {}) =>
     productBookingReadiness(db, organizationId, product, { env, paymentSetup, currency, scheduledScopes: scheduledScopes.get(product.id) ?? new Set(), ...extra })
@@ -528,15 +532,31 @@ function organizationProductSelection(input: Omit<OrganizationProductListInput, 
 }
 
 /** Menu cards use the canonical product projection without waiting for product IDs in JavaScript. */
-export function prepareOrganizationDishRead(organizationId: string, publishedOnly: boolean) {
-  const { selection, params } = organizationProductSelection({ organizationId, kind: 'dish', publishedOnly })
+export function prepareOrganizationDishRead(organizationId: string | { sql: string }, publishedOnly: boolean) {
+  return preparePublicProductSelection(organizationId, 'dish', publishedOnly)
+}
+
+function preparePublicProductSelection(organizationId: string | { sql: string }, kind: 'dish' | 'experience', publishedOnly: boolean) {
+  const { selection, params } = organizationProductSelection({ organizationId, kind, publishedOnly })
   const relationships = productHydrationQueries(organizationId, { query: `SELECT p.id ${selection}`, params }).slice(0, 7)
-  // A dish cannot carry stay settings.
+  // Dishes and experiences cannot carry stay settings.
   const queries = [{ query: `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id`, params }, ...relationships]
   return {
-    queries,
+    queries, ids: { query: `SELECT p.id ${selection} AND (p.order_url IS NULL OR p.order_url = '')`, params },
     read: ([products, ...rows]: Awaited<ReturnType<typeof executeBatch>>) =>
       hydrateProductRows((products!.results as Row[]).map(mapProductRow), rows, new Map(), new Map()),
+  }
+}
+
+export function preparePublicExperiences(scope: string | { sql: string }) {
+  const selection = preparePublicProductSelection(scope, 'experience', true)
+  return {
+    queries: [...selection.queries, bookingScheduleScopesQuery(scope, selection.ids)],
+    read(rows: D1Result[], db: DbClient, env: CloudflareEnv, organizationId: string, currency: CurrencyCode | null) {
+      const products = selection.read(rows.slice(0, selection.queries.length))
+      const scheduledScopes = scheduleScopesFromRows(rows[selection.queries.length]!.results as BookingScheduleScopeRow[])
+      return publicProductWindow(db, organizationId, products, undefined, env, undefined, false, { currency, scheduledScopes })
+    },
   }
 }
 
@@ -763,8 +783,12 @@ export async function organizationDefaultCurrency(db: DbClient, organizationId: 
   if (!organizationId) invalid('currency is required when no organization context is given')
   const organization = await queryFirst<{ default_currency: string }>(db, 'SELECT default_currency FROM organization WHERE id = ?', [organizationId])
   if (!organization) notFound('Organization not found')
-  if (!isCurrencyCode(organization.default_currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
-  return organization.default_currency
+  return checkedOrganizationCurrency(organizationId, organization.default_currency)
+}
+
+function checkedOrganizationCurrency(organizationId: string, currency: string | null) {
+  if (!isCurrencyCode(currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
+  return currency
 }
 
 interface NormalizedPrice {
@@ -2261,10 +2285,17 @@ async function productCacheInvalidations(db: DbClient, organizationId: string, p
 /** Read which product scopes have a schedule, without projecting an entire catalog. */
 export async function bookingScheduleScopes(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, Set<string | null>>> {
   if (!productIds.length) return new Map()
-  const rows = await queryAll<{ product_id: string; location_id: string | null }>(db, `
+  const { query, params } = bookingScheduleScopesQuery(organizationId, { query: 'SELECT value FROM json_each(?)', params: [d1JsonValue(productIds)] })
+  return scheduleScopesFromRows(await queryAll<BookingScheduleScopeRow>(db, query, params))
+}
+
+type BookingScheduleScopeRow = { product_id: string; location_id: string | null }
+
+function bookingScheduleScopesQuery(organizationId: string | { sql: string }, ids: BatchQuery) {
+  return { query: `
     WITH configured AS (
-      SELECT c.* FROM product_booking_configs c WHERE c.organization_id=? AND c.duration_minutes>0
-        AND c.product_id IN (SELECT value FROM json_each(?))
+      SELECT c.* FROM product_booking_configs c WHERE c.organization_id=${typeof organizationId === 'string' ? '?' : organizationId.sql} AND c.duration_minutes>0
+        AND c.product_id IN (${ids.query})
         AND (c.scheduling_mode<>'provider' OR EXISTS (
           SELECT 1 FROM member_scheduling ms WHERE ms.organization_id=c.organization_id AND ms.member_id=c.assigned_member_id
             AND ms.timezone IS NOT NULL AND json_array_length(ms.weekly_json)>0))
@@ -2285,7 +2316,10 @@ export async function bookingScheduleScopes(db: DbClient, organizationId: string
           AND s.starts_at<strftime('%Y-%m-%dT%H:%M:%fZ','now',printf('+%d days',?))))))
     UNION ALL
     SELECT c.product_id, NULL FROM configured c WHERE c.held_online=1 AND c.scheduling_mode='provider'
-  `, [organizationId, d1JsonValue(productIds), BOOKING_HORIZON_DAYS])
+  `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...ids.params ?? [], BOOKING_HORIZON_DAYS] }
+}
+
+function scheduleScopesFromRows(rows: BookingScheduleScopeRow[]) {
   const byProduct = new Map<string, Set<string | null>>()
   for (const row of rows) {
     const scopes = byProduct.get(row.product_id) ?? new Set()
