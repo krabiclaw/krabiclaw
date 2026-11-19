@@ -1,7 +1,7 @@
 # The Durable Object Worker `nuxt dev` starts beside the platform proxy. See
 # guest-inbox-hub.worker.ts. Never deployed: `wrangler deploy` reads the root
 # wrangler.toml, where the class belongs to the main Worker.
-name = "krabiclaw-guest-inbox-hub"
+name = "blawby-guest-inbox-hub"
 main = "guest-inbox-hub.worker.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat_v2", "web_socket_auto_reply_to_close"]

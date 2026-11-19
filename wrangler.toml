@@ -1,4 +1,4 @@
-name = "krabiclaw"
+name = "blawby"
 main = ".output/server/index.mjs"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat_v2", "nodejs_compat_populate_process_env", "global_fetch_strictly_public", "web_socket_auto_reply_to_close"]
@@ -137,14 +137,14 @@ deleted_classes = ["GuestThreadCommandObject"]
 # What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
 [[queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events"
+queue = "blawby-events"
 
 [[queues.consumers]]
-queue = "krabiclaw-events"
+queue = "blawby-events"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
-dead_letter_queue = "krabiclaw-events-dlq"
+dead_letter_queue = "blawby-events-dlq"
 
 # Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
 # so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
@@ -231,12 +231,12 @@ remote = false
 [[env.dev.durable_objects.bindings]]
 name = "GUEST_INBOX_HUBS"
 class_name = "GuestInboxHubObject"
-script_name = "krabiclaw-guest-inbox-hub"
+script_name = "blawby-guest-inbox-hub"
 
 # The platform proxy uses the dev registry to reach the queue consumer in the local inbox hub Worker.
 [[env.dev.queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events-local"
+queue = "blawby-events-local"
 
 # Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
 # so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
@@ -337,14 +337,14 @@ deleted_classes = ["GuestThreadCommandObject"]
 # What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
 [[env.staging.queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events-staging"
+queue = "blawby-events-staging"
 
 [[env.staging.queues.consumers]]
-queue = "krabiclaw-events-staging"
+queue = "blawby-events-staging"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
-dead_letter_queue = "krabiclaw-events-staging-dlq"
+dead_letter_queue = "blawby-events-staging-dlq"
 
 # Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
 # so a repeated delivery reads the stage the earlier one saved and never sends the same Channex create twice.
@@ -362,7 +362,7 @@ dead_letter_queue = "blawby-airbnb-sync-staging-dlq"
 
 [[env.staging.r2_buckets]]
 binding = "MEDIA_BUCKET"
-bucket_name = "krabiclaw-media-staging"
+bucket_name = "blawby-media-staging"
 remote = false
 
 [[env.staging.kv_namespaces]]
@@ -440,10 +440,10 @@ deleted_classes = ["GuestThreadCommandObject"]
 # What a write announces, delivered by Cloudflare to whatever reacts (server/events.ts). No timer looks for it.
 [[env.e2e.queues.producers]]
 binding = "EVENTS"
-queue = "krabiclaw-events-local"
+queue = "blawby-events-local"
 
 [[env.e2e.queues.consumers]]
-queue = "krabiclaw-events-local"
+queue = "blawby-events-local"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
