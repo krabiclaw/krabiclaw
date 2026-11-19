@@ -2186,14 +2186,27 @@ export function canReleaseStayNights(stay: Stay, now = new Date()): boolean {
 export async function releaseStayNights(db: DbClient, env: StayMutationEnv, inputAccess: StayAccess, stayId: string, input: Record<string, unknown>): Promise<StayDetail> {
   const access = await stayOperationAccess(db, inputAccess, { bookingId: stayId })
   const stay = await getStay(db, access, stayId)
-  if (stay.actual_check_out_date !== null && input.actual_check_out_date === stay.actual_check_out_date && input.version === stay.version - 1) return stay
+  const now = new Date().toISOString()
+  const today = homeToday(stay.timezone, new Date(now))
+  const checkout = input.actual_check_out_date
+  const ranges = isStayDate(checkout) && checkout < stay.check_out_date && today < stay.check_out_date
+    ? [[checkout < today ? today : checkout, stay.check_out_date] as const] : []
+  const publishCheckout = async (saved: StayDetail, taskIds: string[]) => {
+    if (ranges.length) await scheduleBusinessWake(env, access.organizationId, 'channex_ari', Date.now())
+    const bookedHome = saved.booked_product_id ? await readStayHome(db, { ...access, listingId: saved.booked_product_id }, saved.booked_product_id) : null
+    await publishStayChange(env, access.organizationId, saved, ranges, true, taskIds, true, undefined,
+      bookedHome ? [{ product_id: bookedHome.product_id, location_id: bookedHome.location_id }] : undefined)
+    return saved
+  }
+  if (stay.actual_check_out_date !== null && checkout === stay.actual_check_out_date && input.version === stay.version - 1) {
+    const rows = await queryAll<{ id: string }>(db, "SELECT id FROM tasks WHERE organization_id = ? AND product_id = ? AND kind = 'turnover' AND updated_at = ?",
+      [access.organizationId, stay.product_id, stay.updated_at])
+    return publishCheckout(stay, rows.map(row => row.id))
+  }
   if (!canReleaseStayNights(stay)) {
     fail(409, 'EARLY_CHECKOUT_NOT_AVAILABLE', 'Only a confirmed Airbnb stay that has not already checked out can release nights.', 'actual_check_out_date')
   }
   if (input.version !== stay.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  const checkout = input.actual_check_out_date
-  const now = new Date().toISOString()
-  const today = homeToday(stay.timezone, new Date(now))
   if (!isStayDate(checkout) || checkout <= stay.check_in_date || checkout >= stay.check_out_date || checkout > today) {
     fail(422, 'INVALID_EARLY_CHECKOUT', 'Choose a checkout day after check-in, before the scheduled checkout, and no later than today.', 'actual_check_out_date')
   }
@@ -2205,8 +2218,6 @@ export async function releaseStayNights(db: DbClient, env: StayMutationEnv, inpu
   }
   const affected = { organizationId: access.organizationId, before: stay, after: occupied }
   const turnovers = turnoverTaskQueries({ ...affected, now, homes: await readTurnoverHomes(db, affected) })
-  const pushFrom = checkout < today ? today : checkout
-  const ranges = pushFrom < stay.check_out_date ? [[pushFrom, stay.check_out_date] as const] : []
   const homes = [...new Set([stay.product_id, stay.booked_product_id].filter((id): id is string => id !== null))]
   const results = await executeBatch(db, [
     {
@@ -2224,12 +2235,7 @@ export async function releaseStayNights(db: DbClient, env: StayMutationEnv, inpu
     stayDetailQuery(access, stayId),
   ], { operation: 'Record early Airbnb checkout' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  const saved = stayDetailFrom(access, results.at(-1)?.results[0])
-  if (ranges.length) await scheduleBusinessWake(env, access.organizationId, 'channex_ari', Date.now())
-  const bookedHome = stay.booked_product_id ? await readStayHome(db, { ...access, listingId: stay.booked_product_id }, stay.booked_product_id) : null
-  await publishStayChange(env, access.organizationId, saved, ranges, true, changedTaskIds(results), true, undefined,
-    bookedHome ? [{ product_id: bookedHome.product_id, location_id: bookedHome.location_id }] : undefined)
-  return saved
+  return publishCheckout(stayDetailFrom(access, results.at(-1)?.results[0]), changedTaskIds(results))
 }
 
 function stayCancellationQueries(organizationId: string, stay: Stay, now: string, input: {
@@ -2972,7 +2978,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const version = previous ? previous.version + 1 : 1
   const now = new Date().toISOString()
   const actualCheckout = previous?.actual_check_out_date
-  const released = actualCheckout && booking.check_in_date < actualCheckout && actualCheckout < booking.check_out_date
+  const released = actualCheckout && booking.check_in_date < actualCheckout && actualCheckout <= booking.check_out_date
     ? actualCheckout : null
   const occupiedCheckout = released ?? booking.check_out_date
   const change = { organizationId, before: previous && { ...previous, check_out_date: previous.actual_check_out_date ?? previous.check_out_date },

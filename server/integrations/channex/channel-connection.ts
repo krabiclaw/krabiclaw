@@ -631,8 +631,10 @@ export class ChannexConnection {
       await executeBatch(this.db, [
         assertBookingBatchWrite({
           query: `EXISTS (SELECT 1 FROM product_airbnb_listings WHERE organization_id = ? AND listing_id = ? AND product_id = ? AND updated_at = ?)
-            AND NOT EXISTS (SELECT 1 FROM product_airbnb_listings WHERE organization_id = ? AND product_id = ? AND listing_id <> ?)`,
-          params: [this.organizationId, listingId, sourceId, existing.updated_at, this.organizationId, sourceId, listingId],
+            AND NOT EXISTS (SELECT 1 FROM product_airbnb_listings WHERE organization_id = ? AND product_id = ? AND listing_id <> ?)
+            AND EXISTS (SELECT 1 FROM product_channel_mappings m JOIN products p ON p.organization_id = m.organization_id AND p.id = m.product_id
+              WHERE m.organization_id = ? AND m.product_id = ? AND m.provider = 'channex' AND m.enabled = 1 AND p.active = 1)`,
+          params: [this.organizationId, listingId, sourceId, existing.updated_at, this.organizationId, sourceId, listingId, this.organizationId, productId],
         }),
         ...merge,
         {
@@ -706,7 +708,11 @@ export class ChannexConnection {
         // imported changed nothing since its inventory and sends nothing.
         if ((await this.deliverCalendar(mapping)).state === 'pending') return { product_id: productId, stage, waiting: true, content: null }
         const former = channel.ratePlans.find(entry => entry.rate_plan_id !== mapping.rate_plan_id && object(entry.settings, 'Mapping settings').listing_id === listingId)
-        if (former) await channexRequest(this.env, `${path}/mappings/${encodeURIComponent(string(former.id, 'Mapping id'))}`, 'DELETE')
+        if (former) {
+          await channexRequest(this.env, `${path}/mappings/${encodeURIComponent(string(former.id, 'Mapping id'))}`, 'DELETE')
+          // Channex asks remaps to wait for Airbnb to finish removing the old mapping.
+          return { product_id: productId, stage, waiting: true, content: null }
+        }
         if (!channel.ratePlans.some(entry => entry.rate_plan_id === mapping.rate_plan_id && object(entry.settings, 'Mapping settings').listing_id === listingId)) {
           await channexCreate(this.env, `${path}/mappings`, { mapping: { rate_plan_id: mapping.rate_plan_id, settings: { listing_id: mapping.listing_id } } }, 'channel_rate_plan')
         }
