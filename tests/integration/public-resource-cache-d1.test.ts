@@ -203,7 +203,7 @@ test('an organization write purges that organization despite an older invalidati
     await kv.put(`html:${organization}.krabiclaw.com:/`, 'cached HTML')
   }
   const queue = captureEvents()
-  const env = { ...cacheEnv, DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs, EVENTS: queue.binding } as CloudflareEnv
+  const env = { ...cacheEnv, DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs, EVENTS: queue.binding, ZARAZ_ANALYTICS: 'absent' } as CloudflareEnv
   bindDatabaseEvents(db, env)
   await purgePublicResourceCacheNow(env, 'changed')
   assert.equal(await kv.get('public~changed~v4~page'), null)
