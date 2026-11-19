@@ -58,9 +58,9 @@ export const STAY_BED_TYPES = {
   couch: { label: 'Couch', icon: 'i-lucide-sofa' },
   floor_mattress: { label: 'Floor mattress', icon: 'i-lucide-bed-single' },
   air_mattress: { label: 'Air mattress', icon: 'i-lucide-bed-single' },
-  crib: { label: 'Crib', icon: 'i-krabi-crib' },
+  crib: { label: 'Crib', icon: 'i-blawby-crib' },
   toddler_bed: { label: 'Toddler bed', icon: 'i-lucide-bed-single' },
-  hammock: { label: 'Hammock', icon: 'i-krabi-hammock' },
+  hammock: { label: 'Hammock', icon: 'i-blawby-hammock' },
   water_bed: { label: 'Water bed', icon: 'i-lucide-bed-double' },
 } as const
 export type StayBedType = keyof typeof STAY_BED_TYPES
