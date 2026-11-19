@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { getIcons } from '@iconify/utils'
 import { visualizer } from 'rollup-plugin-visualizer'
+import { DOCS_CATEGORY_ART } from './utils/docs-category-art'
 import { LEGACY_PLATFORM_THEME_STORAGE_KEY, PLATFORM_THEME_STORAGE_KEY } from './shared/platform-theme'
 import { ROBOTS_DISABLED_DIRECTIVE, ROBOTS_ENABLED_DIRECTIVE } from './shared/robots-directive'
 import { localizedPublicRouteAliases } from './build/localized-public-routes'
@@ -424,6 +425,12 @@ export default defineNuxtConfig({
   },
 
   routeRules: {
+    // Preserve published docs illustration and social-card URLs.
+    ...Object.fromEntries([...new Set(Object.values(DOCS_CATEGORY_ART).map(({ file }) => file))]
+      .flatMap(file => ['', '-og'].map(suffix => [
+        `/platform/docs/categories/${file.replace(/^blawby-/, 'krabiclaw-')}${suffix}.png`,
+        { redirect: { to: `/platform/docs/categories/${file}${suffix}.png`, statusCode: 301 } },
+      ]))),
     // Versioned static assets — immutable forever
     '/assets/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
     '/_nuxt/**':  { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
