@@ -4,8 +4,7 @@ import { jsonResponse } from '~/server/utils/api-response'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 import { requestAirbnbSync } from '~/server/integrations/channex/airbnb-sync'
 
-// Which Airbnb listings sync: {sync: [listing_id…], stop: [product_id…]}. 402 HOME_LIMIT with the homes quote
-// before anything is queued; otherwise 202 with the queued listings, which the airbnb-sync task works through.
+// Queue the requested changes to specific Airbnb listings and return their initial status.
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required', code: 'VALIDATION_ERROR', field: 'organizationId' }, { status: 400 })

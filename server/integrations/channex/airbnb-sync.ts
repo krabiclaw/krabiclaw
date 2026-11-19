@@ -4,7 +4,7 @@ import { publishAirbnbSync, type AirbnbSyncMessage } from '~/server/events'
 import { scheduleBusinessWake } from '~/server/cloudflare/guest-inbox-events'
 import { execute, executeBatch, MAX_D1_BATCH_STATEMENTS, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { countActiveHomes, homeAllowance, homesQuote, homeLimit, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
+import { reportBillingUsage } from '~/server/utils/billing'
 import { ChannexConnection, type ImportStage } from './channel-connection'
 import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/member-access'
 
@@ -101,10 +101,9 @@ function syncItems(value: unknown): Array<{ listing_id: string; product_id: stri
 
 /**
  * Queue a change to which listings sync. `sync` names Airbnb listings on the
- * connected account; `stop` names homes imported from it. Refused with 402
- * HOME_LIMIT and the homes quote when the plan would not take the live homes
- * the change leaves; otherwise every named listing is queued, replacing any
- * earlier request for it, and the change's listings are answered as GET does.
+ * connected accounts. Every named listing is queued, replacing any earlier
+ * request for it. The Business plan meters the live listings after their
+ * changes commit.
  */
 export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organizationId: string, userId: string, body: { sync?: unknown; stop?: unknown; stop_listing_ids?: unknown }): Promise<AirbnbSyncListing[]> {
   const items = syncItems(body.sync)
@@ -138,26 +137,6 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
   if (missing) fail(404, 'IMPORT_NOT_FOUND', 'This listing is not imported from your connected Airbnb accounts.', { listing_id: missing })
   const both = stopped.find(mapping => sync.includes(mapping.listing_id))
   if (both) fail(422, 'VALIDATION_ERROR', 'A listing cannot be synced and stopped at once', { listing_id: both.listing_id })
-
-  // The live homes the change leaves: a synced listing is live; a stopped home stays live only while published on the site.
-  const homes = sync.length ? await queryAll<{ product_id: string; live: number; published: number }>(db, `SELECT p.id AS product_id, ${liveHomeSql('p')} AS live,
-      EXISTS (SELECT 1 FROM product_publications pp WHERE pp.organization_id = p.organization_id AND pp.product_id = p.id AND pp.published = 1) AS published
-    FROM products p JOIN product_channel_mappings m ON m.organization_id = p.organization_id AND m.product_id = p.id AND m.provider = 'channex' WHERE p.organization_id = ?`, [organizationId]) : []
-  const home = (productId: string | undefined) => homes.find(row => row.product_id === productId)
-  const productOf = (listingId: string) => {
-    const listing = listings.find(row => row.id === listingId)!
-    return listing.import.status === 'imported' ? listing.import.product_id : undefined
-  }
-  const adding = items.filter(item => {
-    const source = home(productOf(item.listing_id))
-    if (!item.product_id) return !source?.live
-    return !source?.live || source.published === 1
-  }).length
-  const leaving = stopped.filter(mapping => home(mapping.product_id)?.live && !home(mapping.product_id)?.published).length
-  if (adding > leaving && !(await homeAllowance(env, db, organizationId, adding - leaving)).allowed) {
-    const refusal = homeLimit(await countActiveHomes(db, organizationId))
-    throw new HTTPError({ statusCode: refusal.status, statusMessage: refusal.data.error, data: { ...refusal.data, quote: await homesQuote(env, db, organizationId, adding - leaving) } })
-  }
 
   const queued = [...items.map(item => ({ listing: item.listing_id, product: item.product_id ?? null, action: 'sync' as const, details: item.details ? JSON.stringify(item.details) : null })),
     ...stopped.map(mapping => ({ listing: mapping.listing_id, product: mapping.product_id, action: 'stop' as const, details: null }))]

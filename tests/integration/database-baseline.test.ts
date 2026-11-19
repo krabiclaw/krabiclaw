@@ -131,7 +131,7 @@ test('Channex home migrations preserve accounts, listings, calendar delivery and
     for (const { tag } of journal.entries.slice(journal.entries.findIndex(entry => entry.tag === migration) + 1)) {
       database.transaction(() => database.exec(readFileSync(`migrations-history/v27/${tag}.sql`, 'utf8')))()
     }
-    database.transaction(() => database.exec(readFileSync('migrations/0001_airbnb_shared_homes.sql', 'utf8')))()
+    database.transaction(() => database.exec(readFileSync('migrations-history/v28/0001_airbnb_shared_homes.sql', 'utf8')))()
     assert.deepEqual(['channel_night_pushes', 'channel_threads'].map(read), before.slice(1))
     assert.deepEqual(database.prepare('SELECT organization_id, group_id FROM channex_groups').all(), [{ organization_id: 'tenant', group_id: 'group' }])
     assert.deepEqual(database.prepare('SELECT organization_id, status, channel_id FROM channex_connections').all(), [{ organization_id: 'tenant', status: 'connected', channel_id: 'channel' }])

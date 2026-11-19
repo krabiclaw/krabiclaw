@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "aafb6028-c1ea-49f0-ac7f-32bba124c6f3",
+  "id": "a0edca3f-f946-4125-a6c6-648df6b123be",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -1156,6 +1156,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "actual_check_out_date": {
+          "name": "actual_check_out_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "timezone": {
@@ -2418,10 +2425,17 @@
     "channex_connections": {
       "name": "channex_connections",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
         "organization_id": {
           "name": "organization_id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -2430,13 +2444,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "group_id": {
-          "name": "group_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "setup_property_id": {
@@ -2520,13 +2527,20 @@
         }
       },
       "indexes": {
-        "channex_connections_group_unique": {
-          "name": "channex_connections_group_unique",
+        "channex_connections_org_idx": {
+          "name": "channex_connections_org_idx",
           "columns": [
-            "group_id"
+            "organization_id"
+          ],
+          "isUnique": false
+        },
+        "channex_connections_signup_unique": {
+          "name": "channex_connections_signup_unique",
+          "columns": [
+            "organization_id"
           ],
           "isUnique": true,
-          "where": "group_id IS NOT NULL"
+          "where": "channel_id IS NULL"
         },
         "channex_connections_channel_unique": {
           "name": "channex_connections_channel_unique",
@@ -2574,7 +2588,7 @@
         },
         "channex_connections_connected_check": {
           "name": "channex_connections_connected_check",
-          "value": "status <> 'connected' OR (channel_id IS NOT NULL AND group_id IS NOT NULL AND connected_at IS NOT NULL)"
+          "value": "status <> 'connected' OR (channel_id IS NOT NULL AND connected_at IS NOT NULL)"
         },
         "channex_connections_authorizing_check": {
           "name": "channex_connections_authorizing_check",
@@ -2585,6 +2599,52 @@
           "value": "(authorization_expires_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', authorization_expires_at, '+0 days') IS authorization_expires_at) AND (connected_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', connected_at, '+0 days') IS connected_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at"
         }
       }
+    },
+    "channex_groups": {
+      "name": "channex_groups",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "group_id": {
+          "name": "group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "channex_groups_group_id_unique": {
+          "name": "channex_groups_group_id_unique",
+          "columns": [
+            "group_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "channex_groups_organization_id_organization_id_fk": {
+          "name": "channex_groups_organization_id_organization_id_fk",
+          "tableFrom": "channex_groups",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "collection_products": {
       "name": "collection_products",
@@ -10505,6 +10565,153 @@
         }
       }
     },
+    "product_airbnb_listings": {
+      "name": "product_airbnb_listings",
+      "columns": {
+        "listing_id": {
+          "name": "listing_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rate_plan_id": {
+          "name": "rate_plan_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "import_stage": {
+          "name": "import_stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "import_content": {
+          "name": "import_content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "import_written": {
+          "name": "import_written",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "product_airbnb_listings_home_idx": {
+          "name": "product_airbnb_listings_home_idx",
+          "columns": [
+            "organization_id",
+            "product_id"
+          ],
+          "isUnique": false
+        },
+        "product_airbnb_listings_channel_idx": {
+          "name": "product_airbnb_listings_channel_idx",
+          "columns": [
+            "channel_id"
+          ],
+          "isUnique": false
+        },
+        "product_airbnb_listings_rate_plan_unique": {
+          "name": "product_airbnb_listings_rate_plan_unique",
+          "columns": [
+            "rate_plan_id"
+          ],
+          "isUnique": true,
+          "where": "rate_plan_id IS NOT NULL"
+        }
+      },
+      "foreignKeys": {
+        "product_airbnb_listings_home_scope_fk": {
+          "name": "product_airbnb_listings_home_scope_fk",
+          "tableFrom": "product_airbnb_listings",
+          "tableTo": "product_stay_configs",
+          "columnsFrom": [
+            "organization_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "product_airbnb_listings_stage_check": {
+          "name": "product_airbnb_listings_stage_check",
+          "value": "import_stage IN ('property', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')"
+        },
+        "product_airbnb_listings_enabled_check": {
+          "name": "product_airbnb_listings_enabled_check",
+          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('mapping', 'activate', 'reservations', 'messages', 'complete'))"
+        },
+        "product_airbnb_listings_content_check": {
+          "name": "product_airbnb_listings_content_check",
+          "value": "import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')"
+        },
+        "product_airbnb_listings_written_check": {
+          "name": "product_airbnb_listings_written_check",
+          "value": "import_written IS NULL OR (json_valid(import_written) AND json_type(import_written) = 'object')"
+        }
+      }
+    },
     "product_availability_rules": {
       "name": "product_availability_rules",
       "columns": {
@@ -11088,20 +11295,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "listing_id": {
-          "name": "listing_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "property_id": {
           "name": "property_id",
           "type": "text",
@@ -11137,27 +11330,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "import_calendar": {
-          "name": "import_calendar",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "import_content": {
-          "name": "import_content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "import_written": {
-          "name": "import_written",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "enabled": {
           "name": "enabled",
           "type": "integer",
@@ -11184,14 +11356,6 @@
         }
       },
       "indexes": {
-        "product_channel_mappings_listing_unique": {
-          "name": "product_channel_mappings_listing_unique",
-          "columns": [
-            "provider",
-            "listing_id"
-          ],
-          "isUnique": true
-        },
         "product_channel_mappings_property_unique": {
           "name": "product_channel_mappings_property_unique",
           "columns": [
@@ -11274,31 +11438,19 @@
         },
         "product_channel_mappings_stage_check": {
           "name": "product_channel_mappings_stage_check",
-          "value": "import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')"
-        },
-        "product_channel_mappings_airbnb_ids_check": {
-          "name": "product_channel_mappings_airbnb_ids_check",
-          "value": "(listing_id IS NULL) = (channel_id IS NULL) AND (listing_id IS NOT NULL OR import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete'))"
+          "value": "import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete')"
         },
         "product_channel_mappings_ids_check": {
           "name": "product_channel_mappings_ids_check",
           "value": "(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)"
         },
-        "product_channel_mappings_calendar_check": {
-          "name": "product_channel_mappings_calendar_check",
-          "value": "import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')"
-        },
         "product_channel_mappings_property_json_check": {
           "name": "product_channel_mappings_property_json_check",
           "value": "import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')"
         },
-        "product_channel_mappings_content_json_check": {
-          "name": "product_channel_mappings_content_json_check",
-          "value": "import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')"
-        },
         "product_channel_mappings_enabled_check": {
           "name": "product_channel_mappings_enabled_check",
-          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('draft', 'mapping', 'activate', 'reservations', 'messages', 'complete'))"
+          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage = 'complete')"
         },
         "product_channel_mappings_instants_check": {
           "name": "product_channel_mappings_instants_check",
