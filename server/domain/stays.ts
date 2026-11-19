@@ -1958,10 +1958,8 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
     const earlier = await replay()
     if (earlier) return publish(earlier)
   }
-  if (!imported) {
-    if (fields.guest_email === null) fail(422, 'GUEST_EMAIL_REQUIRED', 'Enter the guest’s email address.', 'guest_email')
-    assertStayCheckoutHorizon(fields.check_out_date, homeToday(home.timezone))
-  }
+  if (channel === 'direct' && fields.guest_email === null) fail(422, 'GUEST_EMAIL_REQUIRED', 'Enter the guest’s email address.', 'guest_email')
+  if (!imported) assertStayCheckoutHorizon(fields.check_out_date, homeToday(home.timezone))
   // A stay the host takes asks the home's questions as its direct booking does; the host's words are in the site's own language.
   const questions = parseStoredFormQuestions(home.questions)
   const answers = imported ? [] : validateFormAnswers({ questions, questions_revision: formQuestionsRevision(questions) }, {
@@ -2050,6 +2048,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, inputAccess
   const before: StayFields = { check_in_date: current.check_in_date, check_out_date: current.check_out_date, arrival_time: recordedArrival(current, home), adults: current.adults, children: current.children, infants: current.infants,
     guest_name: current.guest_name ?? '', guest_email: current.guest_email, guest_phone: current.guest_phone, total_minor: current.total_minor, private_notes: current.private_notes }
   const fields = stayFields({ ...before, ...input }, home)
+  if (before.guest_email !== null && fields.guest_email === null) fail(422, 'GUEST_EMAIL_REQUIRED', 'Enter the guest’s email address.', 'guest_email')
   if (fields.check_in_date !== before.check_in_date || fields.check_out_date !== before.check_out_date) {
     assertStayCheckoutHorizon(fields.check_out_date, homeToday(home.timezone))
   }

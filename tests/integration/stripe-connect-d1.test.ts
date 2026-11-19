@@ -244,6 +244,7 @@ test('Today suggests Stripe setup until the account is ready, and a price for ea
       assert.deepEqual(await earnings('view=payout&payout_id=po_auto'), {
         id: automatic.id, amount: 4800, currency: 'USD', status: 'paid', arrival_date: automatic.arrival_date,
         bank: { bank_name: 'Fixture Bank', last4: '9021' }, items: [],
+        failure_code: null, failure_message: null,
       })
       assert.deepEqual(payoutCalls.sort(), ['/v1/accounts/acct_payouts/external_accounts/ba_paid', '/v1/balance_transactions', '/v1/payouts/po_auto'])
 
