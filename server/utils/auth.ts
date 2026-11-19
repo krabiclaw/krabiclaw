@@ -273,9 +273,9 @@ export function localDevelopmentOrigin(value: string | undefined): string | null
   return origin
 }
 
-/** Where Stripe Checkout hands a host back to the iPhone app. */
+/** Hosted connection flows still return to the scheme older iPhone builds register. */
 export const NATIVE_CONNECTION_RETURN_ORIGIN = 'krabiclaw://connections'
-export const NATIVE_BILLING_RETURN_ORIGIN = 'krabiclaw://billing'
+const NATIVE_RETURN_SCHEMES = ['blawby:', 'krabiclaw:']
 
 function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Request) => string[]) {
   const origins = new Set<string>()
@@ -286,12 +286,12 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   for (const origin of [authOrigin, platformOrigin, freeOrganizationOrigin, wildcardOrigin(freeOrganizationOrigin), legacyFreeOrigin, wildcardOrigin(legacyFreeOrigin)]) {
     if (origin) origins.add(origin)
   }
-  // The iPhone app opens Stripe Checkout with its own session and takes the
-  // checkout's success, cancel and portal returns at krabiclaw://billing/…
-  // Better Auth matches a custom scheme by scheme and authority, so only the
-  // billing returns are trusted, not any krabiclaw:// address.
-  origins.add(NATIVE_BILLING_RETURN_ORIGIN)
-  origins.add(NATIVE_CONNECTION_RETURN_ORIGIN)
+  // Better Auth matches custom schemes by scheme and authority. Bind the
+  // trust to billing and integration returns for both generations of app.
+  for (const scheme of NATIVE_RETURN_SCHEMES) {
+    origins.add(`${scheme}//billing`)
+    origins.add(`${scheme}//connections`)
+  }
   // Sign in with Apple returns to the website by posting a form from Apple.
   origins.add('https://appleid.apple.com')
   if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') {
@@ -579,7 +579,7 @@ function buildAuth(env: CloudflareEnv) {
         const callback = new URL(state.callbackURL, authBaseUrl)
         // Only a successful integration link continues to resource selection.
         if (new URL(location, authBaseUrl).href !== callback.href) return
-        const nativeIntegration = callback.protocol === 'krabiclaw:' && callback.host === 'connections'
+        const nativeIntegration = NATIVE_RETURN_SCHEMES.includes(callback.protocol) && callback.host === 'connections'
           ? callback.pathname.match(/^\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads|personal-calendar)$/)?.[1]
           : undefined
         const integration = nativeIntegration ?? callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads)$/)?.[1]
