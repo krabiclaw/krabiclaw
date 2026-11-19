@@ -1,4 +1,4 @@
-import { CHANNEX_PROPERTY_HOMES } from '~/server/integrations/channex/listing-mappings'
+import { CHANNEX_PROPERTY_HOME } from '~/server/integrations/channex/listing-mappings'
 import { initialConversationParticipants, initialListingParticipants, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -73,8 +73,7 @@ export async function guestThreadChannel(db: DbClient, conversationId: string, o
 
 async function homeMapping(db: DbClient, propertyId: string): Promise<HomeMapping | null> {
   return queryFirst<HomeMapping>(db, `SELECT m.organization_id, m.product_id, m.property_id, m.enabled, c.location_id
-    FROM ${CHANNEX_PROPERTY_HOMES} m JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
-    WHERE m.property_id = ?`, [propertyId])
+    FROM (${CHANNEX_PROPERTY_HOME}) m JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id`, [propertyId])
 }
 
 type ThreadStay = { id: string; conversation_id: string; organization_id: string; product_id: string }
