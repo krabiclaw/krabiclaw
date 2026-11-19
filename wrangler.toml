@@ -45,6 +45,10 @@ zone_name = "krabiclaw.com"
 pattern = "blawby.com/*"
 zone_name = "blawby.com"
 
+[[routes]]
+pattern = "*.blawby.com/*"
+zone_name = "blawby.com"
+
 [vars]
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
