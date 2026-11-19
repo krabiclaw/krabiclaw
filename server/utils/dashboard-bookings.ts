@@ -133,9 +133,9 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
   const canMessageGuest = !thread.blocked_at && (await guestReplyDestination(db, thread, channel ? parseGuestThreadChannel(channel) : null, account)).channel !== null
 
   const channelOwned = isChannelManagedStay(stay)
-  const record = stay.request_status ? threadOperationalRecordFromRow(operations!.results[0]) : null
-  if (stay.request_status && !record) throw new Error('The conversation has no booking')
-  const available_actions = record ? requestActions(record, new Date().toISOString())
+  const operationalRecord = stay.request_status ? threadOperationalRecordFromRow(operations!.results[0]) : null
+  if (stay.request_status && !operationalRecord) throw new Error('The conversation has no booking')
+  const available_actions = operationalRecord ? requestActions(operationalRecord, new Date().toISOString())
     : stay.status === 'cancelled' || channelOwned ? [] : ['edit', 'cancel']
   const pending_changes = stay.channel === 'airbnb' && channelOwned && changes!.results.length
     ? pendingStayChangesFromRows(changes!.results, bookingId, sourceLocaleFromRows(organizationId, locale!.results).locale)
