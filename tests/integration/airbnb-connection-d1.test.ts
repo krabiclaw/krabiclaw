@@ -146,11 +146,11 @@ test('an Airbnb sign-in completes only for its own person and state', async () =
     const other = new ChannexConnection(db, env, ORG, OTHER)
 
     // The Worker ends after Channex created the group and before its id is saved: the next start finds that group.
-    await db.prepare("CREATE TRIGGER lose_group_id BEFORE UPDATE OF group_id ON channex_connections BEGIN SELECT RAISE(ABORT, 'Worker ended'); END").run()
+    await db.prepare("CREATE TRIGGER lose_group_id BEFORE INSERT ON channex_groups BEGIN SELECT RAISE(ABORT, 'Worker ended'); END").run()
     await assert.rejects(owner.start(), (error: Error) => String(error.cause).includes('Worker ended'))
     await db.prepare('DROP TRIGGER lose_group_id').run()
     const started = await owner.start()
-    assert.deepEqual([channex.created.filter(id => id.startsWith('grp-')), await db.prepare('SELECT group_id FROM channex_connections').first('group_id')], [['grp-1'], 'grp-1'])
+    assert.deepEqual([channex.created.filter(id => id.startsWith('grp-')), await db.prepare('SELECT group_id FROM channex_groups').first('group_id')], [['grp-1'], 'grp-1'])
     assert.equal(started.authorization_url, 'https://www.airbnb.com/oauth2/auth?client_id=x')
     const link = channex.seen.find(request => request.path === '/meta/airbnb/connection_link')!.body!.connection_link as Record<string, unknown>
     assert.deepEqual([link.redirect_uri, link.group_id, link.properties], [AIRBNB_CALLBACK, 'grp-1', ['setup-1']])
@@ -169,7 +169,8 @@ test('an Airbnb sign-in completes only for its own person and state', async () =
     assert.deepEqual(await owner.complete(channex.token!, 'chan-1'), { connected: true })
     const stored = await db.prepare('SELECT status, channel_id, state_hash, authorization_url FROM channex_connections WHERE organization_id = ?').bind(ORG).first()
     assert.deepEqual(stored, { status: 'connected', channel_id: 'chan-1', state_hash: null, authorization_url: null })
-    assert.deepEqual(await owner.status(), { status: 'connected', connected_at: (await db.prepare('SELECT connected_at FROM channex_connections').first<{ connected_at: string }>())!.connected_at, listing_count: 0, channel_active: false, disconnect_error: null })
+    const status = await owner.status()
+    assert.deepEqual(status.connections, [{ status: 'connected', connected_at: (await db.prepare('SELECT connected_at FROM channex_connections').first<{ connected_at: string }>())!.connected_at, listing_count: 0, channel_active: false, disconnect_error: null, channel_id: 'chan-1' }])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
@@ -184,7 +185,7 @@ test('two Connect requests at once leave one group and one setup property in Cha
   try {
     const [first, second] = await Promise.all([new ChannexConnection(db, env, ORG, OWNER).start(), new ChannexConnection(db, env, ORG, OWNER).start()])
     assert.equal(first.authorization_url, second.authorization_url)
-    const row = await db.prepare('SELECT status, group_id, setup_property_id FROM channex_connections').first<{ status: string; group_id: string; setup_property_id: string }>()
+    const row = await db.prepare('SELECT c.status, g.group_id, c.setup_property_id FROM channex_connections c JOIN channex_groups g USING (organization_id)').first<{ status: string; group_id: string; setup_property_id: string }>()
     // Each request created its own; the one saved second was deleted again.
     const kept = channex.created.filter(id => !channex.deleted.includes(id))
     assert.deepEqual(kept, [row!.group_id, row!.setup_property_id])
@@ -210,26 +211,26 @@ test('a disconnect that fails on the queue shows its reason with the connection,
     channex.channel.active = true
     // A disconnect the queue did not take is visible to both the caller and another client reading status.
     const unqueued = new ChannexConnection(db, { ...queued, AIRBNB_SYNC: { send: async () => { throw new Error('Queue unavailable') } } } as unknown as CloudflareEnv, ORG, OWNER)
-    await assert.rejects(unqueued.disconnect(), /Queue unavailable/)
+    await assert.rejects(unqueued.disconnect('chan-1'), /Queue unavailable/)
     const rejected = await owner.status()
     assert.deepEqual([rejected.status, rejected.disconnect_error], ['connected', 'Queue unavailable'])
     channex.failDeactivate = true
-    const requests = await Promise.all([owner.disconnect(true), owner.disconnect(true)])
+    const requests = await Promise.all([owner.disconnect('chan-1', true), owner.disconnect('chan-1', true)])
     assert.deepEqual(requests, [{ disconnected: false }, { disconnected: false }])
-    assert.deepEqual(await owner.disconnect(), { disconnected: false }, 'a repeated POST observes the pending disconnect')
+    assert.deepEqual(await owner.disconnect('chan-1'), { disconnected: false }, 'a repeated POST observes the pending disconnect')
     assert.equal(syncs.pending.length, 1, 'only one request starts the disconnect')
     assert.equal((await owner.status()).status, 'disconnecting')
     await syncs.drain(queued)
     const failed = await owner.status()
     assert.deepEqual([failed.status, failed.disconnect_error], ['connected', 'Channex answered 500 to POST /channels/chan-1/deactivate: {"errors":{"title":"Channel is busy"}}'])
-    await assert.rejects(owner.disconnect(), { status: 409, message: failed.disconnect_error! })
+    await assert.rejects(owner.disconnect('chan-1'), { status: 409, message: failed.disconnect_error! })
     assert.equal(syncs.pending.length, 0, 'a repeated POST does not restart a failed disconnect')
     channex.failDeactivate = false
-    assert.deepEqual(await owner.disconnect(true), { disconnected: false })
+    assert.deepEqual(await owner.disconnect('chan-1', true), { disconnected: false })
     assert.equal((await owner.status()).disconnect_error, null)
     await syncs.drain(queued)
-    assert.deepEqual(await owner.disconnect(), { disconnected: true })
-    assert.deepEqual(await owner.status(), { status: 'not_connected', connected_at: null, listing_count: 0, channel_active: false, disconnect_error: null })
+    await assert.rejects(owner.disconnect('chan-1'), code('AIRBNB_ACCOUNT_NOT_FOUND'))
+    assert.deepEqual(await owner.status(), { status: 'not_connected', connected_at: null, listing_count: 0, channel_active: false, disconnect_error: null, channel_id: null, connections: [] })
     assert.equal(channex.channelExists, false)
   } finally {
     globalThis.fetch = realFetch
@@ -256,7 +257,7 @@ test('deleting the organization releases its Airbnb channel, every property in i
     assert.equal(channex.seen.filter(request => request.method !== 'GET').length, connectedWrites)
     const syncs = captureEvents<AirbnbSyncMessage>()
     const queued = { ...env, DB: db, AIRBNB_SYNC: syncs.binding } as unknown as CloudflareEnv
-    assert.deepEqual(await new ChannexConnection(db, queued, ORG, OWNER).disconnect(), { disconnected: false })
+    assert.deepEqual(await new ChannexConnection(db, queued, ORG, OWNER).disconnect('chan-1'), { disconnected: false })
     await assert.rejects(owner.deleteForOrganization(), (error: { body?: { code?: string } }) => error.body?.code === 'AIRBNB_CONNECTED')
     await syncs.drain(queued)
 
@@ -266,8 +267,8 @@ test('deleting the organization releases its Airbnb channel, every property in i
     assert.deepEqual(writes.slice(writes.indexOf('POST /channels/chan-1/deactivate')), [
       'POST /channels/chan-1/deactivate', 'DELETE /properties/setup-1', 'DELETE /channels/chan-1', 'DELETE /properties/prop-2', 'DELETE /groups/grp-1',
     ])
-    assert.deepEqual(await db.prepare('SELECT status, channel_id, group_id, setup_property_id FROM channex_connections').first(),
-      { status: 'not_connected', channel_id: null, group_id: null, setup_property_id: null })
+    assert.equal(await db.prepare('SELECT 1 FROM channex_connections').first(), null)
+    assert.equal(await db.prepare('SELECT 1 FROM channex_groups').first(), null)
     // Repeating it finds nothing left to release.
     const before = channex.seen.length
     await owner.deleteForOrganization()

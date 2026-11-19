@@ -1,3 +1,4 @@
+import { CHANNEX_PROPERTY_HOME } from '~/server/integrations/channex/listing-mappings'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -116,7 +117,7 @@ async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: strin
  */
 export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, request: AlterationRequest): Promise<'recorded' | 'reconciled' | 'unchanged' | 'ignored'> {
   const mapping = await queryFirst<{ organization_id: string; product_id: string; enabled: number }>(db,
-    "SELECT organization_id, product_id, enabled FROM product_channel_mappings WHERE provider = 'channex' AND property_id = ?", [request.propertyId])
+    CHANNEX_PROPERTY_HOME, [request.propertyId])
   if (!mapping || mapping.enabled !== 1) return 'ignored'
   const dedupeKey = `${PREFIX}${request.id}`
   let entry = await findMessageByDedupeKey(db, dedupeKey)

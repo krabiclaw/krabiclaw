@@ -138,8 +138,10 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       kind: 'stay', name: '74 D · Sky', variants: [{ name: '74 D · Sky', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'location', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'owner-member' },
     } })
-    await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
-      VALUES (?, ?, 'channex', 'listing', 'channel', ?, 'room', 'rate', 'complete', 1)`).bind(ORG, home.id, PROPERTY).run()
+    await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, property_id, room_type_id, rate_plan_id, import_stage, enabled)
+      VALUES (?, ?, 'channex', ?, 'room', 'rate', 'complete', 1)`).bind(ORG, home.id, PROPERTY).run()
+    await db.prepare(`INSERT INTO product_airbnb_listings (organization_id, product_id, listing_id, channel_id, import_stage, enabled)
+      VALUES (?, ?, 'listing', 'channel', 'complete', 1)`).bind(ORG, home.id).run()
     const principal = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
 
     // The booked stay and its conversation: a message, a photo, the host's Airbnb reply, then the guest's question, which alerts (unread).

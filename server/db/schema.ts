@@ -1042,6 +1042,7 @@ export const bookings = sqliteTable("bookings", {
 	location_id: text(),
 	starts_at: text().notNull(),
 	ends_at: text().notNull(),
+	actual_check_out_date: text(),
 	timezone: text().notNull(),
 	party_size: integer().notNull(),
 	adults: integer(),
@@ -1466,40 +1467,52 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
 	provider: text().$type<'channex'>().notNull(),
-	listing_id: text(),
-	channel_id: text(),
 	property_id: text(),
 	room_type_id: text(),
 	rate_plan_id: text(),
-	import_stage: text().$type<'property' | 'room' | 'rate' | 'inventory' | 'verify_inventory' | 'content' | 'draft' | 'mapping' | 'activate' | 'reservations' | 'messages' | 'complete'>().notNull(),
+	import_stage: text().$type<'property' | 'room' | 'rate' | 'inventory' | 'verify_inventory' | 'complete'>().notNull(),
 	import_property: text(),
-	import_calendar: text(),
-	// What the content stage left out, as JSON (ImportContentReport); null until it ran.
-	import_content: text(),
-	// SHA-256 of each text and count the content stage last wrote, as JSON
-	// { field: hash }: a later refresh writes only a field still holding it,
-	// so a host's own edit is never overwritten. Null until the stage ran.
-	import_written: text(),
 	enabled: integer({ mode: "boolean" }).default(false).notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	primaryKey({ columns: [table.product_id, table.provider], name: "product_channel_mappings_pk" }),
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_channel_mappings_home_scope_fk" }).onDelete("cascade"),
-	uniqueIndex("product_channel_mappings_listing_unique").on(table.provider, table.listing_id),
 	uniqueIndex("product_channel_mappings_property_unique").on(table.provider, table.property_id).where(sql`property_id IS NOT NULL`),
 	uniqueIndex("product_channel_mappings_room_type_unique").on(table.provider, table.room_type_id).where(sql`room_type_id IS NOT NULL`),
 	uniqueIndex("product_channel_mappings_rate_plan_unique").on(table.provider, table.rate_plan_id).where(sql`rate_plan_id IS NOT NULL`),
 	index("product_channel_mappings_org_idx").on(table.organization_id),
 	check("product_channel_mappings_provider_check", sql`provider = 'channex'`),
-	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')`),
-	check("product_channel_mappings_airbnb_ids_check", sql`(listing_id IS NULL) = (channel_id IS NULL) AND (listing_id IS NOT NULL OR import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete'))`),
+	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'complete')`),
 	check("product_channel_mappings_ids_check", sql`(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)`),
-	check("product_channel_mappings_calendar_check", sql`import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')`),
 	check("product_channel_mappings_property_json_check", sql`import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')`),
-	check("product_channel_mappings_content_json_check", sql`import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')`),
-	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('draft', 'mapping', 'activate', 'reservations', 'messages', 'complete'))`),
+	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage = 'complete')`),
 	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
+
+// The provider account and rate plan used by each Airbnb listing on the home's shared inventory.
+export const product_airbnb_listings = sqliteTable("product_airbnb_listings", {
+	listing_id: text().primaryKey(),
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	channel_id: text().notNull(),
+	// NULL maps the listing to the home's standard rate. An independent rate is on the same room.
+	rate_plan_id: text(),
+	import_stage: text().$type<'property' | 'content' | 'draft' | 'mapping' | 'activate' | 'reservations' | 'messages' | 'complete'>().notNull(),
+	import_content: text(),
+	import_written: text(),
+	enabled: integer({ mode: "boolean" }).default(false).notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_airbnb_listings_home_scope_fk" }).onDelete("cascade"),
+	index("product_airbnb_listings_home_idx").on(table.organization_id, table.product_id),
+	index("product_airbnb_listings_channel_idx").on(table.channel_id),
+	uniqueIndex("product_airbnb_listings_rate_plan_unique").on(table.rate_plan_id).where(sql`rate_plan_id IS NOT NULL`),
+	check("product_airbnb_listings_stage_check", sql`import_stage IN ('property', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')`),
+	check("product_airbnb_listings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('mapping', 'activate', 'reservations', 'messages', 'complete'))`),
+	check("product_airbnb_listings_content_check", sql`import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')`),
+	check("product_airbnb_listings_written_check", sql`import_written IS NULL OR (json_valid(import_written) AND json_type(import_written) = 'object')`),
 ]);
 
 // What a host asked Blawby to do with each Airbnb listing of its connected
@@ -1657,10 +1670,15 @@ export const organization_integrations = sqliteTable("organization_integrations"
 // per organization with its own lifecycle: a Channex group and a temporary
 // setup property, a single-use sign-in bound to the person who started it,
 // then the connected channel.
-export const channex_connections = sqliteTable("channex_connections", {
+export const channex_groups = sqliteTable("channex_groups", {
 	organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
+	group_id: text().notNull().unique(),
+});
+
+export const channex_connections = sqliteTable("channex_connections", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting'>().notNull(),
-	group_id: text(),
 	setup_property_id: text(),
 	state_hash: text(),
 	authorization_url: text(),
@@ -1674,10 +1692,11 @@ export const channex_connections = sqliteTable("channex_connections", {
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
-	uniqueIndex("channex_connections_group_unique").on(table.group_id).where(sql`group_id IS NOT NULL`),
+	index("channex_connections_org_idx").on(table.organization_id),
+	uniqueIndex("channex_connections_signup_unique").on(table.organization_id).where(sql`channel_id IS NULL`),
 	uniqueIndex("channex_connections_channel_unique").on(table.channel_id).where(sql`channel_id IS NOT NULL`),
 	check("channex_connections_status_check", sql`status IN ('not_connected', 'authorizing', 'connected', 'disconnecting')`),
-	check("channex_connections_connected_check", sql`status <> 'connected' OR (channel_id IS NOT NULL AND group_id IS NOT NULL AND connected_at IS NOT NULL)`),
+	check("channex_connections_connected_check", sql`status <> 'connected' OR (channel_id IS NOT NULL AND connected_at IS NOT NULL)`),
 	check("channex_connections_authorizing_check", sql`status <> 'authorizing' OR (authorization_url IS NOT NULL AND state_hash IS NOT NULL AND authorization_expires_at IS NOT NULL AND authorization_title IS NOT NULL)`),
 	check("channex_connections_instants_check", sql`(authorization_expires_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', authorization_expires_at, '+0 days') IS authorization_expires_at) AND (connected_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', connected_at, '+0 days') IS connected_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);

@@ -133,7 +133,7 @@ test('guest table cancellation refunds until 24 hours before the start, through 
       assert.equal(params.get('payment_intent'), `pi_${key}`)
       assert.equal(params.has('amount'), false)
       assert.equal(new Headers(init.headers).get('idempotency-key'), `krabiclaw-refund:${key}:guest-cancelled-booking:${paid.bookingId}`)
-      return Response.json({ id: `re_${key}`, object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } })
+      return Response.json({ id: `re_${key}`, object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { [credential === 'buyer' ? 'blawby_refund_id' : 'krabiclaw_refund_id']: params.get('metadata[krabiclaw_refund_id]') } })
      }
      assert.equal(init?.method, 'GET')
      assert.equal(url.pathname, `/v1/charges/ch_${key}`)
@@ -1162,7 +1162,7 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
   const intent = () => ({ id: `pi_${paymentId}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000,
    amount_received: statuses[paymentId!] === 'succeeded' ? 10000 : 0, status: statuses[paymentId!], client_secret: `pi_${paymentId}_secret`,
    payment_method: 'pm_proof', latest_charge: ['succeeded', 'requires_capture'].includes(statuses[paymentId!]!) ? charge : null,
-   cancellation_reason: cancellations.get(paymentId!) ?? null, last_payment_error: null, metadata: { krabiclaw_payment_id: paymentId } })
+   cancellation_reason: cancellations.get(paymentId!) ?? null, last_payment_error: null, metadata: { [paymentId === 'authenticating' ? 'blawby_payment_id' : 'krabiclaw_payment_id']: paymentId } })
   if (resource === 'payment_intents' && action === 'confirm') { calls.confirm.push(paymentId!); return Response.json(intent()) }
   if (resource === 'payment_intents' && action === 'capture') { calls.capture.push(paymentId!); statuses[paymentId!] = 'succeeded'; return Response.json(intent()) }
   if (resource === 'payment_intents' && action === 'cancel') {
@@ -1256,7 +1256,7 @@ test('a card is authorized, booked, then captured, and an expired payment window
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
   assert.deepEqual(calls.capture, ['direct'])
   statuses.authenticating = 'requires_capture'
-  const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { krabiclaw_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
+  const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { blawby_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
   await processPaymentEvent(db, stripe, event, env)
   assert.deepEqual(bookedWhenCaptured, { direct: 1, authenticating: 1 })
   assert.equal((await requirePayment(db, ORG, 'authenticating')).captured_amount, 10000)

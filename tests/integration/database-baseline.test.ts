@@ -94,7 +94,7 @@ test('snapshot payload preserves destination signing keys for refreshes and carr
   }
 })
 
-test('standalone Channex homes migration preserves calendar delivery and channel conversation rows', () => {
+test('Channex home migrations preserve accounts, listings, calendar delivery and conversations', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
@@ -113,6 +113,8 @@ test('standalone Channex homes migration preserves calendar delivery and channel
         VALUES ('tenant', 'cabin', 'cabin-site', 'host', 'host');
       INSERT INTO product_stay_configs (organization_id, product_id, location_id, internal_name, created_by, updated_by)
         VALUES ('tenant', 'cabin', 'cabin-site', 'Cabin', 'host', 'host');
+      INSERT INTO channex_connections (organization_id, status, group_id, channel_id, connected_at)
+        VALUES ('tenant', 'connected', 'group', 'channel', '2026-11-17T00:00:00.000Z');
       INSERT INTO product_channel_mappings (rowid, organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
         VALUES (13, 'tenant', 'cabin', 'channex', 'listing', 'channel', 'property', 'room', 'rate', 'complete', 1);
       INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at)
@@ -126,6 +128,17 @@ test('standalone Channex homes migration preserves calendar delivery and channel
     const before = ['product_channel_mappings', 'channel_night_pushes', 'channel_threads'].map(read)
     database.transaction(() => database.exec(readFileSync(`migrations-history/v27/${migration}.sql`, 'utf8')))()
     assert.deepEqual(['product_channel_mappings', 'channel_night_pushes', 'channel_threads'].map(read), before)
+    for (const { tag } of journal.entries.slice(journal.entries.findIndex(entry => entry.tag === migration) + 1)) {
+      database.transaction(() => database.exec(readFileSync(`migrations-history/v27/${tag}.sql`, 'utf8')))()
+    }
+    database.transaction(() => database.exec(readFileSync('migrations-history/v28/0001_airbnb_shared_homes.sql', 'utf8')))()
+    assert.deepEqual(['channel_night_pushes', 'channel_threads'].map(read), before.slice(1))
+    assert.deepEqual(database.prepare('SELECT organization_id, group_id FROM channex_groups').all(), [{ organization_id: 'tenant', group_id: 'group' }])
+    assert.deepEqual(database.prepare('SELECT organization_id, status, channel_id FROM channex_connections').all(), [{ organization_id: 'tenant', status: 'connected', channel_id: 'channel' }])
+    assert.deepEqual(database.prepare('SELECT product_id, listing_id, channel_id, enabled FROM product_airbnb_listings').all(),
+      [{ product_id: 'cabin', listing_id: 'listing', channel_id: 'channel', enabled: 1 }])
+    assert.deepEqual(database.prepare('SELECT product_id, property_id, room_type_id, rate_plan_id FROM product_channel_mappings').all(),
+      [{ product_id: 'cabin', property_id: 'property', room_type_id: 'room', rate_plan_id: 'rate' }])
     assert.deepEqual(database.pragma('foreign_key_check'), [])
   } finally {
     database.close()

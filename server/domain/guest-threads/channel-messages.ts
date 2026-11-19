@@ -1,3 +1,4 @@
+import { CHANNEX_PROPERTY_HOME } from '~/server/integrations/channex/listing-mappings'
 import { initialConversationParticipants, initialListingParticipants, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -22,7 +23,7 @@ import type { GuestThreadDeliveryRow } from './types'
 import type { StayChannel } from '~/shared/bookings'
 
 type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv & UploadResolvedMediaInput['env']
-interface HomeMapping { organization_id: string; product_id: string; property_id: string; channel_id: string; location_id: string; enabled: number }
+interface HomeMapping { organization_id: string; product_id: string; property_id: string; location_id: string; enabled: number }
 export interface ChannelThreadMapping { organization_id: string; product_id: string; conversation_id: string; external_thread_id: string; external_booking_id: string | null; moved_from_thread_id: string | null }
 
 function fail(statusCode: number, code: string, message: string, field: string): never {
@@ -71,9 +72,8 @@ export async function guestThreadChannel(db: DbClient, conversationId: string, o
 }
 
 async function homeMapping(db: DbClient, propertyId: string): Promise<HomeMapping | null> {
-  return queryFirst<HomeMapping>(db, `SELECT m.organization_id, m.product_id, m.property_id, m.channel_id, m.enabled, c.location_id
-    FROM product_channel_mappings m JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
-    WHERE m.provider = 'channex' AND m.property_id = ?`, [propertyId])
+  return queryFirst<HomeMapping>(db, `SELECT m.organization_id, m.product_id, m.property_id, m.enabled, c.location_id
+    FROM (${CHANNEX_PROPERTY_HOME}) m JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id`, [propertyId])
 }
 
 type ThreadStay = { id: string; conversation_id: string; organization_id: string; product_id: string }
@@ -296,7 +296,7 @@ export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadI
   const home = await homeMapping(db, expectedPropertyId)
   if (!home || home.enabled !== 1) return { status: 'ignored_disconnected' }
   const thread = await getChannexThread(env, threadId)
-  if (thread.propertyId !== expectedPropertyId || (thread.channelId !== null && thread.channelId !== home.channel_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
+  if (thread.propertyId !== expectedPropertyId || (thread.channelId !== null && !await queryFirst(db, 'SELECT 1 FROM product_airbnb_listings WHERE organization_id = ? AND product_id = ? AND channel_id = ? AND enabled = 1', [home.organization_id, home.product_id, thread.channelId]))) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
   if (assignedBookingId !== undefined && thread.bookingId !== assignedBookingId) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The assignment event does not match the provider conversation', 'payload.booking_id')
   const messages = await listChannexMessages(env, threadId)
   if (expectedMessageId !== undefined && !messages.some(message => message.id === expectedMessageId)) fail(409, 'CHANNEL_MESSAGE_NOT_READY', 'The provider conversation does not yet contain the webhook message', 'payload.id')
@@ -436,12 +436,12 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   }
   // Whether the home may still be written to is the caller's (guestReplyDestination);
   // proven accepted replays above remain safe even after it is disconnected.
-  const home = await queryFirst<HomeMapping>(db, `SELECT m.*, c.location_id FROM product_channel_mappings m
-    JOIN product_stay_configs c ON c.product_id = m.product_id AND c.organization_id = m.organization_id
-    WHERE m.provider = 'channex' AND m.organization_id = ? AND m.product_id = ?`, [input.mapping.organization_id, input.mapping.product_id])
-  if (!home) throw new Error(`Channel thread ${input.mapping.conversation_id} names a home with no Channex mapping`)
   const current = await getChannexThread(env, input.mapping.external_thread_id)
-  if (current.propertyId !== home.property_id || (current.channelId !== null && current.channelId !== home.channel_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
+  const home = await homeMapping(db, current.propertyId)
+  if (!home || home.organization_id !== input.mapping.organization_id || home.product_id !== input.mapping.product_id
+    || (current.channelId !== null && !await queryFirst(db, 'SELECT 1 FROM product_airbnb_listings WHERE organization_id = ? AND product_id = ? AND channel_id = ? AND enabled = 1', [home.organization_id, home.product_id, current.channelId]))) {
+    fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
+  }
   const entry = await input.commit()
   const receipt = input.receipt ?? await getDeliveryById(db, deliveryId)
   if (!receipt || receipt.message_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')

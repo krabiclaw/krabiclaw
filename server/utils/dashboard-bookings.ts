@@ -11,7 +11,7 @@ import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
 import { guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { pendingStayChanges } from '~/server/domain/guest-threads/stay-change-requests'
-import { calendarStays, dashboardStayEditQueries, stayAccessFor, stayCalendarOf, stayCalendarQueries, prepareStayReservationHome, stayDetailFrom, stayDetailQuery, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
+import { calendarStays, canReleaseStayNights, dashboardStayEditQueries, prepareStayReservationHome, stayAccessFor, stayCalendarOf, stayCalendarQueries, stayDetailFrom, stayDetailQuery, type StayHome, type StayNight, type StayReservationHome } from '~/server/domain/stays'
 import { placesCalendarOf, placesCalendarQueries, placesWindow } from '~/server/domain/places'
 import { loadStaffBookingDetails } from '~/server/utils/dashboard-booking-details'
 import { isChannelManagedStay } from '~/shared/bookings'
@@ -119,7 +119,7 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
   const home = homeRead.read(homeRows)
   const channelOwned = isChannelManagedStay(stay)
   const [available_actions, pending_changes] = await Promise.all([
-    stay.request_status
+    canReleaseStayNights(stay) ? ['release_nights'] : stay.request_status
       ? conversation.then(async thread => {
           const record = await getThreadOperationalRecord(db, thread.id, thread)
           if (!record) throw new Error('The conversation has no booking')

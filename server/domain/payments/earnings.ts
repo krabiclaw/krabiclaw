@@ -186,6 +186,8 @@ export async function paymentPayoutDetail(db: DbClient, env: CloudflareEnv, prin
     arrival_date: payout.arrival_date,
     bank,
     items,
+    failure_code: payout.failure_code ?? null,
+    failure_message: payout.failure_message ?? null,
   }
 }
 
