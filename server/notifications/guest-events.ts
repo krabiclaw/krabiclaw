@@ -1,4 +1,5 @@
 import type { NotificationFact, NotificationMessage } from './messages'
+import type { ProductKind } from '~/shared/product-details'
 import { platformLocale } from '~/shared/platform-locales'
 import { formatPhone } from '~/utils/phone'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
@@ -363,21 +364,50 @@ export function reviewRequestMessage(input: {
   partyLabel?: string
   reviewUrl: string
   organizationLogoUrl?: string | null
+  productKind?: ProductKind
+  productTitle?: string | null
 }): NotificationMessage {
+  const kind = input.productKind
+  let title: string
+  let preheader: string
+  let intro: string
+
+  if (kind === 'table') {
+    title = `${input.guestName}, thank you for dining with us at ${input.organizationName}`
+    preheader = `We'd love to hear how your meal was.`
+    intro = `Thank you for dining with us, ${input.guestName}. Whether it was a favorite dish or a quick thought, a couple of lines helps other diners know what to expect.`
+  } else if (kind === 'service') {
+    title = `${input.guestName}, thank you for consulting with ${input.organizationName}`
+    preheader = `We'd appreciate your feedback on our consultation.`
+    intro = `Thank you for speaking with us, ${input.guestName}. A few words about your experience helps our legal team and future clients.`
+  } else if (kind === 'stay') {
+    title = `${input.guestName}, thank you for staying with us at ${input.organizationName}`
+    preheader = `We'd love to hear how your stay went.`
+    intro = `Thank you for staying with us, ${input.guestName}. A few lines about your stay helps future guests and helps us keep improving.`
+  } else if (kind === 'experience') {
+    title = `${input.guestName}, thank you for joining us at ${input.organizationName}`
+    preheader = `We'd love to hear how your experience was.`
+    intro = `Thank you for joining us for ${input.productTitle ?? 'your session'}, ${input.guestName}. A couple of lines helps other guests know what to expect.`
+  } else {
+    title = `${input.guestName}, thank you for visiting ${input.organizationName}`
+    preheader = `${input.organizationName} would love to hear how everything went.`
+    intro = `Thanks for visiting, ${input.guestName}. A couple of lines helps other guests know what to expect.`
+  }
+
   return {
-    title: `Thanks for visiting ${input.organizationName}`,
-    preheader: `${input.organizationName} would love to hear how everything went.`,
+    title,
+    preheader,
     hero: null,
     organizationLogoUrl: input.organizationLogoUrl,
-    intro: `Thanks for visiting, ${input.guestName}. A couple of lines helps other guests know what to expect.`,
+    intro,
     facts: facts(
       fact('visitAt', 'Visit', input.visitAt),
       fact('partySize', input.partyLabel ?? 'Party size', input.partySize),
       fact('location', 'Location', input.locationName),
     ),
     primaryAction: { url: input.reviewUrl, label: 'Leave a review' },
-    emailPurpose: 'promotional',
-    emailReason: `You received this review request after your visit to ${input.organizationName}. You can unsubscribe from future review requests below.`,
+    emailPurpose: 'transactional',
+    emailReason: `You received this follow-up after your visit to ${input.organizationName}.`,
     category: 'review_requests',
     organizationName: input.organizationName,
   }

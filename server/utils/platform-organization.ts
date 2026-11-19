@@ -1,5 +1,5 @@
 import { queryFirst, type DbClient } from '~/server/db'
-import { PLATFORM_SITE } from '~/utils/site-routing'
+import { PLATFORM_THEME_IDS } from '~/utils/site-routing'
 
 export interface PlatformTenantIdentity {
   id: string
@@ -14,8 +14,8 @@ export interface PlatformTenantIdentity {
 export async function getPlatformOrganization(db: DbClient): Promise<PlatformTenantIdentity> {
   const tenant = await queryFirst<PlatformTenantIdentity>(
     db,
-    "SELECT id FROM organization WHERE theme_id = ? AND status = 'active' LIMIT 1",
-    [PLATFORM_SITE.themeId],
+    `SELECT id FROM organization WHERE theme_id IN (${PLATFORM_THEME_IDS.map(() => '?').join(', ')}) AND status = 'active' LIMIT 1`,
+    [...PLATFORM_THEME_IDS],
   )
   if (!tenant) throw new Error('No active organization runs the platform site')
   return tenant

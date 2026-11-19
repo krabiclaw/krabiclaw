@@ -10,7 +10,8 @@ import type { LayoutKey } from 'nuxt/app'
 export type SiteSurface = 'tenant' | 'platform'
 
 /** Blawby's own site is the one organization on this theme id. Every other id is a customer site. */
-export const PLATFORM_THEME_ID = 'krabiclaw-theme-v1'
+export const PLATFORM_THEME_ID = 'blawby-theme-v1'
+export const PLATFORM_THEME_IDS: readonly string[] = [PLATFORM_THEME_ID, 'krabiclaw-theme-v1']
 export const PLATFORM_CONTACT_EMAIL = 'hello@blawby.com'
 /** The theme id provisioning gives a customer site. */
 export const TENANT_THEME_ID = 'tenant-theme-v1'
@@ -54,10 +55,10 @@ export const CUSTOMER_SITE: PublicSiteDefinition = {
   layout: 'tenant',
   sitemap: {
     // Authored pages are listed from published documents, never assumed from a business type.
-    exactPaths: ['/', '/menu', '/products', '/experiences', '/stays', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
+    exactPaths: ['/', '/services', '/menu', '/products', '/experiences', '/stays', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
     dynamicPrefixes: ['/blog/', '/docs/', '/services/', '/experiences/', '/stays/', '/locations/', '/posts/'],
   },
-  nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed'],
+  nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed', '/login', '/signup', '/forgot-password', '/reset-password', '/accept-invitation'],
   pageDocuments: {
     recipes: {
       home: '/', about: '/about', contact: '/contact', reservations: '/reservations',
@@ -92,7 +93,7 @@ export function isPublicLocationPath(path: string): boolean {
  * names Blawby's own site out explicitly: that site is also `service`.
  */
 export function isLegalPracticeSite(input: { themeId?: string | null; vertical?: string | null }): boolean {
-  return String(input.themeId ?? '').trim().toLowerCase() !== PLATFORM_THEME_ID && isLegalPractice(input.vertical)
+  return !isPlatformSite(input) && isLegalPractice(input.vertical)
 }
 
 // Blawby's own site: the marketing pages, documentation and blog. It is an
@@ -107,10 +108,10 @@ export const PLATFORM_SITE: PublicSiteDefinition = {
     // page documents now, and the platform sitemap reads them from
     // content_documents (see server/plugins/sitemap.ts). What remains is the
     // set of code-owned platform routes that hold no document.
-    exactPaths: ['/blog', '/docs', '/help', '/posts', '/signup', '/templates', '/templates/blawby', '/templates/saya'],
+    exactPaths: ['/blog', '/docs', '/help', '/login', '/posts', '/signup', '/templates', '/templates/blawby', '/templates/saya'],
     dynamicPrefixes: ['/blog/', '/docs/', '/posts/'],
   },
-  nonIndexableExactPaths: ['/login', '/forgot-password', '/reset-password', '/accept-invitation'],
+  nonIndexableExactPaths: ['/forgot-password', '/reset-password', '/accept-invitation'],
   // Blawby's own marketing pages are ordinary page documents on the
   // platform site, read by the same loader every customer site uses (#903).
   // The routes that are not editorial — /blog, /docs, /help, /templates —
@@ -133,7 +134,7 @@ export const PUBLIC_SITES: readonly PublicSiteDefinition[] = [PLATFORM_SITE, CUS
 
 /** Is this Blawby's own site? Its theme id alone says. */
 export function isPlatformSite(input: { themeId?: string | null }): boolean {
-  return String(input.themeId ?? '').trim().toLowerCase() === PLATFORM_THEME_ID
+  return PLATFORM_THEME_IDS.includes(String(input.themeId ?? '').trim().toLowerCase())
 }
 
 export const TENANT_NON_INDEXABLE_EXACT_PATHS = new Set(
@@ -147,7 +148,6 @@ export const TENANT_NON_INDEXABLE_EXACT_PATHS = new Set(
 export function resolvePublicSite(input: {
   themeId?: string | null
 }): PublicSiteDefinition {
-  const themeId = String(input.themeId ?? '').trim().toLowerCase()
-  if (themeId === PLATFORM_THEME_ID) return PLATFORM_SITE
+  if (isPlatformSite(input)) return PLATFORM_SITE
   return CUSTOMER_SITE
 }

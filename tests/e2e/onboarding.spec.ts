@@ -222,9 +222,11 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const session = await (await page.request.get('/api/auth/get-session')).json() as { session: { activeOrganizationId: string | null } }
   const organizationId = session.session.activeOrganizationId
   expect(organizationId).toBe(initialDraft.organization_id)
-  const organizations = await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; name: string; slug: string }>
+  const organizations = await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; name: string; slug: string; metadata: unknown }>
   const created = organizations.find(organization => organization.id === organizationId)
   expect(created?.name).toBe(name)
+  const metadata = typeof created?.metadata === 'string' ? JSON.parse(created.metadata) : created?.metadata
+  expect(metadata).toMatchObject({ __blawby_organization_creation_marker: initialDraft.draft_id })
   const activatedWorkspaces = await page.request.get('/api/account/organizations?onboarding_status=active')
   expect(activatedWorkspaces.status()).toBe(200)
   expect((await activatedWorkspaces.json()).organizations).toContainEqual(expect.objectContaining({ id: organizationId, name }))

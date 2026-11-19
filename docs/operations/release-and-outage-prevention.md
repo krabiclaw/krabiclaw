@@ -79,6 +79,12 @@ After the deploy, the `adopt-pending-work` step re-queues every pending
 `airbnb_sync_jobs` row there. Check the `blawby-airbnb-sync` dead-letter queue
 when qualifying a release that changes Airbnb synchronization.
 
+Zaraz pageview triggers in both platform and SaaS zones accept
+`blawby_native_pageview` and the previous event name. Both are excluded from
+general tracks. The collector dispatches the Blawby event after recording the
+pageview. An open browser tab can keep using the previous event. Verify a
+consented pageview reaches GA once.
+
 ## Verifying a release
 
 Verification means completing what the customer came to do, up to the last

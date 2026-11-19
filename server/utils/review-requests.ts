@@ -161,7 +161,7 @@ export async function getReviewBookingContext(
 export async function getReviewRequestByToken(
   db: DbClient,
   token: string,
-  opts: { markClicked?: boolean } = {},
+  opts: { markClicked?: boolean; allowSubmitted?: boolean } = {},
 ): Promise<{ request: ReviewRequestRow; context: ReviewBookingContext } | null> {
   const tokenHash = await hashReviewRequestToken(token)
   const request = await queryFirst<ReviewRequestRow>(db, `
@@ -169,7 +169,7 @@ export async function getReviewRequestByToken(
     FROM review_requests
     WHERE token_hash = ?
       AND revoked_at IS NULL
-      AND submitted_at IS NULL
+      ${opts.allowSubmitted ? '' : 'AND submitted_at IS NULL'}
       AND expires_at > ?
     LIMIT 1
   `, [tokenHash, new Date().toISOString()])

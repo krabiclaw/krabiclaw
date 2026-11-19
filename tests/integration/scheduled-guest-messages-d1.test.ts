@@ -9,7 +9,7 @@ import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import { readToday } from '../../server/domain/today.ts'
 import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { joinedMemberPrincipal } from '../../server/utils/member-access.ts'
-import { guestConversationPath } from '../../shared/messages-contract.ts'
+import { PLATFORM_MESSAGE_AUTHOR_KIND, guestConversationPath } from '../../shared/messages-contract.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
@@ -77,7 +77,7 @@ test('the business outbox sends due messages, leaves future ones pending and rec
     // A send recorded under Cy's key with other words cannot be reconciled
     // automatically; it goes to review rather than being sent again.
     const cyWelcome = (await planned(cy.id, welcome.id))!
-    await appendMessage(db, { id: 'earlier-attempt', conversationId: cy.conversation_id, authorKind: 'krabiclaw', authorUserId: null, channel: 'email', body: 'Different words',
+    await appendMessage(db, { id: 'earlier-attempt', conversationId: cy.conversation_id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, channel: 'email', body: 'Different words',
       eventName: 'thread.scheduled_message', payload: { request_hash: 'other' }, dedupeKey: `guest-thread-operation:${cy.conversation_id}:scheduled-guest-message:${cyWelcome.id}` })
 
     // Eve's conversation is addressed through Channex. The provider's answer to
@@ -111,7 +111,7 @@ test('the business outbox sends due messages, leaves future ones pending and rec
     assert.equal(sent.status, 'sent')
     assert.ok(sent.sent_at && sent.message_id)
     assert.deepEqual(await db.prepare('SELECT e.conversation_id, e.author_kind, e.author_user_id, e.event_name, e.body, d.channel, d.purpose, d.status FROM messages e JOIN guest_thread_deliveries d ON d.message_id = e.id WHERE e.id = ?').bind(sent.message_id).first(), {
-      conversation_id: ana.conversation_id, author_kind: 'krabiclaw', author_user_id: null, event_name: 'thread.scheduled_message', body: 'Thanks for booking the cabin.', channel: 'email', purpose: 'scheduled_message', status: 'sent',
+      conversation_id: ana.conversation_id, author_kind: PLATFORM_MESSAGE_AUTHOR_KIND, author_user_id: null, event_name: 'thread.scheduled_message', body: 'Thanks for booking the cabin.', channel: 'email', purpose: 'scheduled_message', status: 'sent',
     })
     // Phone alone, with no email and no Blawby account, is nowhere to send: the failure is recorded with its own facts.
     const failed = (await planned(dee.id, welcome.id))!

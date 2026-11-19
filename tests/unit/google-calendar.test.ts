@@ -4,7 +4,7 @@ import { calendarEvent } from '../../server/utils/google-calendar.ts'
 import { composeBuyerActivityUrl, composeOwnerThreadInboxUrl } from '../../server/utils/dashboard-notification-links.ts'
 
 test('a table booking projects as a reservation, preserving canonical UTC instants and timezone without guest invitations', () => {
-  for (const origin of ['http://localhost:3113', 'https://staging.krabiclaw.com']) {
+  for (const origin of ['http://localhost:3113', 'https://staging.blawby.com']) {
     assert.equal(composeBuyerActivityUrl({ NUXT_PUBLIC_PLATFORM_DOMAIN: origin }, 'booking', 'thread'), `${origin}/dashboard/account/messages/thread/reservation`)
     assert.equal(composeOwnerThreadInboxUrl({ NUXT_PUBLIC_PLATFORM_DOMAIN: origin }, { orgSlug: 'org', locationSlug: null }, 'thread'), `${origin}/dashboard/org/messages/thread`)
   }

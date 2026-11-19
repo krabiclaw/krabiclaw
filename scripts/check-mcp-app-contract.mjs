@@ -36,7 +36,7 @@ async function main() {
   }
   const headers = await authHeaders()
 
-  const init = await request('initialize', { protocolVersion: MCP_VERSION, capabilities: {}, clientInfo: { name: 'krabiclaw-contract-check', version: '0.1.0' } }, headers)
+  const init = await request('initialize', { protocolVersion: MCP_VERSION, capabilities: {}, clientInfo: { name: 'blawby-contract-check', version: '0.1.0' } }, headers)
   expectStatus('initialize succeeds', init, 200)
   if (init.body?.result?.capabilities?.tools) pass('initialize advertises tools capability')
   else fail('initialize did not advertise tools capability', init.body)
@@ -71,7 +71,7 @@ async function main() {
   }
   const expectedFingerprint = catalogFingerprint(snapshot.tools)
   const actualFingerprint = catalogFingerprint(toolList)
-  const advertisedFingerprint = tools.body?.result?._meta?.['krabiclaw/catalogFingerprint']
+  const advertisedFingerprint = tools.body?.result?._meta?.['blawby/catalogFingerprint']
   if (expectedFingerprint === snapshot.fingerprint && actualFingerprint === expectedFingerprint
     && advertisedFingerprint === expectedFingerprint) {
     pass(`tools/list complete contracts match the canonical snapshot (${expectedFingerprint})`)
@@ -90,7 +90,7 @@ async function main() {
     if (hasTenantOauth && metaMatches) pass(`${tool.name} declares tenant OAuth security scheme`)
     else fail(`${tool.name} missing tenant OAuth security scheme`, { securitySchemes, metaSecuritySchemes })
   }
-  const client = new Client({ name: 'krabiclaw-contract-check', version: '0.1.0' }, {
+  const client = new Client({ name: 'blawby-contract-check', version: '0.1.0' }, {
     versionNegotiation: { mode: { pin: '2026-07-28' } },
   })
   const credentialHeaders = new Headers(headers)

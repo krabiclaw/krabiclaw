@@ -2,7 +2,7 @@ import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } fr
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
 import { normalizeHost, type TenantHostEnv } from '~/server/utils/tenant-hosts'
-import { PLATFORM_THEME_ID } from '~/utils/site-routing'
+import { isPlatformSite } from '~/utils/site-routing'
 import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { publishEvent, type EventsEnv } from '~/server/events'
 import { advanceOrganizationSocialCardRefresh, SOCIAL_CARD_REFRESH_LEASE_SECONDS, SOCIAL_CARD_REFRESH_PREFIX, type SocialCardEnv } from '~/server/utils/social-card'
@@ -165,7 +165,7 @@ export async function purgeOrganizationCaches(db: DbClient, kv: KVNamespace, org
   const hostnames = new Set<string>(domains.map(domain => domain.domain))
   const organization = organizations[0]
   if (organization?.subdomain && freeOrganizationDomain) hostnames.add(`${organization.subdomain}.${freeOrganizationDomain}`)
-  if (organization?.theme_id === PLATFORM_THEME_ID) {
+  if (isPlatformSite({ themeId: organization?.theme_id })) {
     // The platform's configured apex can move without changing the hosted
     // domain rows that keep the original address and native APIs routable.
     const platformHost = normalizeHost(env.NUXT_PUBLIC_PLATFORM_DOMAIN)

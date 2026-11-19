@@ -10,15 +10,15 @@ export interface TenantHostEnv {
 const PAGES_DEV_HOST = 'krabiclaw.pages.dev'
 export const LEGACY_FREE_SITE_HOST = 'krabiclaw.com'
 export const BLAWBY_FREE_SITE_HOST = 'blawby.com'
-const STAGING_PLATFORM_HOST = 'staging.blawby.com'
-const LEGACY_STAGING_PLATFORM_HOST = 'staging.krabiclaw.com'
+export const STAGING_PLATFORM_HOST = 'staging.blawby.com'
+export const LEGACY_STAGING_PLATFORM_HOST = 'staging.krabiclaw.com'
 
 const ENVIRONMENT_PLATFORM_HOST_PATTERN = /^(staging)\.(.+)$/
 const ENVIRONMENT_TENANT_ALIAS_HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-staging\.(?:blawby|krabiclaw)\.com$/
 const TENANT_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
 
 // Strip protocol, path, and port so config values (which may be
-// full URLs like "https://krabiclaw.com" or "http://localhost:3000") compare
+// full URLs like "https://blawby.com" or "http://localhost:3000") compare
 // cleanly against a request's hostname (which never carries protocol and has
 // already had its port stripped by the caller).
 export function normalizeHost(value?: string | null): string {

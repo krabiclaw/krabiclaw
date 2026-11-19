@@ -57,7 +57,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
       return Response.json({ object: 'subscription', id: subscription, status, ...trial, customer: `cus_${subscription.slice(4)}`, items: { object: 'list', data: [plan, ...items], has_more: false } })
     }
     // Basic is quoted from the published catalog.
-    const catalog = publishedCatalogResponse(url)
+    const catalog = publishedCatalogResponse(url, 'legacy')
     if (catalog) return catalog
     assert.equal(url.pathname, '/v1/billing/meter_events')
     const body = new URLSearchParams(String(init?.body))

@@ -15,10 +15,10 @@ function price(key: BillingMeterKey) {
   }
 }
 
-export function publishedCatalogResponse(url: URL): Response | null {
+export function publishedCatalogResponse(url: URL, generation: 'blawby' | 'legacy' = 'blawby'): Response | null {
   const list = (data: unknown[]) => Response.json({ object: 'list', data, has_more: false })
   if (url.pathname === '/v1/products') return list(BILLING_METER_KEYS.map(key => ({ object: 'product', id: `prod-${key}`, active: true, metadata: { product_family: key, monthly_price_id: `price-${key}` } })))
   if (url.pathname === '/v1/prices') return list(BILLING_METER_KEYS.map(price))
-  if (url.pathname === '/v1/billing/meters') return list(BILLING_METER_KEYS.map(key => ({ object: 'billing.meter', id: `mtr-${key}`, status: 'active', event_name: BILLING_METERS[key].eventName, default_aggregation: { formula: BILLING_METERS[key].formula } })))
+  if (url.pathname === '/v1/billing/meters') return list(BILLING_METER_KEYS.map(key => ({ object: 'billing.meter', id: `mtr-${key}`, status: 'active', event_name: generation === 'legacy' ? BILLING_METERS[key].eventName : BILLING_METERS[key].replacementEventName, default_aggregation: { formula: BILLING_METERS[key].formula } })))
   return null
 }

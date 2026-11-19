@@ -28,6 +28,19 @@ test('unknown sites render an unbranded 404 while resolved tenant errors retain 
   expect(errors).toEqual([])
 })
 
+test('old public logo URLs redirect to the renamed PNG assets', async ({ request, baseURL }) => {
+  for (const asset of ['logo', 'logo-192', 'maskable-192', 'maskable-512']) {
+    const target = `/blawby-${asset}.png`
+    const legacy = await request.get(`/krabi-claw-${asset}.png`, { maxRedirects: 0 })
+    expect(legacy.status()).toBe(301)
+    expect(new URL(legacy.headers().location!, baseURL).pathname).toBe(target)
+    const image = await request.get(target)
+    expect(image.status()).toBe(200)
+    expect(image.headers()['content-type']).toContain('image/png')
+    expect((await image.body()).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
+  }
+})
+
 test('the platform publishes its localized homepage and includes its canonical URL in the sitemap', async ({ page, request, baseURL }) => {
   const translations = [
     ['ja', 'ウェブサイトを数分で公開'],
@@ -59,6 +72,7 @@ test('tenant blog search opens an article from its body and excludes another ten
   const articleTitle = 'Preparing for your legal consultation'
   await openTenantPage(page, new URL('/blog', seededSiteURL('legal')).href, seededSiteHeaders('legal'))
   await waitForNuxtHydration(page)
+  await expect(page.locator('link[rel=preconnect][href="https://media.blawby.com"]')).toHaveCount(1)
   await page.getByRole('button', { name: /search/i }).filter({ visible: true }).first().click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('textbox').fill('relevant documents')

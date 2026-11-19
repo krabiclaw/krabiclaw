@@ -13,7 +13,7 @@ function domain(overrides: Partial<DomainRecord>): DomainRecord {
     role: 'secondary',
     status: 'pending',
     dns_status: 'pending',
-    dns_target: 'customers.krabiclaw.com',
+    dns_target: 'customers.blawby.com',
     created_at: '2026-07-23T00:00:00.000Z',
     updated_at: '2026-07-23T00:00:00.000Z',
     ...overrides,
@@ -22,8 +22,8 @@ function domain(overrides: Partial<DomainRecord>): DomainRecord {
 
 test('only account-specific CNAMEs prove that DNS points to SaaS', () => {
   const cases = [
-    { name: 'exact CNAME', cname: ['customers.krabiclaw.com'], a: [], aaaa: [], expected: true },
-    { name: 'managed descendant CNAME', cname: ['tenant.customers.krabiclaw.com'], a: [], aaaa: [], expected: true },
+    { name: 'exact CNAME', cname: ['customers.blawby.com'], a: [], aaaa: [], expected: true },
+    { name: 'managed descendant CNAME', cname: ['tenant.customers.blawby.com'], a: [], aaaa: [], expected: true },
     { name: 'unrelated CNAME', cname: ['proxy.example.net'], a: [], aaaa: [], expected: false },
     { name: 'shared IPv4 only', cname: [], a: ['104.21.79.204'], aaaa: [], expected: null },
     { name: 'shared IPv6 only', cname: [], a: [], aaaa: ['2606:4700:3030::6815:4fcc'], expected: null },
@@ -32,7 +32,7 @@ test('only account-specific CNAMEs prove that DNS points to SaaS', () => {
 
   for (const entry of cases) {
     assert.equal(
-      domainRecordsPointToSaas([...entry.cname], [...entry.a], [...entry.aaaa], 'customers.krabiclaw.com'),
+      domainRecordsPointToSaas([...entry.cname], [...entry.a], [...entry.aaaa], 'customers.blawby.com'),
       entry.expected,
       entry.name,
     )
@@ -53,16 +53,16 @@ test('domainInstructions uses first-class second SSL and Delegated DCV fields', 
     ssl_validation_value_2: 'ssl-token-2',
     dcv_delegation_name: '_acme-challenge.example.com',
     dcv_delegation_type: 'CNAME',
-    dcv_delegation_value: 'krabiclaw.com.dcv.cloudflare.com',
+    dcv_delegation_value: 'blawby.com.dcv.cloudflare.com',
     metadata: JSON.stringify({ ssl_validation_value2: 'legacy-hidden-token' }),
   }))
 
   assert.equal(instructions.ownership?.value, 'ownership-token')
-  assert.equal(instructions.dcv_delegation?.value, 'krabiclaw.com.dcv.cloudflare.com')
+  assert.equal(instructions.dcv_delegation?.value, 'blawby.com.dcv.cloudflare.com')
   assert.deepEqual(instructions.ssl_records.map((record) => record.value), ['ssl-token-1', 'ssl-token-2'])
   assert.deepEqual(instructions.records.map((record) => record.value), [
     'ownership-token',
-    'krabiclaw.com.dcv.cloudflare.com',
+    'blawby.com.dcv.cloudflare.com',
     'ssl-token-1',
     'ssl-token-2',
   ])
@@ -99,7 +99,7 @@ test('groupCustomDomains renders apex and www as one customer domain row', () =>
       ownership_validation_value: 'ownership-token',
       dcv_delegation_name: '_acme-challenge.example.com',
       dcv_delegation_type: 'CNAME',
-      dcv_delegation_value: 'krabiclaw.com.dcv.cloudflare.com',
+      dcv_delegation_value: 'blawby.com.dcv.cloudflare.com',
     }),
     domain({
       id: 'domain-www',
@@ -112,7 +112,7 @@ test('groupCustomDomains renders apex and www as one customer domain row', () =>
     }),
     domain({
       id: 'domain-platform',
-      domain: 'demo.krabiclaw.com',
+      domain: 'demo.blawby.com',
       type: 'subdomain',
       status: 'active',
     }),
@@ -124,8 +124,8 @@ test('groupCustomDomains renders apex and www as one customer domain row', () =>
   assert.equal(groups[0]?.www_domain_id, 'domain-www')
   assert.deepEqual(groups[0]?.records.map((record) => [record.type, record.name, record.value]), [
     ['TXT', '_cf-custom-hostname.example.com', 'ownership-token'],
-    ['CNAME', '_acme-challenge.example.com', 'krabiclaw.com.dcv.cloudflare.com'],
-    ['CNAME', 'www', 'customers.krabiclaw.com'],
+    ['CNAME', '_acme-challenge.example.com', 'blawby.com.dcv.cloudflare.com'],
+    ['CNAME', 'www', 'customers.blawby.com'],
     ['TXT', '_acme-challenge.www.example.com', 'www-certificate-token'],
   ])
 })

@@ -17,7 +17,7 @@ test('locale query selection is limited to public data APIs', () => {
     undefined,
   )
   assert.equal(
-    localeQueryMiddleware(event('https://krabiclaw.example/dashboard/kikuzuki/website/brand?editMode=translations&locale=th')),
+    localeQueryMiddleware(event('https://blawby.example/dashboard/kikuzuki/website/brand?editMode=translations&locale=th')),
     undefined,
   )
   assert.throws(

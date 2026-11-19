@@ -3,7 +3,7 @@ import { normalizeReferrerHost, readAttributionParams } from '~/utils/analytics-
 import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { isTrackablePath } from '~/utils/pageview-path'
-import { NATIVE_PAGEVIEW_ZARAZ_EVENT } from '~/utils/zaraz-consent'
+import { LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT } from '~/utils/zaraz-consent'
 
 interface ZarazPageviewApi {
   track?: (name: string, properties?: Record<string, unknown>) => Promise<void>
@@ -104,7 +104,7 @@ export function registerPageviewTracking() {
       keepalive: true,
     })
     if (!response.ok) throw new Error(`Analytics collection was rejected (${response.status})`)
-    return await response.json() as { ignored?: boolean; ga4_delivery?: { dispatch?: boolean } }
+    return await response.json() as { ignored?: boolean; ga4_delivery?: { dispatch?: boolean; event_name?: string } }
   }
   const report = (error: unknown) => {
     void nuxtApp.callHook('vue:error', error, null, 'analytics-collector')
@@ -117,13 +117,14 @@ export function registerPageviewTracking() {
     await after
     const result = await send(page.pageview!).catch(report)
     if (!result || result.ignored) return false
-    if (result.ga4_delivery?.dispatch) {
+    const delivery = result.ga4_delivery
+    if (delivery?.dispatch) {
       // Native readiness never waits for an optional destination or its receipt.
       void (async () => {
         let deliveryStatus = 'dispatched'
         try {
           if (!win.zaraz?.track) throw new Error('Zaraz is unavailable for the recorded pageview')
-          await win.zaraz.track(NATIVE_PAGEVIEW_ZARAZ_EVENT, { event_id: page.eventId, page_location: new URL(page.fullPath, window.location.origin).href })
+          await win.zaraz.track(delivery.event_name ?? LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT, { event_id: page.eventId, page_location: new URL(page.fullPath, window.location.origin).href })
         } catch (error) { deliveryStatus = 'failed'; report(error) }
         await send({ event_id: page.eventId, event_type: 'ga4_delivery', page_path: page.path, delivery_status: deliveryStatus }).catch(report)
       })()
