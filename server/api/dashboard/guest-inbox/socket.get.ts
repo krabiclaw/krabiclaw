@@ -28,10 +28,10 @@ export default defineHandler(async (event) => {
   }
   const headers = {
     upgrade: 'websocket',
-    'x-krabiclaw-user-id': session.user.id,
-    'x-krabiclaw-session-id': session.session.id,
-    'x-krabiclaw-session-token': session.session.token,
-    ...(organizationId !== null && { 'x-krabiclaw-organization-id': organizationId }),
+    'x-blawby-user-id': session.user.id,
+    'x-blawby-session-id': session.session.id,
+    'x-blawby-session-token': session.session.token,
+    ...(organizationId !== null && { 'x-blawby-organization-id': organizationId }),
   }
 
   // URL and init rather than a Request: Wrangler's platform proxy stub for a

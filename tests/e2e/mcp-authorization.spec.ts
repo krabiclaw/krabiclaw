@@ -17,12 +17,14 @@ test.describe('stateless MCP server', () => {
 
     // A blank header is not "no tenant selected": it names a tenant that
     // resolves to nothing, and must fail closed the same way.
-    const blankOrgTools = await mcpRequest(request, baseURL!, {
-      method: 'tools/list',
-      extraHeaders: { 'x-krabiclaw-organization-id': '   ' },
-    })
-    expect(blankOrgTools.status()).toBe(200)
-    expect(((await blankOrgTools.json()) as { result: { tools: unknown[] } }).result.tools).toEqual([])
+    for (const header of ['x-blawby-organization-id', 'x-krabiclaw-organization-id']) {
+      const blankOrgTools = await mcpRequest(request, baseURL!, {
+        method: 'tools/list',
+        extraHeaders: { [header]: '   ' },
+      })
+      expect(blankOrgTools.status()).toBe(200)
+      expect(((await blankOrgTools.json()) as { result: { tools: unknown[] } }).result.tools).toEqual([])
+    }
 
     const wrongOrg = await mcpRequest(request, baseURL!, {
       method: 'tools/call',

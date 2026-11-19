@@ -80,7 +80,7 @@ const LOCK_STALE_MS = 60_000
 const LOCK_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000]
 const TENANT_KEY_PREFIX = 'ga-tenant-'
 // Not under TENANT_KEY_PREFIX: it is shared by every GA4 tool and outlives any one tenant's.
-const NATIVE_PAGEVIEW_TRIGGER_KEY = 'krabiclaw-native-pageview'
+const NATIVE_PAGEVIEW_TRIGGER_KEY = 'blawby-native-pageview'
 const GOOGLE_VENDOR_NAME = 'Google Analytics'
 const GOOGLE_VENDOR_POLICY_URL = 'https://policies.google.com/privacy'
 
@@ -399,6 +399,21 @@ export function reconcileZarazAnalyticsConfig(
   config.triggers ||= {}
   config.tools ||= {}
   const before = stableStringify(config)
+  const legacyPageviewKey = 'krabiclaw-native-pageview'
+  const { [legacyPageviewKey]: legacyPageviewTrigger, ...currentTriggers } = config.triggers
+  if (legacyPageviewTrigger) {
+    config.triggers = { ...currentTriggers, [NATIVE_PAGEVIEW_TRIGGER_KEY]: currentTriggers[NATIVE_PAGEVIEW_TRIGGER_KEY] ?? legacyPageviewTrigger }
+    for (const tool of Object.values(config.tools)) {
+      for (const action of Object.values(tool.actions ?? {})) {
+        if (action.firingTriggers) {
+          action.firingTriggers = action.firingTriggers.map(key => key === legacyPageviewKey ? NATIVE_PAGEVIEW_TRIGGER_KEY : key)
+        }
+        if (action.blockingTriggers) {
+          action.blockingTriggers = action.blockingTriggers.map(key => key === legacyPageviewKey ? NATIVE_PAGEVIEW_TRIGGER_KEY : key)
+        }
+      }
+    }
+  }
   const desiredToolKeys = new Set(input.tenants.map(tenant => tenantKey(tenant.organizationId)))
   const desiredTriggerKeys = new Set(input.tenants.flatMap(tenant => {
     const k = tenantKey(tenant.organizationId)
