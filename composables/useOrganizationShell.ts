@@ -38,7 +38,7 @@ export const useOrganizationShellState = () => {
     }),
     {
       server: true,
-      dedupe: 'cancel',
+      dedupe: 'defer',
       // Reuse what SSR already resolved. Without this the shell can be
       // fetched a second time during hydration, and that fetch carries
       // different authorization than the server render did (the preview

@@ -4,9 +4,8 @@ import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { executeBatch, queryFirst } from '~/server/db'
-import { dashboardMemberQuery, dashboardOrgQueryParam, getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { dashboardMemberQuery, dashboardOrgQueryParam, getDashboardMemberContext, getDashboardSession } from '~/server/utils/dashboard-context'
 import { cloudflareEnv, readRequiredBody } from '~/server/utils/api-response'
-import { getAuthSession } from '~/server/utils/auth'
 import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, withViewer } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
 import { BOOKING_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, requestActions, type BookedRecord } from '~/server/domain/requests'
@@ -173,11 +172,11 @@ export async function dashboardBookingList(event: H3Event, query: BookingListQue
  * read by the organization's slug, and every other statement names the
  * organization through that slug.
  */
-async function dashboardPlacesCalendar(event: H3Event, window: BookingWindow) {
+async function dashboardPlacesCalendar(event: H3Event, window: BookingWindow, orgSlug?: string) {
   const env = cloudflareEnv(event)
-  const session = await getAuthSession(event, env)
+  const session = await getDashboardSession(event, env)
   if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
-  const slug = dashboardOrgQueryParam(event)
+  const slug = orgSlug ?? dashboardOrgQueryParam(event)
   if (!slug) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
   const userId = session.user.id
   const organization = { query: '(SELECT id FROM organization WHERE slug = ?)', params: [slug] }
@@ -201,11 +200,11 @@ async function dashboardPlacesCalendar(event: H3Event, window: BookingWindow) {
  * places are. The membership leads the batch; homes, prices, stays and nights
  * follow, each reading the homes the viewer may see.
  */
-async function dashboardHomesCalendar(event: H3Event, window: BookingWindow) {
+async function dashboardHomesCalendar(event: H3Event, window: BookingWindow, orgSlug?: string) {
   const env = cloudflareEnv(event)
-  const session = await getAuthSession(event, env)
+  const session = await getDashboardSession(event, env)
   if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
-  const slug = dashboardOrgQueryParam(event)
+  const slug = orgSlug ?? dashboardOrgQueryParam(event)
   if (!slug) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
   const userId = session.user.id
   const membership = membershipBySlugQuery(slug, userId)
@@ -219,10 +218,10 @@ async function dashboardHomesCalendar(event: H3Event, window: BookingWindow) {
   return { from: window.from, to: window.to, bookings: calendar.stays, homes, places: [], manage: access.manage }
 }
 
-export async function dashboardBookingCalendar(event: H3Event, query: BookingListQuery) {
+export async function dashboardBookingCalendar(event: H3Event, query: BookingListQuery, orgSlug?: string) {
   const window = bookingListWindow(query)
-  if (window.unit === 'slot') return dashboardPlacesCalendar(event, window)
-  if (window.unit === 'nights') return dashboardHomesCalendar(event, window)
+  if (window.unit === 'slot') return dashboardPlacesCalendar(event, window, orgSlug)
+  if (window.unit === 'nights') return dashboardHomesCalendar(event, window, orgSlug)
   // Without a unit: the homes calendar, and the timed bookings beside its stays.
   const [homes, timed] = await Promise.all([dashboardHomesCalendar(event, window), dashboardBookingsContext(event).then(async context => timedBookings(await readBookedRecords(context, window), window))])
   return { ...homes, bookings: [...timed, ...homes.bookings] }

@@ -1,6 +1,6 @@
 import type { H3Event } from 'nitro'
 import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
-import type { BatchQuery, DbClient } from '~/server/db'
+import { executeBatch, type BatchQuery, type DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
 import { projectPublicLocation } from '~/shared/location-sharing'
 import { publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
@@ -121,7 +121,7 @@ export function publicSections(vertical: string | null, catalog: readonly Public
   }
 }
 
-export function appendPublicShellQueries(
+function appendPublicShellQueries(
   queries: BatchQuery[],
   organizationId: string,
   previewMenu = false,
@@ -166,6 +166,15 @@ export function appendPublicShellQueries(
                       OR (mp.owner_type = 'business_location' AND mp.slot IN ('hero', 'social_card')))
                   ORDER BY mp.owner_type, mp.owner_id, mp.slot, mp.sort_order, mp.id`, [organizationId]),
   }
+}
+
+export function readPublicShellRows(event: H3Event, db: DbClient, organizationId: string, previewMenu: boolean) {
+  return oncePerRequest(event, `public-shell-rows:${organizationId}:${previewMenu}`, async () => {
+    const queries: BatchQuery[] = []
+    const indexes = appendPublicShellQueries(queries, organizationId, previewMenu)
+    const results = await executeBatch(db, queries)
+    return { indexes, results }
+  })
 }
 
 export function readPublicExperiences(event: H3Event, db: DbClient, organizationId: string, env: CloudflareEnv): Promise<Product[]> {

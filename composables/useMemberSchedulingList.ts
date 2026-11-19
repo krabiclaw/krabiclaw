@@ -5,7 +5,7 @@ import type { Serialize } from 'nitro/types'
 type MembersResponse = Serialize<Awaited<ReturnType<typeof memberSchedulingList>>>
 
 /** One scoped read for assignment controls and calendar filters. */
-export function useMemberSchedulingList(organizationId: MaybeRefOrGetter<string | null | undefined>) {
+export function useMemberSchedulingList(organizationId: MaybeRefOrGetter<string | null | undefined>, deferred = false) {
   return useAsyncData(
     computed(() => `member-scheduling-list:${toValue(organizationId) ?? 'none'}`),
     () => {
@@ -18,5 +18,6 @@ export function useMemberSchedulingList(organizationId: MaybeRefOrGetter<string 
             && (member.scheduling === null || isRecord(member.scheduling))),
       })
     },
+    { server: !deferred, lazy: deferred },
   )
 }
