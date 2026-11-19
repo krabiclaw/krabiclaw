@@ -40,6 +40,8 @@ import { prepareTenantPageEditor, websiteEditorOrganization } from '~/server/uti
 import { prepareConnectionSummary, prepareWebsiteSettings } from '~/server/utils/organization-settings'
 import { prepareOrganizationReviews } from '~/server/utils/organization-reviews'
 import { preparePublicLocationDocument } from '~/server/utils/public-route'
+import { preparePublicAuthoredPage } from '~/server/utils/public-tenant-pages'
+import { preparePublicInquiryForm } from '~/server/domain/form-questions'
 import { isDocumentOnlyPublicPath } from '~/shared/public-locale-routes'
 import { blogPostCategoriesQuery, prepareBlogList, prepareBlogPost } from '~/server/utils/content/publishing'
 import { articleCategoriesQuery, readArticleCategories } from '~/server/utils/content/article-categories'
@@ -134,9 +136,14 @@ const TENANT_SELECT_SQL = `SELECT ${publicBaseColumns('o')},
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/acceptable-use' AND ${publicTenantPageSql('d')}) AS acceptable_use_policy,
              ${PUBLIC_CONFIG_COLUMNS}`
 
+function authoredDocumentPath(path: string) {
+  return /^\/(?:about|contact|schedule|policies\/(?:privacy|terms|acceptable-use))?$/.test(path) ? path : null
+}
+
 function tenantSelectFor(event: H3Event) {
   const path = normalizedPath(event.url.pathname)
-  const document = isDocumentOnlyPublicPath(splitLocalePrefix(path).sourcePath)
+  const sourcePath = splitLocalePrefix(path).sourcePath
+  const document = authoredDocumentPath(sourcePath) || isDocumentOnlyPublicPath(sourcePath)
     || /^\/(?:[A-Za-z-]+\/)?(?:reservations|pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(path)
   if (!['GET', 'HEAD'].includes(event.method) || !document) {
     return { query: TENANT_SELECT_SQL, params: [] }
@@ -264,22 +271,30 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
   const includeReviews = sourcePath === '/reviews'
   const locationRoute = /^\/locations\/([a-z0-9_-]+)\/(menu|reviews)$/.exec(sourcePath)
   const privateCheckout = /^\/(?:pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(sourcePath)
-  if (!collectionKind && !includeReviews && !locationRoute && !privateCheckout) {
+  const authoredApi = path === '/api/public/pages'
+  const apiPath = authoredApi ? event.url.searchParams.get('path') : null
+  const authoredPath = apiPath?.startsWith('/') && !apiPath.startsWith('//') ? normalizedPath(apiPath)
+    : authoredDocumentPath(sourcePath)
+  if (!collectionKind && !includeReviews && !locationRoute && !privateCheckout && !authoredPath) {
     return queryFirst<TenantRow>(db, host.query, host.params)
   }
 
   const organization = { sql: '(SELECT id FROM viewer)' }
   const locale = { sql: `(SELECT locale FROM organization_locales WHERE organization_id = ${organization.sql} AND is_source = 1)` }
-  const plan = preparePublicShellRows(organization, requestedLocale || locale, { collectionKind, includeReviews, previewMenu: false })
-  const localizations = requestedLocale ? [publicLocalizationsQuery(organization, requestedLocale)] : []
+  const documentLocale = authoredApi ? event.url.searchParams.get('locale') : requestedLocale
+  const plan = authoredApi ? null : preparePublicShellRows(organization, requestedLocale || locale, { collectionKind, includeReviews, previewMenu: false })
+  const localizations = documentLocale ? [publicLocalizationsQuery(organization, documentLocale)] : []
   const location = locationRoute ? preparePublicLocationDocument(organization, {
     slug: locationRoute[1]!, page: locationRoute[2]!, locale: requestedLocale || undefined,
   }) : null
+  const authored = authoredPath ? preparePublicAuthoredPage(organization, authoredPath, documentLocale || locale) : null
+  const inquiry = !authoredApi && authoredPath === '/contact' ? preparePublicInquiryForm(organization, documentLocale || locale) : null
   const returningId = /^\/pay\/([a-f0-9-]+)$/.exec(sourcePath)?.[1]
   const returnPlan = returningId && typeof claim === 'string' && /^[a-f0-9-]{72}$/u.test(claim)
     ? await preparePaymentReturn(tenantScope, returningId, claim) : null
   const [hostRows, ...results] = await executeBatch(db, [
-    host, ...[...plan.queries, ...localizations, ...location?.queries ?? []].map(query => withViewer(authorized, query)),
+    host, ...[...plan?.queries ?? [], ...localizations, ...location?.queries ?? [], ...authored?.queries ?? [], ...inquiry ? [inquiry.statement] : []]
+      .map(query => withViewer(authorized, query)),
     ...(returnPlan ? [returnPlan] : []),
   ], {
     operation: 'Read the public tenant document',
@@ -288,15 +303,26 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
   if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
     const source = JSON.parse(tenant.source_locale_rows) as { locale: string }[]
     if (source.length === 1) {
-      event.context.publicDocumentShell = {
+      const shellLength = plan?.queries.length ?? 0
+      const locationStart = shellLength + localizations.length
+      const authoredStart = locationStart + (location?.queries.length ?? 0)
+      if (plan) event.context.publicDocumentShell = {
         organizationId: tenant.id, locale: requestedLocale || source[0]!.locale, collectionKind, includeReviews, plan,
-        results: results.slice(0, plan.queries.length),
+        results: results.slice(0, shellLength),
       } satisfies PublicDocumentShell
-      if (requestedLocale) event.context.publicDocumentLocalizations = {
-        organizationId: tenant.id, locale: requestedLocale,
-        rows: results[plan.queries.length]!.results as StoredPublicLocalizationRow[],
+      if (documentLocale) event.context.publicDocumentLocalizations = {
+        organizationId: tenant.id, locale: documentLocale,
+        rows: results[shellLength]!.results as StoredPublicLocalizationRow[],
       }
-      if (location) event.context.publicLocationDocument = location.read(results.slice(plan.queries.length + localizations.length), tenant.id)
+      if (location) event.context.publicLocationDocument = location.read(results.slice(locationStart, authoredStart), tenant.id)
+      if (authored) event.context.publicAuthoredPage = {
+        organizationId: tenant.id, locale: documentLocale || source[0]!.locale, path: authoredPath!, plan: authored,
+        rows: results.slice(authoredStart, authoredStart + authored.queries.length),
+      }
+      if (inquiry) event.context.publicInquiryForm = {
+        organizationId: tenant.id, locale: documentLocale || source[0]!.locale,
+        value: results[authoredStart + (authored?.queries.length ?? 0)]!.results[0],
+      }
       if (returnPlan && typeof claim === 'string') {
         const resolvedLocale = requestedLocale || source[0]!.locale
         event.context.paymentReturnDocument = await sealPaymentReturnDocument(cloudflareEnv(event).BETTER_AUTH_SECRET,

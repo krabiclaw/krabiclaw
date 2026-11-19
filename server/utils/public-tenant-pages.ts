@@ -1,26 +1,31 @@
-import { getSourceLocale } from '~/server/utils/organization-locales'
 import type { ProductKind } from '~/shared/product-details'
-import { HTTPError } from 'nitro';
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { HTTPError, type H3Event } from 'nitro'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { faqBlockSource, faqItems, listFaqBlockQa } from '~/server/utils/location-qa'
 import type { FaqBlockSource } from '~/shared/faq-block'
 import { listOrganizationReviews } from '~/server/utils/organization-reviews'
-import { getTenantPageById, getPublishedTenantPage, publicTenantPageSql, type TenantPageDto } from '~/server/utils/content/pages'
-import { validateContentBlockData, type TenantPageBlock } from '~/utils/tenant-page-blocks'
+import { prepareTenantPageAtPath, publicTenantPageSql, type TenantPageDto } from '~/server/utils/content/pages'
+import { normalizeTenantPagePath, validateContentBlockData, type TenantPageBlock } from '~/utils/tenant-page-blocks'
 import type { MediaPlacementItem } from '~/server/utils/media-placement'
 import { COVER_SELECT, attachCoverMedia, coverJoinSql } from '~/server/utils/content/cover'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
-import type { SocialImageSource } from '~/utils/social-metadata'
+import { publicSocialMediaFromPlacements, type SocialImageSource } from '~/utils/social-metadata'
+import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
+import { assertPublicOrganizationLanguage, getPersistedSourceLocale, readPublicOrganizationLanguage, readPublicSourceLocale } from '~/server/utils/localization'
 import {
-  loadExactPublicLocalizations,
+  indexStoredPublicLocalizations,
+  preloadedPublicLocalizations,
+  publicLocalizationsQuery,
+  type StoredPublicLocalizationRow,
   projectExactLocalizedCollection,
   projectLocalizedMediaAlt,
   type ExactPublicLocalization,
 } from '~/server/utils/public-localization'
 import { documentOfRootSql } from '~/server/utils/content/documents'
-import { listPublicLocaleRepresentations, resolvePublicDocumentSourcePath } from '~/server/utils/public-locale-representations'
+import { listPublicLocaleRepresentations, publicDocumentLocaleQuery, type LocalizedRouteCandidate } from '~/server/utils/public-locale-representations'
 import { listPublicSocialPosts } from '~/server/utils/post-management'
+import { cloudflareEnv } from '~/server/utils/api-response'
 import { isLegalPracticeSite, resolvePublicSite } from '~/utils/site-routing'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { EXPERIENCE_PRESENTATION, presentationForProduct, publicLocationPath } from '~/utils/product-presentation'
@@ -29,7 +34,7 @@ import { projectPublicLocation, type PublicLocationPrivacySource } from '~/share
 import { publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
-import { listCollections, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
+import { prepareCollectionList, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
 import { summarizeProductPrices } from '~/utils/product-money'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
@@ -89,9 +94,7 @@ export interface PublicTenantPageProductRow {
   media: MediaPlacementItem[]
 }
 
-export interface PublicTenantPageHydrationResources {
-  pages?: Promise<PublicTenantPageReferenceRow[]>
-}
+type AuthoredPageSite = { theme_id: string | null; vertical: string | null; default_currency: string | null; address_visibility: string | null }
 
 /**
  * Resolve the pages a page_grid names.
@@ -100,14 +103,12 @@ export interface PublicTenantPageHydrationResources {
  * page on the site" — that source is gone, because it silently changed
  * whenever anyone added a page.
  */
-export async function listPublicTenantPageReferenceRows(
+async function listPublicTenantPageReferenceRows(
   db: DbClient,
   organizationId: string,
   pageIds: readonly string[],
-  locale?: string,
+  locale: string,
 ): Promise<PublicTenantPageReferenceRow[]> {
-  locale ??= await getSourceLocale(db, organizationId)
-  if (pageIds.length === 0) return []
   // The referenced root, rendered in the requested locale through its own
   // representation row. A missing translation links to the source document.
   const rows = await queryAll<Omit<PublicTenantPageReferenceRow, 'media'>>(db, `
@@ -131,35 +132,39 @@ export async function listPublicTenantPageReferenceRows(
  * The grid stores references only, so names and descriptions come from the
  * product every time it renders and cannot go stale.
  */
-async function loadTenantPageProductCatalog(db: DbClient, organizationId: string, locale?: string, localizations: readonly ExactPublicLocalization[] | null = null, env?: CloudflareEnv) {
-  locale ??= await getSourceLocale(db, organizationId)
-  const [products, collections, locations, pageRepresentations] = await Promise.all([
+async function loadTenantPageProductCatalog(db: DbClient, organizationId: string, locale: string, localizations: readonly ExactPublicLocalization[] | null, env: CloudflareEnv) {
+  const collections = prepareCollectionList({ organizationId })
+  const placements = mediaPlacementsQuery({ organizationId, ownerType: 'product', owners: {
+    sql: 'SELECT product_id FROM product_publications WHERE organization_id = ? AND published = 1',
+    params: [organizationId],
+  } })
+  const [products, [locations, images, ...rows]] = await Promise.all([
     listOrganizationProducts(db, { organizationId, publishedOnly: true, env }).then(products => products.map(publicProduct)),
-    listCollections(db, { organizationId }),
-    queryAll<{ id: string; slug: string }>(db, "SELECT id,slug FROM business_locations WHERE organization_id=? AND status='active'", [organizationId]),
-    localizations ? queryAll<{ product_id: string; path: string }>(db, `SELECT root.product_id, rep.path
-      FROM content_documents root JOIN content_documents rep ON rep.root_id=root.id AND rep.row_role='representation' AND rep.locale=?
-      WHERE root.organization_id=? AND root.kind='page' AND root.product_id IS NOT NULL AND rep.path IS NOT NULL AND ${publicTenantPageSql('root')}`, [locale, organizationId]) : Promise.resolve([]),
+    executeBatch(db, [
+      { query: "SELECT id,slug FROM business_locations WHERE organization_id=? AND status='active'", params: [organizationId] },
+      placements, ...collections.queries,
+      ...(localizations ? [{ query: `SELECT root.product_id, rep.path
+        FROM content_documents root JOIN content_documents rep ON rep.root_id=root.id AND rep.row_role='representation' AND rep.locale=?
+        WHERE root.organization_id=? AND root.kind='page' AND root.product_id IS NOT NULL AND rep.path IS NOT NULL AND ${publicTenantPageSql('root')}`,
+        params: [locale, organizationId] }] : []),
+    ], { operation: 'Read authored page catalog references' }),
   ])
-  const media = await loadPublicSocialMedia(db, organizationId, 'product', products.map(product => product.id))
-  if (localizations) for (const entry of media.values()) entry.media = projectLocalizedMediaAlt(entry.media, localizations)
+  const sourceLocations = locations!.results as { id: string; slug: string }[]
+  const media = groupMediaPlacements(images!.results)
   const localizedProducts = localizations ? projectExactLocalizedCollection('product', products, localizations) : products
-  const localizedLocations = localizations ? projectExactLocalizedCollection('business_location', locations, localizations) : locations
-  return { products: localizedProducts, collections, locations: localizedLocations, media, locale, localized: localizations !== null, pageRepresentations }
+  const localizedLocations = localizations ? projectExactLocalizedCollection('business_location', sourceLocations, localizations) : sourceLocations
+  return { products: localizedProducts, collections: collections.read(rows.slice(0, collections.queries.length)), locations: localizedLocations,
+    media, locale, localizations, pageRepresentations: (localizations ? rows.at(-1)!.results : []) as { product_id: string; path: string }[] }
+
 }
 
-export async function listPublicTenantPageProductRows(
-  db: DbClient,
-  organizationId: string,
-  selection: { collectionId?: string | null; productIds?: readonly string[] },
+function tenantPageProductRows(
+  source: Awaited<ReturnType<typeof loadTenantPageProductCatalog>>,
+  selection: { collectionId?: string; productIds?: readonly string[] },
   currency: string,
-  catalog?: Awaited<ReturnType<typeof loadTenantPageProductCatalog>>,
-  env?: CloudflareEnv,
-): Promise<PublicTenantPageProductRow[]> {
-  const productIds = new Set(selection.productIds ?? [])
-  if (!selection.collectionId && !productIds.size) return []
+): PublicTenantPageProductRow[] {
   if (!isCurrencyCode(currency)) throw new Error('The public catalog requires a supported currency')
-  const source = catalog ?? await loadTenantPageProductCatalog(db, organizationId, undefined, null, env)
+  const productIds = new Set(selection.productIds ?? [])
   const collection = selection.collectionId ? source.collections.find(item => item.id === selection.collectionId) : null
   if (selection.collectionId && !collection) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page collection reference is unavailable' })
   const locations = new Map(source.locations.map(location => [location.id, location]))
@@ -182,7 +187,7 @@ export async function listPublicTenantPageProductRows(
       : locationSlug && presentation ? presentation.productPath(locationSlug, product.slug) : null)
     const localizedPage = source.pageRepresentations.find(page => page.product_id === product.id)
     let publicPath = sourcePath
-    if (source.localized) {
+    if (source.localizations) {
       if (product.page) publicPath = localizedPage ? `/${source.locale}${localizedPage.path}` : null
       else publicPath = sourcePath ? `/${source.locale}${sourcePath}` : null
     }
@@ -193,7 +198,10 @@ export async function listPublicTenantPageProductRows(
       pricing_note: typeof note === 'string' ? note : null,
       unit_amount: prices.lowest?.unit_amount ?? null, max_unit_amount: prices.highest?.unit_amount ?? null,
       compare_at_unit_amount: prices.lowest?.compare_at_unit_amount ?? null, currency: prices.lowest?.currency ?? null,
-      media: source.media.get(product.id)?.media ?? [],
+      media: projectLocalizedMediaAlt(
+        (source.media.get(product.id) ?? []).filter(item => item.slot === 'image' || item.slot === 'gallery'),
+        source.localizations,
+      ),
     }]
   })
 }
@@ -205,7 +213,7 @@ async function hydrateBlocks(
   pagePath: string,
   locale: string,
   blocks: TenantPageBlock[],
-  resources: PublicTenantPageHydrationResources = {},
+  organizationRow: AuthoredPageSite,
   localizations: readonly ExactPublicLocalization[] | null = null,
 ): Promise<TenantPageBlock[]> {
   const pageIds = new Set<string>()
@@ -237,19 +245,8 @@ async function hydrateBlocks(
     // A contact form may name an offering whose booking flow a visitor can enter instead.
     if (block.type === 'contact_form' && typeof block.data.booking_product_id === 'string' && block.data.booking_product_id.trim()) productIds.add(block.data.booking_product_id)
   }
-  // The site this page belongs to. Its site decides where an article
-  // lives, its vertical decides where a product lives, and its currency
-  // decides which offers apply.
-  // The reads a block names (pages, FAQ, reviews, posts) depend on the blocks
-  // alone, so they travel with the site row rather than after it.
-  const [organizationRow, sourcePages, qaItemsBySource, sourceReviewRows, sourcePostRows] = await Promise.all([
-    queryFirst<{ theme_id: string | null; vertical: string | null; default_currency: string | null; address_visibility: string | null }>(
-      db, "SELECT theme_id, vertical, default_currency, json_extract(settings_json, '$.compliance.address_visibility') AS address_visibility FROM organization WHERE id = ? LIMIT 1", [organizationId]),
-    pageIds.size
-      ? resources.pages
-        ? resources.pages.then(pages => pages.filter(page => pageIds.has(page.id)))
-        : listPublicTenantPageReferenceRows(db, organizationId, [...pageIds], locale)
-      : [],
+  const [sourcePages, qaItemsBySource, sourceReviewRows, sourcePostRows] = await Promise.all([
+    pageIds.size ? listPublicTenantPageReferenceRows(db, organizationId, [...pageIds], locale) : [],
     Promise.all([...qaSources].map(async source => [source, faqItems(await listFaqBlockQa(db, organizationId, pagePath, source, locale))] as const)).then(entries => new Map(entries)),
     hasReviewSource ? listOrganizationReviews(db, organizationId, { publishedOnly: true }) : [],
     hasPostSource ? queryAll<{ id: string; title: string; slug: string; excerpt: string | null; cover_asset_id: string | null; cover_public_url: string | null; cover_thumbnail_url: string | null; cover_kind: string | null; cover_alt_text: string | null; cover_width: number | null; cover_height: number | null }>(db, `
@@ -260,7 +257,6 @@ async function hydrateBlocks(
        ORDER BY root.published_at IS NULL, root.published_at DESC, p.id DESC
     `, [locale, organizationId]) : [],
   ])
-  if (!organizationRow) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page site is unavailable' })
   const site = resolvePublicSite({ themeId: organizationRow.theme_id})
   // Legal practices list their practice areas on /services, and their offices
   // link to the contact page rather than to location pages they do not have.
@@ -274,10 +270,7 @@ async function hydrateBlocks(
   const currency = organizationRow.default_currency
   const homepage = pagePath === '/' && site.slug !== 'platform'
   const homepageMenu = homepage && !legalPractice
-  // The default services list, the catalog and the branches all follow from the
-  // site alone; one round trip reads the three.
-  const [services, productCatalog, sourceLocations] = await Promise.all([
-    defaultServices ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, env }).then(products => products.map(publicProduct)) : [],
+  const [productCatalog, sourceLocations] = await Promise.all([
     collectionIds.size || productIds.size || homepage || defaultServices ? loadTenantPageProductCatalog(db, organizationId, locale, localizations, env) : undefined,
     locationIds.size || defaultLocationGrid
       ? queryAll<PublicLocationPrivacySource & { id: string; title: string; slug: string; address: string | null; latitude: number | null; longitude: number | null; description: string | null; short_description: string | null; asset_id: string | null; public_url: string | null; thumbnail_url: string | null; kind: string | null; alt_text: string | null }>(db, `
@@ -290,7 +283,7 @@ async function hydrateBlocks(
         `, [organizationId, defaultLocationGrid ? 1 : 0, d1JsonStringSet([...locationIds])])
       : [],
   ])
-  for (const service of services) {
+  for (const service of defaultServices ? productCatalog!.products.filter(product => product.kind === 'service') : []) {
     if (!service.page) throw new HTTPError({ statusCode: 500, statusMessage: 'Published service page is unavailable', data: { code: 'SERVICE_PAGE_MISSING', product_id: service.id } })
     productIds.add(service.id)
   }
@@ -307,10 +300,10 @@ async function hydrateBlocks(
   if ((collectionIds.size || productIds.size) && !currency) {
     throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page site has no currency' })
   }
-  const productsByCollection = new Map(await Promise.all([...collectionIds].map(async collectionId =>
-    [collectionId, await listPublicTenantPageProductRows(db, organizationId, { collectionId }, currency!, productCatalog)] as const)))
+  const productsByCollection = new Map([...collectionIds].map(collectionId =>
+    [collectionId, tenantPageProductRows(productCatalog!, { collectionId }, currency!)] as const))
   const productById = new Map((productIds.size
-    ? await listPublicTenantPageProductRows(db, organizationId, { productIds: [...productIds] }, currency!, productCatalog)
+    ? tenantPageProductRows(productCatalog!, { productIds: [...productIds] }, currency!)
     : []).map(product => [product.id, product]))
   const menuProducts = [...productById.values()].filter(product => product.kind === 'dish')
   const featuredMenuProducts = menuProducts.filter(product => product.featured)
@@ -563,68 +556,90 @@ function mapPage(
   }
 }
 
+export function preparePublicAuthoredPage(
+  organization: string | { sql: string }, path: string, locale: string | { sql: string }, preview = false,
+) {
+  const page = prepareTenantPageAtPath(organization, path, locale, preview)
+  const scoped = { sql: '(SELECT organization_id FROM page_scope)' }
+  const home = path === '/'
+  const media = mediaPlacementsQuery({
+    organizationId: scoped, ownerType: home ? 'organization' : 'content_document',
+    owners: { sql: `SELECT ${home ? 'organization_id' : 'id'} FROM page_scope` }, includeOrganizationFallback: !home,
+  })
+  const alternates = publicDocumentLocaleQuery(scoped, { sql: '(SELECT page_id FROM page_scope)' })
+  const site: BatchQuery = {
+    query: `SELECT theme_id, vertical, default_currency, json_extract(settings_json, '$.compliance.address_visibility') AS address_visibility
+              FROM organization WHERE id = ${scoped.sql}`,
+  }
+  return {
+    queries: [...page.queries, ...[media, alternates, site].map(statement => ({
+      query: `WITH page_scope AS (${page.statement.query}) ${statement.query}`,
+      params: [...page.statement.params ?? [], ...statement.params ?? []],
+    }))],
+    read(rows: D1Result[]) {
+      const record = page.read(rows)
+      if (!record) return null
+      const [placements, candidates, configuration] = rows.slice(page.queries.length)
+      const site = configuration!.results[0] as AuthoredPageSite | undefined
+      if (!site || !record.row.source_path) throw new Error('Tenant page is missing its site or source path')
+      const grouped = groupMediaPlacements(placements!.results)
+      const brand = grouped.get(record.page.organization_id) ?? []
+      const picture = home ? publicSocialMediaFromPlacements('organization', brand, brand)
+        : publicSocialMediaFromPlacements('content_document', grouped.get(record.page.id) ?? [], brand)
+      return { page: record.page, sourcePath: record.row.source_path, site,
+        social: home ? { media: [], social_image: picture.social_image } : picture,
+        candidates: candidates!.results as LocalizedRouteCandidate[] }
+    },
+  }
+}
+
 export async function getPublicTenantPageForPath(
   env: CloudflareEnv,
   db: DbClient,
   organizationId: string,
   path: string,
-  options: {
-    locale?: string | null
-    preview?: boolean
-    hydrationResources?: PublicTenantPageHydrationResources
-    localizations?: readonly ExactPublicLocalization[] | null
-  } = {},
+  options: { locale?: string | null; preview?: boolean; event?: H3Event; localizations?: readonly ExactPublicLocalization[] | null } = {},
 ): Promise<PublicTenantPage | null> {
-  const page = options.preview
-    ? await getTenantPageById(db, await resolveVariantId(db, organizationId, path, options.locale), { organizationId })
-    : await getPublishedTenantPage(db, organizationId, path, options.locale)
-  if (!page) return null
-  const localizations = page.id === page.page_id
-    ? null
-    : options.localizations ?? await loadExactPublicLocalizations(env, db, page.organization_id, page.locale)
-  // The home page has no card of its own: it is the organization's page, and
-  // its image is the organization's.
-  const [blocks, media, locale_representations] = await Promise.all([
-    hydrateBlocks(env, db, organizationId, page.path, page.locale, page.blocks, options.hydrationResources, localizations),
-    page.path === '/'
-      ? loadPublicSocialMedia(db, organizationId, 'organization', [organizationId]).then(organization => new Map([[page.id, {
-          media: [],
-          social_image: organization.get(organizationId)?.social_image ?? null,
-        }]]))
-      : loadPublicSocialMedia(db, organizationId, 'content_document', [page.id]),
-    resolvePublicDocumentSourcePath(db, organizationId, page.page_id).then(sourcePath => listPublicLocaleRepresentations(env, db, {
-      organizationId: page.organization_id,
-      sourcePath,
-      documentId: page.page_id,
-    })),
+  path = normalizeTenantPagePath(path)
+  const { event, preview = false } = options
+  const source = await (event ? readPublicSourceLocale(event, db, organizationId) : getPersistedSourceLocale(db, organizationId))
+  const locale = options.locale || source.locale
+  const translated = locale !== source.locale
+  if (translated) await (event ? readPublicOrganizationLanguage(event, db, organizationId, locale, source)
+    : assertPublicOrganizationLanguage(db, organizationId, locale, source))
+  const preloaded = event?.context.publicAuthoredPage as { organizationId: string; locale: string; path: string;
+    plan: ReturnType<typeof preparePublicAuthoredPage>; rows: D1Result[] } | undefined
+  const reuse = !preview && preloaded?.organizationId === organizationId && preloaded.locale === locale && preloaded.path === path
+  const stored = translated && !options.localizations && event ? preloadedPublicLocalizations(event, organizationId, locale) : undefined
+  const plan = reuse ? preloaded.plan : preparePublicAuthoredPage(organizationId, path, locale, preview)
+  const localizationRead = translated && !options.localizations && !stored ? publicLocalizationsQuery(organizationId, locale) : null
+  const rows = reuse && !localizationRead ? preloaded.rows
+    : await executeBatch(db, [...plan.queries, ...localizationRead ? [localizationRead] : []], { operation: 'Read authored public page' })
+  const record = plan.read(rows)
+  if (!record) return null
+  const { page, site, social, sourcePath, candidates } = record
+  const localizations = translated ? options.localizations ?? indexStoredPublicLocalizations(
+    stored ?? rows.at(-1)!.results as StoredPublicLocalizationRow[]) : null
+  const [blocks, locale_representations] = await Promise.all([
+    hydrateBlocks(env, db, organizationId, page.path, page.locale, page.blocks, site, localizations),
+    listPublicLocaleRepresentations(env, db, { organizationId, sourceLocale: source, sourcePath, candidates }),
   ])
-  const localizedMedia = page.id === page.page_id
-    ? media.get(page.id) ?? { media: [], social_image: null }
-    : {
-        ...(media.get(page.id) ?? { media: [], social_image: null }),
-        media: projectLocalizedMediaAlt(media.get(page.id)?.media ?? [], localizations ?? []),
-      }
-  if (page.id !== page.page_id) {
-    for (const block of blocks) {
-      block.media = projectLocalizedMediaAlt(
-        block.media.map(item => ({ ...item, alt_text: item.alt_text ?? null })),
-        localizations ?? [],
-      )
-    }
+  if (localizations) for (const block of blocks) {
+    block.media = projectLocalizedMediaAlt(block.media.map(item => ({ ...item, alt_text: item.alt_text ?? null })), localizations)
   }
-  return mapPage(page, blocks, localizedMedia, locale_representations)
+  return mapPage(page, blocks, localizations ? { ...social, media: projectLocalizedMediaAlt(social.media, localizations) } : social, locale_representations)
 }
 
-async function resolveVariantId(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<string> {
-  locale ??= await getSourceLocale(db, organizationId)
-  const row = await queryFirst<{ id: string } | null>(db, `
-    SELECT v.id
-      FROM content_documents v
-     WHERE v.kind = 'page' AND v.row_role IN ('root','representation') AND v.organization_id = ? AND v.path = ?
-       AND (? IS NULL OR v.locale = ?)
-     ORDER BY v.locale ASC
-     LIMIT 1
-  `, [organizationId, path, locale ?? null, locale ?? null])
-  if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Tenant page not found' })
-  return row.id
+export async function readPublicAuthoredPage(event: H3Event, query: Record<string, unknown>) {
+  const organizationId = event.context.organizationId as string | undefined
+  if (!organizationId) throw new HTTPError({ statusCode: 400, statusMessage: 'Unknown tenant' })
+  const env = cloudflareEnv(event)
+  if (!env.db) throw new HTTPError({ statusCode: 503, statusMessage: 'Database unavailable' })
+  const path = typeof query.path === 'string' ? query.path : null
+  if (!path) throw new HTTPError({ statusCode: 400, statusMessage: 'A page path is required' })
+  const locale = typeof query.locale === 'string' ? query.locale : null
+  const preview = event.context.previewAuthorized === true
+  const page = await getPublicTenantPageForPath(env, env.db, organizationId, path, { locale, preview, event })
+  if (!page) throw new HTTPError({ statusCode: 404, statusMessage: 'Tenant page not found' })
+  return { success: true as const, page, preview }
 }

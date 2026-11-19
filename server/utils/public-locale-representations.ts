@@ -39,6 +39,23 @@ export function publicResourceLocaleQuery(
     type, ...(typeof id === 'string' ? [id] : id.params)] }
 }
 
+export function publicDocumentLocaleQuery(organizationId: string | { sql: string }, documentId: string | { sql: string }): BatchQuery {
+  return { query: `
+    SELECT v.locale, CASE WHEN v.path = '/' THEN '/' || v.locale ELSE '/' || v.locale || v.path END AS route_path
+      FROM content_documents v
+      JOIN organization_locales sl ON sl.organization_id = v.organization_id AND sl.locale = v.locale
+     WHERE v.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}
+       AND v.root_id = ${typeof documentId === 'string' ? '?' : documentId.sql}
+       AND v.row_role = 'representation' AND sl.status = 'published'
+     ORDER BY v.locale
+  `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(typeof documentId === 'string' ? [documentId] : [])] }
+}
+
+function readDocumentCandidates(db: DbClient, organizationId: string, documentId: string) {
+  const { query, params } = publicDocumentLocaleQuery(organizationId, documentId)
+  return queryAll<LocalizedRouteCandidate>(db, query, params)
+}
+
 export async function resolvePublicLocalizationSourcePath(
   db: DbClient,
   organizationId: string,
@@ -104,16 +121,7 @@ export async function listPublicLocaleRepresentations(
   const candidates = input.candidates ?? (resource
     ? await queryAll<LocalizedRouteCandidate>(db, resource.query, resource.params)
     : input.documentId
-      ? await queryAll<{ locale: string; route_path: string }>(db, `
-          SELECT v.locale,
-                 CASE WHEN v.path = '/' THEN '/' || v.locale ELSE '/' || v.locale || v.path END AS route_path
-            FROM content_documents v
-            JOIN organization_locales sl
-              ON sl.organization_id = v.organization_id AND sl.locale = v.locale
-           WHERE v.organization_id = ? AND v.root_id = ? AND v.row_role = 'representation'
-             AND sl.status = 'published'
-           ORDER BY v.locale
-        `, [input.organizationId, input.documentId])
+      ? await readDocumentCandidates(db, input.organizationId, input.documentId)
       : input.publishedLocaleRoute
         ? input.publishedLocales?.filter(locale => locale !== sourceLocale.locale)
           .map(locale => ({ locale, route_path: `/${locale}${input.sourcePath === '/' ? '' : input.sourcePath}` }))

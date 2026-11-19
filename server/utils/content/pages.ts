@@ -266,21 +266,28 @@ export interface TenantPageScope {
   organizationId: string
 }
 
-function pageRepresentationQuery(variantId: string, organization?: string | { sql: string }, editor = false): BatchQuery {
+function pageRepresentationQuery(
+  target: string | { path: string; locale: string | { sql: string }; preview: boolean },
+  organization?: string | { sql: string }, editor = false,
+): BatchQuery {
   const scope = typeof organization === 'string' ? '?' : organization?.sql
   const publication = editor ? `,
     CASE WHEN ${publicTenantPageSql('p')} AND EXISTS (SELECT 1 FROM organization_locales l
       WHERE l.organization_id = v.organization_id AND l.locale = v.locale
         AND (v.row_role = 'root' OR l.status = 'published'))
       THEN v.path END AS public_path` : ''
+  const where = typeof target === 'string' ? 'v.id = ?'
+    : `v.path = ? AND v.locale = ${typeof target.locale === 'string' ? '?' : target.locale.sql}
+        ${target.preview ? '' : `AND ${publicTenantPageSql('p')}`}`
   return {
-    query: `SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale, v.path,
+    query: `SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale, v.path, p.path AS source_path,
       v.title, v.summary, p.product_id, v.kind, v.row_role, v.root_id, v.created_at,
       json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at${publication}
       FROM content_documents v JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id)
         AND p.row_role = 'root' AND p.kind = 'page' AND p.organization_id = v.organization_id
-      WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.id = ? ${scope ? `AND v.organization_id = ${scope}` : ''} LIMIT 1`,
-    params: [variantId, ...(typeof organization === 'string' ? [organization] : [])],
+      WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND ${where} ${scope ? `AND v.organization_id = ${scope}` : ''} LIMIT 1`,
+    params: [...(typeof target === 'string' ? [target] : [target.path, ...(typeof target.locale === 'string' ? [target.locale] : [])]),
+      ...(typeof organization === 'string' ? [organization] : [])],
   }
 }
 
@@ -512,7 +519,14 @@ function tenantPageBlocksFromRows([blocks, media]: Awaited<ReturnType<typeof exe
 }
 
 export function prepareTenantPageEditorSnapshot(variantId: string, organization?: string | { sql: string }, editor = false) {
-  const page = pageRepresentationQuery(variantId, organization, editor)
+  return prepareTenantPageSnapshot(pageRepresentationQuery(variantId, organization, editor), editor)
+}
+
+export function prepareTenantPageAtPath(organization: string | { sql: string }, path: string, locale: string | { sql: string }, preview = false) {
+  return prepareTenantPageSnapshot(pageRepresentationQuery({ path: normalizeTenantPagePath(path), locale, preview }, organization), false)
+}
+
+function prepareTenantPageSnapshot(page: BatchQuery, editor: boolean) {
   const scoped = { sql: '(SELECT organization_id FROM page_scope)' }
   const document = { sql: '(SELECT id FROM page_scope)' }
   const pageWithFaq = { sql: `(SELECT path FROM page_scope WHERE EXISTS (
@@ -522,6 +536,7 @@ export function prepareTenantPageEditorSnapshot(variantId: string, organization?
   const material = tenantPageBlockQueries(scoped, document)
   if (editor) material.push(qaListQuery(scoped, null, locale, true, pageWithFaq))
   return {
+    statement: page,
     queries: [
       page,
       ...material.map(query => ({
@@ -530,7 +545,7 @@ export function prepareTenantPageEditorSnapshot(variantId: string, organization?
       })),
     ],
     read([result, ...related]: D1Result[]) {
-      const row = result!.results[0] as (PageRepresentationRow & ContentDocumentRow & { public_path?: string | null }) | undefined
+      const row = result!.results[0] as (PageRepresentationRow & ContentDocumentRow & { public_path?: string | null; source_path: string | null }) | undefined
       if (!row) return null
       const blocks = tenantPageBlocksFromRows(related)
       const faq = related[2]?.results as QaDocument[] | undefined
@@ -557,30 +572,16 @@ export async function getTenantPageById(db: DbClient, variantId: string, scope?:
 }
 
 export async function getPublishedTenantPage(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<TenantPageDto | null> {
-  const row = await resolvePublishedTenantPageIdentity(db, organizationId, path, locale)
-  if (!row) return null
-  const rows = await executeBatch(db, tenantPageBlockQueries(organizationId, row.id), { operation: 'Read published page blocks' })
-  return pageDto(row, documentOf(row), tenantPageBlocksFromRows(rows))
+  const plan = prepareTenantPageAtPath(organizationId, path, await resolveLocale(db, organizationId, locale))
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read published page blocks' }))?.page ?? null
 }
 
 export async function resolvePublishedTenantPageIdentity(
-  db: DbClient,
-  organizationId: string,
-  path: string,
-  locale?: string | null,
+  db: DbClient, organizationId: string, path: string, locale?: string | null,
 ) {
-  const resolvedLocale = await resolveLocale(db, organizationId, locale)
-  const normalizedPath = normalizeTenantPagePath(path)
-  return await queryFirst<PageRepresentationRow | null>(db, `
-    SELECT v.id, p.id AS page_id, v.organization_id, v.locale, v.path,
-           v.title, v.summary, p.product_id,
-           json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at
-      FROM content_documents v
-      JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id) AND p.row_role = 'root' AND p.kind = 'page'
-     WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.organization_id = ? AND v.locale = ? AND v.path = ?
-       AND ${publicTenantPageSql('p')}
-      LIMIT 1
-  `, [organizationId, resolvedLocale, normalizedPath])
+  const target = { path: normalizeTenantPagePath(path), locale: await resolveLocale(db, organizationId, locale), preview: false }
+  const { query, params } = pageRepresentationQuery(target, organizationId)
+  return queryFirst<PageRepresentationRow>(db, query, params)
 }
 
 export async function createTenantPagesBatch(

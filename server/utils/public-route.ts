@@ -143,7 +143,7 @@ export async function readPublicRoute(
       })) : { reviews: [], aggregate: null },
     requested.has('photos') ? readPhotos() : [],
     requested.has('qa') ? listQa(db, organizationId, location?.id ?? null, true, null, language.locale) : [],
-    documentPath ? getPublicTenantPageForPath(env, db, organizationId, documentPath, { locale, preview, localizations: language.source ? null : translations }) : null,
+    documentPath ? getPublicTenantPageForPath(env, db, organizationId, documentPath, { locale: language.locale, preview, event, localizations: language.source ? null : translations }) : null,
     blogSlug && requested.has('blog_post') ? getPublishedBlogPost(db, organizationId, 'blog', blogSlug, language.locale, env, preview) : null,
     !documentPath || location ? loadRepresentations() : null,
     locationsRead,
