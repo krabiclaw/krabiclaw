@@ -1,6 +1,7 @@
 import type Stripe from 'stripe'
 import { BILLING_METER_KEYS, BILLING_METERS, type BillingMeterKey } from '~/shared/billing-model'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { attachedBlawbyMeters } from '~/server/utils/better-auth-stripe'
 import { readOrganizationSubscriptions } from '~/server/utils/billing-access'
 import { planSubscriptionItem, readStripeCatalog, selectMeteredPrices } from '~/server/utils/stripe-catalog'
 
@@ -12,7 +13,7 @@ interface StripeMeterTransition {
   completed: boolean
 }
 
-export function stripeMeterTransition(contract?: Stripe.Subscription): StripeMeterTransition | undefined {
+function stripeMeterTransition(contract?: Stripe.Subscription): StripeMeterTransition | undefined {
   const raw = contract?.metadata?.[STRIPE_METER_RENEWAL]
   if (!raw) return
   const renewal = Number(raw)
@@ -25,9 +26,22 @@ export function stripeMeterTransition(contract?: Stripe.Subscription): StripeMet
   return { renewal, completed }
 }
 
-export async function readStripeMeterTransition(
+interface StripeMeterContract {
+  transition?: StripeMeterTransition
+  replacementMeters: ReadonlySet<BillingMeterKey>
+}
+
+export async function stripeMeterContract(stripe: Stripe, env: CloudflareEnv, contract?: Stripe.Subscription): Promise<StripeMeterContract | undefined> {
+  if (!contract) return
+  return {
+    transition: stripeMeterTransition(contract),
+    replacementMeters: await attachedBlawbyMeters(stripe, env, contract),
+  }
+}
+
+export async function readStripeMeterContract(
   stripe: Stripe, env: CloudflareEnv, organizationId: string, customer: string,
-): Promise<StripeMeterTransition | undefined> {
+): Promise<StripeMeterContract | undefined> {
   if (env.STRIPE_BILLING_METER_MIGRATION !== 'true') return
   const all = (await readOrganizationSubscriptions(env, [organizationId])).get(organizationId) ?? []
   const billed = all.filter(row => ['active', 'trialing', 'past_due'].includes(row.status))
@@ -36,7 +50,7 @@ export async function readStripeMeterTransition(
   if (!subscriptionId) return
   const contract = await stripe.subscriptions.retrieve(subscriptionId)
   if (contract.customer !== customer) throw new Error(`Stripe subscription ${subscriptionId} belongs to a different customer`)
-  return stripeMeterTransition(contract)
+  return stripeMeterContract(stripe, env, contract)
 }
 
 export async function reportStripeMeterUsage(
@@ -44,13 +58,20 @@ export async function reportStripeMeterUsage(
   key: BillingMeterKey,
   customer: string,
   value: number,
-  transition?: StripeMeterTransition,
+  contract?: StripeMeterContract,
   identifier?: string,
 ): Promise<void> {
   const { eventName, replacementEventName } = BILLING_METERS[key]
   const payload = { stripe_customer_id: customer, value: String(value) }
-  if (transition?.completed && !identifier) {
-    await stripe.billing.meterEvents.create({ event_name: replacementEventName, payload })
+  const transition = contract?.transition
+  const replacementIdentifier = identifier ? `blawby:${identifier}` : undefined
+  const onReplacement = contract?.replacementMeters.has(key)
+  if (onReplacement && (!identifier || !transition?.completed)) {
+    await stripe.billing.meterEvents.create({
+      event_name: replacementEventName,
+      payload,
+      ...(replacementIdentifier ? { identifier: replacementIdentifier } : {}),
+    }, replacementIdentifier ? { idempotencyKey: replacementIdentifier } : undefined)
     return
   }
   const original = await stripe.billing.meterEvents.create({
@@ -64,7 +85,7 @@ export async function reportStripeMeterUsage(
   // excludes replacement events sent before the new price becomes effective.
   // Keep these events pending in usage_events until the price has switched.
   if (!transition.completed) throw new Error('Stripe has not yet activated the replacement meter for this billing period')
-  const replacementIdentifier = `blawby:${identifier}`
+  if (!onReplacement) return
   await stripe.billing.meterEvents.create({
     event_name: replacementEventName,
     payload,
@@ -98,8 +119,8 @@ export async function replaceRenewedStripeMeters(stripe: Stripe, event: Stripe.E
   }
 
   const catalog = await readStripeCatalog(stripe)
-  const legacy = selectMeteredPrices(catalog)
-  const replacement = selectMeteredPrices(catalog, true)
+  const legacy = selectMeteredPrices(catalog, 'legacy')
+  const replacement = selectMeteredPrices(catalog, 'blawby')
   const items = []
   for (const key of BILLING_METER_KEYS) {
     const current = contract.items.data.filter(item => item.price.id === legacy[key].id)

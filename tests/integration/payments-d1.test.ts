@@ -1593,7 +1593,10 @@ test('the Stripe renewal closes the old meter before delivering usage held for i
      : url.pathname === '/v1/billing/meters'
       ? list.data.map(meter => ({ ...meter, id: `replacement-${meter.id}`, event_name: meter.event_name!.replace('krabiclaw_', 'blawby_') }))
       : []
-    return Response.json({ ...list, data: [...list.data, ...additional] })
+    const entries = url.pathname === '/v1/products'
+    ? list.data.map(product => ({ ...product, metadata: { product_family: product.id.slice(5), monthly_price_id: `replacement-price-${product.id.slice(5)}` } }))
+    : list.data
+   return Response.json({ ...list, data: [...entries, ...additional] })
    }
    if (url.pathname === '/v1/subscriptions/sub_meter_renewal') {
     if (init?.method === 'POST') {
@@ -1640,6 +1643,14 @@ test('the Stripe renewal closes the old meter before delivering usage held for i
   assert.equal(delivered.error, null)
   assert.deepEqual(reported, ['krabiclaw_ad_spend', 'krabiclaw_ad_spend', 'blawby_ad_spend'])
   assert.equal(changes, 1)
+
+  // A subscription sold on the replacement price has no renewal marker.
+  delete metadata.blawby_meter_renewal
+  delete metadata.blawby_meter_renewed
+  await db.prepare("INSERT INTO usage_events(id,organization_id,resource,unit,quantity,idempotency_key,provider_occurred_at,created_at,source) VALUES('new-contract',?,'ad_spend','USD',125,'ads:new-contract',?,?,'payments')").bind(ORG,NOW,NOW).run()
+  assert.deepEqual(await deliverPaymentsUsage(db, env, ORG), { delivered: 1 })
+  assert.ok(await db.prepare("SELECT delivery_at FROM usage_events WHERE id='new-contract'").first('delivery_at'))
+  assert.deepEqual(reported.slice(3), ['blawby_ad_spend'])
  } finally { await runtime.dispose() }
 })
 
