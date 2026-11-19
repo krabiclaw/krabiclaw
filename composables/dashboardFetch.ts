@@ -93,8 +93,10 @@ export async function dashboardFetch<T>(
     return websiteSocialPost(panel) && rendersWebsiteDocument(panel, Object.fromEntries(url.searchParams))
   })()
   if (import.meta.server && (!options.method || options.method === 'GET') && (
-    (/^\/api\/editor\/organizations\/[^/]+\/(?:locations\/[^/]+\/)?products\/[^/]+$/.test(request)
+    (/^\/api\/editor\/organizations\/[^/]+\/(?:locations\/[^/]+\/)?products\/[^/]+(?:\/availability)?$/.test(request)
       && Boolean(dashboardProductId(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
+    || (/^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(request) && options.query?.view === 'assignment')
+    || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(request)
     || request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
     || (request === '/api/dashboard/payments' && (options.query?.view === 'performance' || options.query?.view === 'payouts'))
@@ -159,6 +161,13 @@ export async function applicationFetch<T>(
   request: string,
   options: DashboardFetchOptions<T>,
 ): Promise<T> {
+  if (import.meta.server && (!options.method || options.method === 'GET') && ((/^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(request) && options.query?.view === 'assignment')
+      || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(request))
+    && dashboardProductId(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))) {
+    const slug = useRoute().params.org_slug
+    if (typeof slug !== 'string') throw createError({ statusCode: 400, statusMessage: 'Dashboard organization scope is required' })
+    return dashboardFetch(request, { orgSlug: slug }, options)
+  }
   // See the comment in dashboardFetch above: a bare relative path is only
   // resolvable during SSR when we give ofetch an explicit baseURL.
   const baseURL = useRequestURL().origin

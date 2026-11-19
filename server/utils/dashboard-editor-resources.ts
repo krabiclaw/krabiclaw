@@ -1,3 +1,6 @@
+import { listingAccessGrantsQuery, listingAccessGrantsFromRows, staffAccessWritesEnabled } from '~/server/domain/listing-access'
+import { prepareMemberSchedulingList } from '~/server/domain/member-scheduling'
+import { availabilityRulesQuery, type ProductAvailabilityRule } from '~/server/utils/availability'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { prepareDashboardOffering } from '~/server/utils/dashboard-offering'
@@ -261,7 +264,7 @@ export async function presentDashboardProduct(
 }
 
 /** The same authorized product read joins either the document batch or its direct API batch. */
-export function prepareDashboardProductRead(productId: string, editor = true, saved?: Product) {
+export function prepareDashboardProductRead(productId: string, editor = true, saved?: Product, concerns: { members?: boolean; scheduleLocation?: string; access?: boolean } = {}) {
   const assignment = assignedOfferingCondition({ user: BATCH_VIEWER.user, unrestricted: '0' })
   const update = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: ['update'] }))
   const assigned = roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: ['assigned'] }))
@@ -269,7 +272,7 @@ export function prepareDashboardProductRead(productId: string, editor = true, sa
     WHERE p.organization_id = ${BATCH_VIEWER.organization} AND p.id = ? AND (${update} OR (${assigned} AND (${assignment.sql})))`, params: [productId] }
   const organization = { sql: '(SELECT organization_id FROM editor_product)' }
   const record = saved ? null : prepareOrganizationProduct(organization, productId)
-  const metadata = prepareDashboardProductMetadata(organization, productId, editor)
+  const metadata = prepareDashboardProductMetadata(organization, productId, editor, concerns)
   const recordQueries = record?.queries ?? [{ query: 'SELECT id FROM editor_product', params: [] }]
   const queries = [...recordQueries, ...metadata.queries].map((statement): BatchQuery => {
     const query = statement.query.trimStart()
@@ -285,7 +288,10 @@ export function prepareDashboardProductRead(productId: string, editor = true, sa
   } }
 }
 
-function prepareDashboardProductMetadata(organizationId: string | { sql: string }, productId: string, editor: boolean) {
+function prepareDashboardProductMetadata(organizationId: { sql: string }, productId: string, editor: boolean, concerns: { members?: boolean; scheduleLocation?: string; access?: boolean }) {
+  const members = concerns.members ? prepareMemberSchedulingList(organizationId, BATCH_VIEWER) : null
+  const schedule = concerns.scheduleLocation ? availabilityRulesQuery(organizationId, productId, concerns.scheduleLocation) : null
+  const access = concerns.access ? listingAccessGrantsQuery({ sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, ['owner'])} THEN ${organizationId.sql} END` }, productId) : null
   const media = preparePublicSocialMedia(organizationId, 'product', [productId])
   const links = prepareProductPublicPresentation(organizationId, productId)
   const navigation = editor ? prepareDashboardOffering(organizationId, productId) : null
@@ -294,9 +300,9 @@ function prepareDashboardProductMetadata(organizationId: string | { sql: string 
   const navigationEnd = linksEnd + (navigation?.queries.length ?? 0)
   return {
     queries: [...media.queries, ...links.queries, ...navigation?.queries ?? [], publishedHostProfilesQuery(organizationId, {
-      query: `SELECT assigned_member_id FROM product_booking_configs WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND product_id = ? AND unit = 'nights'`,
-      params: [...(typeof organizationId === 'string' ? [organizationId] : []), productId],
-    })],
+      query: `SELECT assigned_member_id FROM product_booking_configs WHERE organization_id = ${organizationId.sql} AND product_id = ? AND unit = 'nights'`,
+      params: [productId],
+    }), ...members?.queries ?? [], ...(schedule ? [schedule] : []), ...(access ? [access] : [])],
     async read(rows: D1Result[], product: Product, locationId: string | null, context: ProductEditorContext) {
       const { env, db, organization } = context
       const organizationId = organization.id
@@ -320,6 +326,9 @@ function prepareDashboardProductMetadata(organizationId: string | { sql: string 
         previewUrl = url.toString()
       }
       return { success: true as const, product: hydrated!,
+        ...(access && organization.role.split(',').includes('owner') ? { listing_access: { staff_access_writes: staffAccessWritesEnabled(env), grants: listingAccessGrantsFromRows(rows.at(-1)!.results) } } : {}),
+        ...(members ? { member_options: members.read(rows.slice(navigationEnd + 1)) } : {}),
+        ...(schedule ? { schedule: { location_id: concerns.scheduleLocation!, rules: rows[navigationEnd + 1 + (members?.queries.length ?? 0)]!.results as ProductAvailabilityRule[] } } : {}),
         ...(editor ? { collections: product.stay ? details!.collections : [], preview_token: previewToken, locations: details!.locations, assigned_member_name: details!.assigned_member_name } : {}),
         public_url: publicUrl, public_urls: publicUrls, preview_url: previewUrl, host_profile_published: hostProfilePublished,
         offering: details?.offering ?? null }

@@ -1,6 +1,7 @@
+import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { HTTPError } from 'nitro'
-import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertRoleAllows, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { assertRoleAllows, resolveOrganizationMembership, roleAllows, type ResolvedMembership, type ViewerTerms, BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
 import { linkedAccountAccessToken, requireIntegrationAccount, type CloudflareEnv } from '~/server/utils/auth'
 import { addLocalDays, localDateAt, localDateTimeToInstant, isValidTimezone, isValidInstant } from '~/utils/timezone'
 import { MEMBER_BUSY_SCOPES, MEMBER_NAME_SQL, type WorkingHours, type SchedulingInterval } from '~/shared/member-scheduling'
@@ -66,10 +67,18 @@ function validIntervals(value: unknown): SchedulingInterval[] {
   return {start:new Date(v.start).toISOString(),end:new Date(v.end).toISOString()}
  })
 }
-/**
- * The member's settings and, when they check a Google calendar, the upcoming
- * bookings that calendar now says they are busy for.
- */
+function memberSchedulingSummary(row: MemberScheduling, linked: boolean) {
+ return {
+  member_id:row.member_id,organization_id:row.organization_id,timezone:row.timezone,
+  weekly:row.weekly_json===null?null:JSON.parse(row.weekly_json) as WorkingHours[],time_off:row.time_off_json===null?null:JSON.parse(row.time_off_json) as SchedulingInterval[],
+  public_name:row.public_name,public_photo_url:row.public_photo_url,public_bio:row.public_bio,public_approved:row.public_approved,
+  calendar_account_id:row.calendar_account_id,calendar_ids:JSON.parse(row.calendar_ids_json) as string[],
+  updated_at:row.updated_at,updated_by:row.updated_by,
+  calendar_status:!row.calendar_account_id || !JSON.parse(row.calendar_ids_json).length?'internal':!linked?'disconnected':'ready',
+ }
+}
+
+/** The member's settings and live calendar conflicts, read when opening their availability. */
 export async function readMemberScheduling(db: DbClient, env: CloudflareEnv, organizationId: string, memberId: string) {
  const row=await queryFirst<MemberScheduling>(db,'SELECT * FROM member_scheduling WHERE organization_id=? AND member_id=?',[organizationId,memberId])
  if (!row) return null
@@ -87,12 +96,7 @@ export async function readMemberScheduling(db: DbClient, env: CloudflareEnv, org
  return {
   calendar_conflict_count:conflicts[0]?.total??0,
   calendar_conflicts:conflicts.map(({total,...conflict})=>conflict),
-  member_id:row.member_id,organization_id:row.organization_id,timezone:row.timezone,
-  weekly:row.weekly_json===null?null:JSON.parse(row.weekly_json) as WorkingHours[],time_off:row.time_off_json===null?null:JSON.parse(row.time_off_json) as SchedulingInterval[],
-  public_name:row.public_name,public_photo_url:row.public_photo_url,public_bio:row.public_bio,public_approved:row.public_approved,
-  calendar_account_id:row.calendar_account_id,calendar_ids:JSON.parse(row.calendar_ids_json) as string[],
-  updated_at:row.updated_at,updated_by:row.updated_by,
-  calendar_status:!row.calendar_account_id || !JSON.parse(row.calendar_ids_json).length?'internal':!linked?'disconnected':'ready',
+  ...memberSchedulingSummary(row, Boolean(linked)),
  }
 }
 export async function writeMemberScheduling(actor: SchedulingActor, memberId: string, input: {timezone?: string; weekly?: WorkingHours[]; time_off?: SchedulingInterval[]; updated_at: string | null; public_name?: string | null; public_photo_url?: string | null; public_bio?: string | null; public_approved?: boolean}) {
@@ -214,7 +218,8 @@ export function calendarCoverageQuery(viewer: { organization: string; user: stri
   SELECT count(*) AS members, count(*) FILTER (WHERE json_array_length(s.calendar_ids_json) > 0) AS checking
     FROM member m JOIN user u ON u.id = m.userId
     LEFT JOIN member_scheduling s ON s.member_id = m.id AND s.organization_id = m.organizationId
-   WHERE m.organizationId = ${viewer.organization} AND (${viewer.admin} = 1 OR m.userId = ${viewer.user})`, params }
+   WHERE m.organizationId = ${viewer.organization} AND (${viewer.admin} = 1 OR m.userId = ${viewer.user})
+    ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 99 END, u.name`, params }
 }
 
 export async function memberCalendarCoverage(db: DbClient, membership: ResolvedMembership) {
@@ -222,12 +227,33 @@ export async function memberCalendarCoverage(db: DbClient, membership: ResolvedM
  return (await queryFirst<{ members: number; checking: number }>(db, query, params))!
 }
 
+/** Assignment controls read saved settings, without checking every person's live calendar. */
+export function prepareMemberSchedulingList(organization: string | { sql: string }, viewer: ViewerTerms) {
+ const query: BatchQuery = {
+  query: `SELECT m.id, ${MEMBER_NAME_SQL} AS name, u.name AS user_name, u.email, m.role, m.userId AS user_id, u.image, m.userId = ${viewer.user} AS is_self, ms.*,
+    EXISTS (SELECT 1 FROM account a WHERE a.id = ms.calendar_account_id AND a.userId = m.userId AND a.providerId = 'google') AS linked
+    FROM member m JOIN user u ON u.id = m.userId
+    LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId
+    WHERE m.organizationId = ${typeof organization === 'string' ? '?' : organization.sql}
+      AND (${roleMatchesSql(viewer.role!, rolesAllowing({ members: ['read'] }))} OR m.userId = ${viewer.user})
+    ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 99 END, u.name`,
+  params: typeof organization === 'string' ? [organization] : [],
+ }
+ return { queries: [query], read([result]: D1Result[]) {
+  const rows = result!.results as Array<Omit<MemberScheduling, 'member_id'> & { member_id: string | null; id: string; name: string; user_name: string; user_id: string; email: string; role: string; image: string | null; is_self: number; linked: number }>
+  return { members: rows.map(row => ({ id: row.id, name: row.name, user_name: row.user_name, user_id: row.user_id, email: row.email, role: row.role, image: row.image, self: Boolean(row.is_self),
+   scheduling: row.member_id === null ? null : memberSchedulingSummary({ ...row, member_id: row.member_id }, Boolean(row.linked)) })) }
+ } }
+}
+
 export async function memberSchedulingList(actor: SchedulingActor) {
  const membership=await resolveOrganizationMembership(actor.env,{organizationId:actor.organizationId,userId:actor.userId})
  if(!membership)throw new HTTPError({statusCode:403,message:'Membership required'})
- const admin=await roleAllows({...membership,permissions:{members:['read']}})
- const members=await queryAll<{id:string;name:string;image:string|null;is_self:number}>(actor.env.DB,`SELECT m.id,${MEMBER_NAME_SQL} name,u.image,m.userId=? AS is_self FROM member m JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.organizationId=? AND (?=1 OR m.userId=?)`,[actor.userId,actor.organizationId,Number(admin),actor.userId])
- return { members: await Promise.all(members.map(async ({is_self,...member})=>({...member,self:Boolean(is_self),scheduling:await readMemberScheduling(actor.env.DB,actor.env,actor.organizationId,member.id)}))) }
+ const plan=prepareMemberSchedulingList({sql:BATCH_VIEWER.organization},BATCH_VIEWER)
+ const viewer={query:'SELECT ? AS organization_id, ? AS user_id, ? AS role',params:[actor.organizationId,actor.userId,membership.role]}
+ // The full scheduling operation also reports live conflicts; pickers use the saved projection above.
+ const {members}=plan.read(await executeBatch(actor.env.DB,plan.queries.map(query=>withViewer(viewer,query))))
+ return { members: await Promise.all(members.map(async ({id,name,image,self})=>({id,name,image,self,scheduling:await readMemberScheduling(actor.env.DB,actor.env,actor.organizationId,id)}))) }
 }
 export async function connectPersonalCalendar(actor:SchedulingActor, memberId:string, accountId:string) {
  const member=await requireSchedulingAccess(actor,memberId)

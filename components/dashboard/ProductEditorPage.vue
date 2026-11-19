@@ -831,7 +831,7 @@ const { data: scheduleData, error: scheduleFailure, refresh: refreshSchedule } =
   () => `dashboard-product-schedule:${organizationId}:${locationId.value ?? 'online'}:${productId.value}:${scheduleReadable.value ? 'readable' : 'none'}`,
   async () => {
     if (!scheduleReadable.value) return null
-    const { rules } = await dashboardApi(`${scheduleUrl()}?location_id=${encodeURIComponent(locationId.value!)}`, { validate: isRuleList })
+    const { rules } = await dashboardApi(scheduleUrl(), { query: { location_id: locationId.value! }, validate: isRuleList })
     return rules.map(ruleDraft)
   },
 )

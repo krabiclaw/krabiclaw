@@ -389,7 +389,11 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   ] : null
   const query = getQuery(event)
   const productId = dashboardProductId(panel)
-  const product = productId ? prepareDashboardProductRead(productId) : null
+  const product = productId ? prepareDashboardProductRead(productId, true, undefined, {
+    access: /^\/products\/[^/]+\/team(?:\/|$)/.test(panel),
+    members: /^\/products\/[^/]+\/(?:booking|team)(?:\/|$)/.test(panel),
+    scheduleLocation: /^\/products\/[^/]+\/booking(?:\/|$)/.test(panel) && typeof query.location_id === 'string' && query.location_id !== 'online' ? query.location_id : undefined,
+  }) : null
   if (product && query.location_id !== undefined && typeof query.location_id !== 'string') throw new HTTPError({ statusCode: 400, message: 'Invalid location scope' })
   const website = rendersWebsiteDocument(panel, query) ? prepareWebsiteSettings(managedOrg, env) : null
   const websitePanel = website ? panel.split('/')[2] : undefined
@@ -474,7 +478,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
     if (product && productId) {
       const locationId = typeof query.location_id === 'string' && query.location_id !== 'online' ? query.location_id : null
-      event.context.dashboardProduct = { organization_id: organization.id,
+      event.context.dashboardProduct = { organization_id: organization.id, product_id: productId,
         path: `${locationId ? `locations/${encodeURIComponent(locationId)}/` : ''}products/${encodeURIComponent(productId)}`,
         resource: await product.read(panelRows, { env, db, organization }, locationId) }
     }

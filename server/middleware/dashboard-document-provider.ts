@@ -53,11 +53,19 @@ export default defineHandler(event => {
           case '/api/dashboard/integrations/google-calendar':
             return readCalendarSettingsDocument(event, orgSlug)
           default:
-            if (resource.startsWith('/api/editor/')) {
+            if (resource.startsWith('/api/editor/') || /^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(resource)
+              || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(resource)) {
               const { organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
               const prefix = `/api/editor/organizations/${organization.id}/`
-              const product = event.context.dashboardProduct as { organization_id: string; path: string; resource: unknown } | undefined
-              if (product?.organization_id === organization.id && resource === `${prefix}${product.path}`) return product.resource
+              const product = event.context.dashboardProduct as { organization_id: string; product_id: string; path: string; resource: { member_options?: unknown; listing_access?: unknown; schedule?: { location_id: string; rules: unknown } } } | undefined
+              if (product?.organization_id === organization.id) {
+                if (resource === `${prefix}${product.path}`) return product.resource
+                if (resource === `/api/messages/listings/${encodeURIComponent(product.product_id)}/participants`
+                  && query.organization_id === organization.id && product.resource.listing_access) return product.resource.listing_access
+                if (resource === `/api/organizations/${organization.id}/members/scheduling` && query.view === 'assignment' && product.resource.member_options) return product.resource.member_options
+                if (resource === `${prefix}products/${encodeURIComponent(product.product_id)}/availability`
+                  && product.resource.schedule && product.resource.schedule.location_id === query.location_id) return { success: true, rules: product.resource.schedule.rules }
+              }
               const content = resource.startsWith(prefix) ? website?.content.get(resource.slice(prefix.length)) : null
               if (!content) throw new HTTPError({ statusCode: 404, message: 'Website content was not read for this document' })
               return content
