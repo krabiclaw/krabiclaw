@@ -1,3 +1,5 @@
+import { getMediaAsset, listMediaAssets, listMediaAssetsQuery, groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
+import { dashboardLocationQuery, readDashboardMemberResources, type DashboardLocationContextRow, type DashboardOrganizationRow } from '~/server/utils/dashboard-context'
 import { listingAccessGrantsQuery, listingAccessGrantsFromRows, staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import { prepareMemberSchedulingList } from '~/server/domain/member-scheduling'
 import { availabilityRulesQuery, type ProductAvailabilityRule } from '~/server/utils/availability'
@@ -12,7 +14,7 @@ import type { H3Event } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
 import { qaEditQuery, updateQa } from '~/server/utils/location-qa'
 import { jsonResponse } from '~/server/utils/api-response'
-import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, type BatchQuery, type DbClient } from '~/server/db'
 import { requireOrganizationAccess, type OrganizationAccessRow } from '~/server/utils/location-access'
 import {
   BATCH_VIEWER,
@@ -21,19 +23,16 @@ import {
   withViewer,
   type ResolvedMembership,
   resourceLocationScopeSql,
-  assertLocationAccess,
   assertResourceAccess,
   memberAccessPrincipal,
   isOrganizationWideRole,
   roleAllows,
 } from '~/server/utils/member-access'
-import { getMediaAsset, listMediaAssets } from '~/server/utils/media-asset-manager'
-import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
-import { loadPublicSocialMedia, preparePublicSocialMedia } from '~/server/utils/public-social-image'
+import { publicLocationSocialMediaFromPlacements, preparePublicSocialMedia } from '~/server/utils/public-social-image'
 import { parseLocationPayload } from '~/server/utils/location-payload'
 import type { Product } from '~/server/types/products'
-import { hydrateProductMedia, prepareOrganizationProduct, prepareProductPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
-import { readWebsiteMember, requireWebsiteAccess } from '~/server/utils/tenant-pages-api'
+import { hydrateProductMedia, prepareOrganizationProduct, prepareProductPublicPresentation, prepareLocationProductSummary } from '~/server/utils/product-management'
+import { requireWebsiteAccess } from '~/server/utils/tenant-pages-api'
 import { prepareBlogList } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
@@ -66,7 +65,7 @@ export async function saveDashboardQa(event: H3Event) {
   if (pagePath !== null && typeof pagePath !== 'string') throw new HTTPError({ statusCode: 400, message: 'page_path must be a string or null' })
   const snapshot = qaEditQuery({ sql: BATCH_VIEWER.organization }, qaId, locationId, pagePath)
   snapshot.query += ` AND ${resourceLocationScopeSql(BATCH_VIEWER, 'content_documents')}`
-  const { db, organization, session, rows } = await readWebsiteMember(event, organizationId, [snapshot])
+  const { db, organization, session, rows } = await readDashboardMemberResources(event, organizationId, [snapshot])
   const current = rows[0]!.results[0] as Parameters<typeof updateQa>[5] | undefined
   if (!current) throw new HTTPError({ statusCode: 404, message: 'Q&A not found' })
   return jsonResponse(await updateQa(db, { organizationId: organization.id, locationId, pagePath }, qaId, changes, session.user, current))
@@ -129,97 +128,75 @@ export interface LocationContentCounts {
   organization_qa: number
 }
 
-/**
- * What each row on the location hub reports about itself.
- *
- * One statement rather than five round trips, because the hub renders every
- * count at once and a row with no number is a row nobody can act on without
- * opening it first.
- */
-async function loadLocationContentCounts(
-  db: DbClient,
-  organizationId: string,
-  locationId: string,
-): Promise<LocationContentCounts> {
-  // Positional placeholders repeated per subquery: D1 binds each `?` in order
-  // and does not honour numbered `?1` parameters, which silently returned zero
-  // for every count after the first.
-  const row = await queryFirst<Record<string, number>>(db, `
-    SELECT
-      -- Joined to the asset: a placement can stay active while its asset is
-      -- retired, and every other media read here requires an active asset. The
-      -- count has to mean photos a guest could actually see.
-      (SELECT COUNT(*) FROM media_placements mp
-        JOIN media_assets ma ON ma.id = mp.asset_id
-         AND ma.organization_id = mp.organization_id AND ma.organization_id = mp.organization_id
-         AND ma.status = 'active'
-        WHERE mp.organization_id = ? AND mp.owner_type = 'business_location' AND mp.owner_id = ?
-          AND mp.slot IN ('hero', 'gallery') AND mp.status = 'active') AS photos,
-      (SELECT COUNT(*) FROM content_documents WHERE kind = 'social_post' AND row_role = 'root' AND organization_id = ? AND location_id = ? AND status = 'published') AS posts,
-      (SELECT COUNT(*) FROM content_documents WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ? AND location_id = ?) AS qa,
-      (SELECT COUNT(*) FROM reviews WHERE organization_id = ? AND location_id = ?) AS reviews,
-      (SELECT COUNT(*) FROM content_documents WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ? AND location_id IS NULL) AS organization_qa
-  `, [...Array.from({ length: 4 }, () => [organizationId, locationId]).flat(), organizationId])
-  return {
-    photos: row?.photos ?? 0,
-    posts: row?.posts ?? 0,
-    qa: row?.qa ?? 0,
-    reviews: row?.reviews ?? 0,
-    organization_qa: row?.organization_qa ?? 0,
-  }
-}
-
-export async function loadDashboardLocationOverview(
-  event: H3Event,
-  organizationId: string,
-  locationId: string,
-) {
-  const { env, db, organization, location } = await getDashboardLocationContext(event, locationId)
-  if (location.organization_id !== organizationId) {
-    throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
-  }
-  const principal = memberAccessPrincipal(organization, { env, event })
-  await assertLocationAccess(db, { ...principal, locationId })
-  const [catalog, counts] = await Promise.all([
-    summarizeLocationProducts(db, { organizationId: organization.id, locationId }),
-    loadLocationContentCounts(db, organizationId, locationId),
-  ])
-  const loc = parseLocationPayload(location)!
-  if (!organization.vertical || !organization.theme_id) throw new HTTPError({ statusCode: 500, message: 'Location website configuration is missing' })
-  const { capabilities } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
-  const features = new Set([...capabilities.pages.map(page => page.feature), ...capabilities.managers.map(manager => manager.id)])
-  const hasCatalog = features.has('products') || features.has('services')
-  const place = locationEditorPath(organization.slug, loc.slug)
-  const website = `/dashboard/${encodeURIComponent(organization.slug)}/website`
-  const scope = { location_id: locationId }
-  const search = new URLSearchParams(scope).toString()
-  const row = (id: string, label: string, summary: string, extras: Partial<CatalogRow> = {}): CatalogRow =>
-    ({ id, label, summary, to: `${place}/${id}`, native: `business-location-${id}`, query: scope, ...extras })
-  const count = (total: number, noun: string, empty: string) => total ? `${total} ${noun}${total === 1 ? '' : 's'}` : empty
-  const contact = [loc.phone && formatPhone(loc.phone), loc.email].filter(value => value?.trim()).join(' · ')
-  const trust = [
-    count(counts.qa, 'question', ''), count(counts.reviews, 'review', ''),
-    counts.organization_qa ? `${counts.organization_qa} organization-wide` : '',
-  ].filter(Boolean).join(' · ')
-  const picture = features.has('photos') ? (await loadPublicSocialMedia(db, organization.id, 'business_location', [locationId])).get(locationId)?.social_image : null
-  const rows = [
-    ...(features.has('photos') ? [row('photos', 'Media', count(counts.photos, 'item', 'Add media'), { image: picture?.url })] : []),
-    row('name', 'Name', loc.title),
-    row('description', 'Description', loc.short_description?.trim() || loc.description?.trim() || 'Describe this location'),
-    row('hours', 'Hours', getTodayHoursLabel(loc.opening_hours, 'Closed today', loc.timezone, new Date(), loc.special_hours) || 'Set your hours', { icon: 'i-lucide-clock' }),
-    row('address', 'Address', formatPostalAddress(loc.address) || 'Add the address', { icon: 'i-lucide-map-pin' }),
-    row('contact', 'Contact', contact || 'Add a phone or email', { icon: 'i-lucide-contact-round' }),
-    ...(hasCatalog ? [row('products', catalogLabel(organization.vertical, catalog), catalogSummary(organization.vertical, catalog), { icon: 'i-lucide-store', to: catalogPath(organization.slug, locationId), native: 'scoped-catalog' })] : []),
-    ...(features.has('posts') ? [row('posts', 'Posts', count(counts.posts, 'published post', 'Write your first post'), { icon: 'i-lucide-megaphone', to: `${website}/posts?${search}`, native: 'website-posts' })] : []),
-    ...(features.has('qa') ? [row('qa', 'Reviews and Q&A', trust || 'Answer your first question', { icon: 'i-lucide-message-circle-question', to: `${website}/qa?${search}`, native: 'website-qa' })] : []),
-  ]
-  return {
-    location: { success: true as const, location: loc },
-    catalog,
-    counts,
-    rows,
-    settings: row('settings', capabilities.locationVocabulary === 'office/service area' ? 'Office settings' : 'Location settings', loc.status === 'active' ? 'Published' : 'Draft', { native: 'business-location-status' }),
-  }
+/** The selected location and its visible index share the caller's authorized batch. */
+export function prepareDashboardLocationOverview(target: { id: string } | { slug: string }, gallery = false) {
+  const selected = dashboardLocationQuery(target, { sql: BATCH_VIEWER.organization }, BATCH_VIEWER, true)
+  const organizationScope = { sql: '(SELECT organization_id FROM editor_location)' }
+  const locationScope = { sql: '(SELECT id FROM editor_location)' }
+  const catalogPlan = prepareLocationProductSummary(organizationScope, locationScope)
+  const counts: BatchQuery = { query: `SELECT
+    (SELECT count(*) FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
+      WHERE mp.organization_id = ${organizationScope.sql} AND mp.owner_type = 'business_location' AND mp.owner_id = ${locationScope.sql}
+        AND mp.slot IN ('hero', 'gallery') AND mp.status = 'active') AS photos,
+    (SELECT count(*) FROM content_documents WHERE kind = 'social_post' AND row_role = 'root' AND organization_id = ${organizationScope.sql} AND location_id = ${locationScope.sql} AND status = 'published') AS posts,
+    (SELECT count(*) FROM content_documents WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ${organizationScope.sql} AND location_id = ${locationScope.sql}) AS qa,
+    (SELECT count(*) FROM reviews WHERE organization_id = ${organizationScope.sql} AND location_id = ${locationScope.sql}) AS reviews,
+    (SELECT count(*) FROM content_documents WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ${organizationScope.sql} AND location_id IS NULL) AS organization_qa`, params: [] }
+  const media = mediaPlacementsQuery({ organizationId: organizationScope, ownerType: 'business_location',
+    owners: { sql: 'SELECT id FROM editor_location' }, includeOrganizationFallback: true })
+  const galleryQuery = gallery ? listMediaAssetsQuery(organizationScope, { ownerType: 'business_location', ownerId: locationScope, slot: 'gallery', limit: 100 }) : null
+  const details = [...catalogPlan.queries, counts, media, ...(galleryQuery ? [galleryQuery] : [])]
+  return { queries: [selected, ...details.map(statement => {
+    const query = statement.query.trimStart()
+    return { query: `WITH editor_location AS (${selected.query})${/^WITH\s/i.test(query) ? `, ${query.slice(5)}` : ` ${query}`}`,
+      params: [...selected.params ?? [], ...statement.params ?? []] }
+  })], read([locationRows, ...rows]: D1Result[], organization: Pick<DashboardOrganizationRow, 'id' | 'slug' | 'vertical' | 'theme_id'>) {
+    const stored = locationRows!.results[0] as DashboardLocationContextRow & { is_stay_location: number } | undefined
+    if (!stored) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
+    const { is_stay_location, ...location } = stored
+    const loc = parseLocationPayload(location)!
+    const locationId = loc.id
+    const catalog = catalogPlan.read(rows.slice(0, catalogPlan.queries.length))
+    const counts = rows[catalogPlan.queries.length]!.results[0] as LocationContentCounts | undefined
+    if (!counts) throw new Error('Location content counts were not read')
+    const placements = groupMediaPlacements(rows[catalogPlan.queries.length + 1]!.results)
+    const picture = publicLocationSocialMediaFromPlacements({ is_stay_location }, placements.get(locationId) ?? [], placements.get(organization.id) ?? []).social_image
+    if (!organization.vertical || !organization.theme_id) throw new HTTPError({ statusCode: 500, message: 'Location website configuration is missing' })
+    const { capabilities } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
+    const features = new Set([...capabilities.pages.map(page => page.feature), ...capabilities.managers.map(manager => manager.id)])
+    const hasCatalog = features.has('products') || features.has('services')
+    const place = locationEditorPath(organization.slug, loc.slug)
+    const website = `/dashboard/${encodeURIComponent(organization.slug)}/website`
+    const scope = { location_id: locationId }
+    const search = new URLSearchParams(scope).toString()
+    const row = (id: string, label: string, summary: string, extras: Partial<CatalogRow> = {}): CatalogRow =>
+      ({ id, label, summary, to: `${place}/${id}`, native: `business-location-${id}`, query: scope, ...extras })
+    const count = (total: number, noun: string, empty: string) => total ? `${total} ${noun}${total === 1 ? '' : 's'}` : empty
+    const contact = [loc.phone && formatPhone(loc.phone), loc.email].filter(value => value?.trim()).join(' · ')
+    const trust = [
+      count(counts.qa, 'question', ''), count(counts.reviews, 'review', ''),
+      counts.organization_qa ? `${counts.organization_qa} organization-wide` : '',
+    ].filter(Boolean).join(' · ')
+    const navigation = [
+      ...(features.has('photos') ? [row('photos', 'Media', count(counts.photos, 'item', 'Add media'), { image: picture?.url })] : []),
+      row('name', 'Name', loc.title),
+      row('description', 'Description', loc.short_description?.trim() || loc.description?.trim() || 'Describe this location'),
+      row('hours', 'Hours', getTodayHoursLabel(loc.opening_hours, 'Closed today', loc.timezone, new Date(), loc.special_hours) || 'Set your hours', { icon: 'i-lucide-clock' }),
+      row('address', 'Address', formatPostalAddress(loc.address) || 'Add the address', { icon: 'i-lucide-map-pin' }),
+      row('contact', 'Contact', contact || 'Add a phone or email', { icon: 'i-lucide-contact-round' }),
+      ...(hasCatalog ? [row('products', catalogLabel(organization.vertical, catalog), catalogSummary(organization.vertical, catalog), { icon: 'i-lucide-store', to: catalogPath(organization.slug, locationId), native: 'scoped-catalog' })] : []),
+      ...(features.has('posts') ? [row('posts', 'Posts', count(counts.posts, 'published post', 'Write your first post'), { icon: 'i-lucide-megaphone', to: `${website}/posts?${search}`, native: 'website-posts' })] : []),
+      ...(features.has('qa') ? [row('qa', 'Reviews and Q&A', trust || 'Answer your first question', { icon: 'i-lucide-message-circle-question-mark', to: `${website}/qa?${search}`, native: 'website-qa' })] : []),
+    ]
+    return {
+      location: { success: true as const, location: loc },
+      catalog,
+      counts,
+      ...(galleryQuery ? { gallery: { media: rows.at(-1)!.results } } : {}),
+      rows: navigation,
+      settings: row('settings', capabilities.locationVocabulary === 'office/service area' ? 'Office settings' : 'Location settings', loc.status === 'active' ? 'Published' : 'Draft', { native: 'business-location-status' }),
+    }
+  } }
 }
 
 export async function loadDashboardBlogPosts(
@@ -247,7 +224,7 @@ export async function loadDashboardProduct(
   event: H3Event, organizationId: string, locationId: string | null, productId: string, editor = false,
 ) {
   const plan = prepareDashboardProductRead(productId, editor)
-  const context = await readWebsiteMember(event, organizationId, plan.queries)
+  const context = await readDashboardMemberResources(event, organizationId, plan.queries)
   return plan.read(context.rows, context, locationId)
 }
 

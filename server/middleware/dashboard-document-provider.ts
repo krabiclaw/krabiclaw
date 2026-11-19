@@ -38,7 +38,14 @@ export default defineHandler(event => {
             if (!website?.content.has('post-connections')) throw new HTTPError({ statusCode: 404, message: 'Publishing destinations were not read for this document' })
             return website.content.get('post-connections')
           case '/api/dashboard/locations': {
-            await getDashboardContext(event, { organizationSlug: orgSlug })
+            const { organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
+            if (query.view === 'editor') {
+              const location = event.context.dashboardLocation as { organization_id: string; resource: { location: { location: { slug: string } } } } | undefined
+              if (location?.organization_id !== organization.id || location.resource.location.location.slug !== query.location_slug) throw new HTTPError({ statusCode: 404, message: 'Location was not read for this document' })
+              return location.resource
+            }
+            const index = event.context.dashboardLocations as { organization_id: string; resource: unknown } | undefined
+            if (query.organization === 'true' && query.status !== 'all' && index?.organization_id === organization.id) return index.resource
             const locations = query.organization === 'true' ? website?.content.get('post-locations') : null
             if (!locations) throw new HTTPError({ statusCode: 404, message: 'Locations were not read for this document' })
             return locations
@@ -57,6 +64,10 @@ export default defineHandler(event => {
               || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(resource)) {
               const { organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
               const prefix = `/api/editor/organizations/${organization.id}/`
+              const location = event.context.dashboardLocation as { organization_id: string; resource: { location: { location: { id: string } }; gallery?: unknown } } | undefined
+              if (resource === `${prefix}media` && location?.organization_id === organization.id && query.owner_type === 'business_location'
+                && query.owner_id === location.resource.location.location.id && query.slot === 'gallery' && query.limit === '100' && location.resource.gallery) return location.resource.gallery
+
               const product = event.context.dashboardProduct as { organization_id: string; product_id: string; path: string; resource: { member_options?: unknown; listing_access?: unknown; schedule?: { location_id: string; rules: unknown } } } | undefined
               if (product?.organization_id === organization.id) {
                 if (resource === `${prefix}${product.path}`) return product.resource

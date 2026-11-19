@@ -713,18 +713,27 @@ async function readProductList(db: DbClient, input: ProductListInput & { withCou
 export async function summarizeLocationProducts(db: DbClient, input: {
   organizationId: string; locationId: string
 }): Promise<CatalogCounts> {
-  const row = await queryFirst<{ total: number; experiences: number; dishes: number; stays: number }>(db, `
+  const plan = prepareLocationProductSummary(input.organizationId, input.locationId)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read location catalog counts' }))
+}
+
+export function prepareLocationProductSummary(organization: string | { sql: string }, location: string | { sql: string }) {
+  return {
+    queries: [{ query: `
     SELECT count(*) AS total,
            count(CASE WHEN p.kind = 'experience' THEN 1 END) AS experiences,
            count(CASE WHEN p.kind = 'dish' THEN 1 END) AS dishes,
            count(CASE WHEN p.kind = 'stay' THEN 1 END) AS stays
       FROM products p
       JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
-     WHERE p.organization_id = ? AND pl.location_id = ?
-  `, [input.organizationId, input.locationId])
-  // The same numbers countCatalog reads off the rows, so a surface is
-  // assigned identically whether the caller counted rows or SQL did.
-  return { total: Number(row?.total ?? 0), experiences: Number(row?.experiences ?? 0), dishes: Number(row?.dishes ?? 0), stays: Number(row?.stays ?? 0) }
+     WHERE p.organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND pl.location_id = ${typeof location === 'string' ? '?' : location.sql}
+  `, params: [...(typeof organization === 'string' ? [organization] : []), ...(typeof location === 'string' ? [location] : [])] }],
+    read([counts]: D1Result[]): CatalogCounts {
+      const row = counts!.results[0] as CatalogCounts | undefined
+      if (!row) throw new Error('Location catalog counts were not read')
+      return { total: Number(row.total), experiences: Number(row.experiences), dishes: Number(row.dishes), stays: Number(row.stays) }
+    },
+  }
 }
 
 export async function listCollectionProducts(db: DbClient, input: {

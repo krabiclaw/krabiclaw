@@ -544,7 +544,7 @@ export interface OrganizationSettingsEditor {
   consultationMode: ComputedRef<OrganizationSettingsResponse['consultation_mode']>
   lodgingBookingChoices: ComputedRef<LodgingBookingChoice[]>
   /** The saved logo assets' URLs, for previews before a new pick is saved. */
-  logoUrl: (assetId: string | null) => string | null
+  mediaSummary: (assetId: string | null) => NonNullable<OrganizationSettingsResponse['media']>[number] | null
   revert: () => void
   save: () => Promise<void>
   /** The inquiry form's saved questions, or null until the settings have loaded. */
@@ -808,7 +808,7 @@ const bookingCardSubtitle = computed(() => {
 })
 
 const brandLogoUrl = computed(() => {
-  if (form.logoAssetId) return logoUrl(form.logoAssetId)
+  if (form.logoAssetId) return mediaSummary(form.logoAssetId)?.public_url ?? null
   return loadedSettings.value?.media?.find(item => item.slot === 'logo')?.public_url
     ?? dashboard.organization.value?.media?.find(item => item.slot === 'logo')?.public_url
     ?? null
@@ -1030,8 +1030,8 @@ async function resetPalette() {
   editorError.value = null
   try { await patchSettings({ palette: null }) } catch (error) { editorError.value = getErrorMessage(error, 'Failed to reset the colors') } finally { saving.value = false }
 }
-function logoUrl(assetId: string | null) {
-  return assetId ? loadedSettings.value?.media?.find(item => item.asset_id === assetId)?.public_url ?? null : null
+function mediaSummary(assetId: string | null) {
+  return assetId ? loadedSettings.value?.media?.find(item => item.asset_id === assetId) ?? null : null
 }
 async function saveCurrentEditor() {
   if (saveDisabled.value || !detailKey.value) return
@@ -1112,7 +1112,7 @@ provide(organizationSettingsEditorKey, {
   resetPalette,
   consultationMode: computed(() => loadedSettings.value?.consultation_mode ?? null),
   lodgingBookingChoices: computed(() => loadedSettings.value?.lodging_booking_choices ?? []),
-  logoUrl,
+  mediaSummary,
   // A cancelled leaf puts the loaded settings back before it closes.
   revert: resetDraft,
   save: saveCurrentEditor,

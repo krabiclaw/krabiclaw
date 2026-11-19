@@ -8,7 +8,7 @@
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <MediaPicker v-model="editor.form.faviconAssetId" :organization-id="editor.organizationId" accept="image" title="Select favicon" />
+    <MediaPicker v-model="editor.form.faviconAssetId" :selected-summary="editor.mediaSummary(editor.form.faviconAssetId)" :organization-id="editor.organizationId" accept="image" title="Select favicon" />
     <UAlert v-if="editor.validationMessage.value" class="mt-6" color="error" variant="soft" :description="editor.validationMessage.value" />
   </DashboardLeafPanel>
 </template>

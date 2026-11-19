@@ -24,7 +24,7 @@ const document = useState('dashboard:server-document', () => (import.meta.server
   && (rendersDashboardCalendar(route.path, route.query)
     || Boolean(dashboardProductId(route.path.slice(`/dashboard/${route.params.org_slug}`.length)))
     || rendersWebsiteDocument(route.path.slice(`/dashboard/${route.params.org_slug}`.length), route.query)
-    || /^\/dashboard\/[^/]+(?:\/(?:bookings\/[^/]+|products|earnings(?:\/(?:performance|payouts))?|integrations(?:\/google-calendar)?))?\/?$/.test(route.path)))
+    || /^\/dashboard\/[^/]+(?:\/(?:bookings\/[^/]+|locations(?:\/.*)?|products|earnings(?:\/(?:performance|payouts))?|integrations(?:\/google-calendar)?))?\/?$/.test(route.path)))
 const wrapper = document.value ? 'div' : ClientOnly
 
 if (import.meta.client && 'serviceWorker' in navigator) {

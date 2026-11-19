@@ -97,10 +97,12 @@ export async function dashboardFetch<T>(
       && Boolean(dashboardProductId(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
     || (/^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(request) && options.query?.view === 'assignment')
     || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(request)
+    || (request === '/api/dashboard/locations' && /^\/dashboard\/[^/]+\/locations(?:\/|$)/.test(useRequestURL().pathname) && options.query?.status !== 'all')
     || request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
     || (request === '/api/dashboard/payments' && (options.query?.view === 'performance' || options.query?.view === 'payouts'))
     || (request === '/api/dashboard/settings' && (options.query?.connections === '1' || options.query?.view === 'website'))
+    || (/^\/api\/editor\/organizations\/[^/]+\/media$/.test(request) && /^\/dashboard\/[^/]+\/locations\/[^/]+\/photos\/?$/.test(useRequestURL().pathname))
     || /^\/api\/editor\/organizations\/[^/]+\/(?:reviews|blog\/[^/]+|posts|qa|locations\/[^/]+\/qa|pages\/[^/]+)$/.test(request)
       && (!request.endsWith('/blog/categories') || Boolean(websiteBlogPost(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
     || (postDocument && (request === '/api/integrations/social-connections' || request === '/api/dashboard/locations' && options.query?.organization === 'true'

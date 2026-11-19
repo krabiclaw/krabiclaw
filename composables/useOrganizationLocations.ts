@@ -2,7 +2,7 @@ import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import { dashboardFetch } from '~/composables/dashboardFetch'
 
 /** The shared location resource also consumes the product editor's authorized batch. */
-export async function useOrganizationLocations(options: { includeInactive?: boolean; initial?: DashboardLocation[] } = {}) {
+export async function useOrganizationLocations(options: { includeInactive?: boolean; initial?: DashboardLocation[]; enabled?: MaybeRefOrGetter<boolean> } = {}) {
   const route = useRoute()
   const orgSlug = computed(() => String(route.params.org_slug || ''))
   const load = useAsyncData(
@@ -14,6 +14,7 @@ export async function useOrganizationLocations(options: { includeInactive?: bool
     }),
     {
       immediate: options.initial === undefined,
+      enabled: options.enabled,
       watch: [orgSlug],
       getCachedData(cacheKey, nuxtApp) {
         const hydrated = nuxtApp.payload.data[cacheKey] as { success: true; locations: DashboardLocation[] } | undefined

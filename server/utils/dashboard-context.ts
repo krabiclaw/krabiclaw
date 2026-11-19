@@ -1,3 +1,4 @@
+import type { LocationRecord } from '~/server/utils/location-management'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { timeRequestPhase } from '~/server/utils/request-metrics'
 import { HTTPError } from 'nitro'
@@ -6,9 +7,9 @@ import { getQuery } from 'nitro/h3';
 import type { H3Event } from 'nitro'
 
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
-import { executeBatch, queryFirst, type DbClient } from '~/server/db'
-import { assertOrganizationWideAccess, assignedOfferingCondition, DASHBOARD_ORGANIZATION_COLUMNS, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type OfferingReadScope, type ResolvedMembership } from '~/server/utils/member-access'
+import { dashboardSessionUserQuery, getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { assertOrganizationWideAccess, assignedOfferingCondition, BATCH_VIEWER, withViewer, locationAccessSql, type ViewerTerms, joinedMembership, memberAccessPrincipal, membershipByIdQuery, membershipBySlugQuery, resolveUserOrganization, type OfferingReadScope, type ResolvedMembership } from '~/server/utils/member-access'
 
 import { parsePostalAddress } from '~/utils/postal-address'
 import { groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
@@ -60,28 +61,9 @@ export interface DashboardLocationRow {
   social_image: PublicSocialMedia['social_image']
 }
 
-export interface DashboardLocationContextRow {
-  id: string
+export interface DashboardLocationContextRow extends LocationRecord {
   organization_id: string
-  slug: string
-  title: string
-  stay_map_sharing: StayMapSharing
-  address: string | null
-  phone: string | null
-  email: string | null
-  website_url: string | null
-  maps_url: string | null
-  opening_hours: string | null
-  rating: number | null
-  review_count: number | null
-  status: string
   last_synced_at: string | null
-  description: string | null
-  short_description: string | null
-  price_level: string | null
-  google_place_id: string | null
-  google_review_url: string | null
-  timezone: string | null
 }
 
 export interface DashboardContextOptions {
@@ -151,6 +133,26 @@ export async function resolveRequestedOrganization(
   if (!activeOrganizationId) return null
 
   return await resolveUserOrganization(env, { userId, organizationId: activeOrganizationId }, event)
+}
+
+export async function readDashboardMemberResources(event: H3Event, organization: string | { slug: string } | BatchQuery, statements: BatchQuery[] = []) {
+  const env = cloudflareEnv(event)
+  const db = env.DB
+  if (!db) throw new HTTPError({ statusCode: 503, message: 'Database unavailable' })
+  const member = (user: string | BatchQuery) => typeof organization === 'object' && 'slug' in organization
+    ? membershipBySlugQuery(organization.slug, user) : membershipByIdQuery(organization, user)
+  const queries = (membership: BatchQuery) => [membership, ...statements.map(query => withViewer(membership, query))]
+  const auth: DashboardAuthRead = {
+    queries: token => queries(member(dashboardSessionUserQuery(token))),
+  }
+  const session = await getAuthSession(event, env, { document: auth, forwardCookies: true })
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
+  const [viewer, ...rows] = auth.results ?? await executeBatch(
+    db, queries(member(session.user.id)), { operation: 'Read the authorized CMS resource' },
+  )
+  const resolved = dashboardOrganizationFrom(viewer!.results[0])
+  if (resolved.userId !== session.user.id) throw new Error('CMS membership does not match the Better Auth session')
+  return { env, db, session, organization: resolved, userId: session.user.id, rows }
 }
 
 export async function getDashboardMemberContext(
@@ -269,59 +271,32 @@ export async function getDashboardContext(event: H3Event, options: DashboardCont
   return context
 }
 
-export async function getDashboardLocationContext(event: H3Event, locationId: string): Promise<{
-  env: ReturnType<typeof cloudflareEnv>
-  db: D1Database
-  session: NonNullable<Awaited<ReturnType<typeof getAuthSession>>>
-  userId: string
-  organization: DashboardOrganizationRow
-  location: DashboardLocationContextRow
-}> {
-  const env = cloudflareEnv(event)
-  const db = env.DB
-
-  if (!db) {
-    throw new HTTPError({ statusCode: 503, message: 'Database not available' })
-  }
-
-  const session = await getAuthSession(event, env)
-  if (!session?.user?.id) {
-    throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
-  }
-
-  const row = await queryFirst<DashboardLocationContextRow>(db, `
-    SELECT bl.id, bl.organization_id, bl.slug, bl.title, bl.address, bl.stay_map_sharing, bl.phone, bl.website_url, bl.maps_url,
+export function dashboardLocationQuery(target: { id: string } | { slug: string }, organization?: string | { sql: string }, viewer?: ViewerTerms, privacy = false): BatchQuery {
+  return {
+    query: `SELECT bl.id, bl.organization_id, bl.slug, bl.title, bl.address, bl.stay_map_sharing, bl.phone, bl.website_url, bl.maps_url,
            bl.latitude, bl.longitude, bl.opening_hours, bl.categories, bl.rating, bl.review_count, bl.status,
            bl.last_synced_at, bl.description, bl.short_description, bl.special_hours, bl.price_level, bl.email,
            bl.google_place_id, bl.google_review_url, bl.created_at, bl.updated_at, bl.timezone,
-           bl.seo_title, bl.seo_description, bl.canonical_url
-    FROM business_locations bl
-    WHERE bl.id = ?
-    LIMIT 1
-  `, [locationId])
-
-  if (!row) {
-    throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+           bl.seo_title, bl.seo_description, bl.canonical_url${privacy ? `, ${publicLocationProtectedSql('bl')} AS is_stay_location` : ''}
+      FROM business_locations bl WHERE bl.${'id' in target ? 'id' : 'slug'} = ?
+      ${organization ? `AND bl.organization_id = ${typeof organization === 'string' ? '?' : organization.sql}` : ''}
+      ${viewer ? `AND ${locationAccessSql(viewer, 'bl')}` : ''} LIMIT 1`,
+    params: ['id' in target ? target.id : target.slug, ...(typeof organization === 'string' ? [organization] : [])],
   }
+}
 
-  // The location row already names its organization, so the membership and the
-  // configuration row are read in the same round trip.
-  const [membership, configRow] = await Promise.all([
-    resolveUserOrganization(env, { userId: session.user.id, organizationId: row.organization_id }, event),
-    queryFirst<DashboardOrganizationConfig & { id: string }>(db, `SELECT o.id, ${DASHBOARD_ORGANIZATION_COLUMNS} FROM organization o WHERE o.id = ?`, [row.organization_id]),
-  ])
-  if (!membership) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-  if (!configRow) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
-  const { id: _configId, ...config } = configRow
-
-  return {
-    env,
-    db,
-    session,
-    userId: session.user.id,
-    organization: Object.assign(membership, config),
-    location: row,
+/** The explicit route workspace and location are authorized together. */
+export async function getDashboardLocationContext(event: H3Event, locationId: string) {
+  const slug = dashboardOrgQueryParam(event)
+  if (event.url.searchParams.has('org') && !slug) throw dashboardOrganizationRequired()
+  const organization = slug ? { slug } : {
+    query: '(SELECT organization_id FROM business_locations WHERE id = ?)', params: [locationId],
   }
+  const query = dashboardLocationQuery({ id: locationId }, { sql: BATCH_VIEWER.organization }, BATCH_VIEWER)
+  const context = await readDashboardMemberResources(event, organization, [query])
+  const location = context.rows[0]!.results[0] as DashboardLocationContextRow | undefined
+  if (!location) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
+  return { ...context, location }
 }
 
 export function prepareDashboardLocations(

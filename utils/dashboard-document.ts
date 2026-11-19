@@ -24,10 +24,17 @@ export function websiteQuestion(panel: string) {
 
 export function rendersWebsiteDocument(panel: string, query: Record<string, unknown>) {
   return Boolean(websitePageVariant(panel) || websiteBlogPost(panel) || websiteQuestion(panel)
-    || (query.location_id === undefined && websiteSocialPost(panel))) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
+    || (query.location_id === undefined && websiteSocialPost(panel))
+    || /^\/website\/brand(?:\/|$)/.test(panel)
+    || /^\/website\/preferences\/(?:status|currency|booking|reviews)(?:\/|$)/.test(panel)) || /^\/website(?:\/(?:pages|reviews|brand|preferences|blog|posts|qa))?\/?$/.test(panel)
 }
 
 export function dashboardProductId(panel: string) {
   const segment = /^\/products\/([^/]+)(?:\/|$)/.exec(panel)?.[1]
   return segment && !['new', 'menu', 'first-menu', 'first-experience'].includes(segment) ? decodeURIComponent(segment) : null
+}
+
+export function dashboardLocationSlug(panel: string) {
+  const segment = /^\/locations\/([^/]+)(?:\/|$)/.exec(panel)?.[1]
+  return segment && segment !== 'new' ? decodeURIComponent(segment) : null
 }

@@ -474,13 +474,14 @@ export const DASHBOARD_ORGANIZATION_COLUMNS = `o.theme_id, o.vertical, o.subdoma
   (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active') AS public_url,
   o.status, o.onboarding_status, o.default_currency, o.timezone`
 
-function membershipQuery(field: 'slug' | 'id', value: string, userId: string | BatchQuery): BatchQuery {
+function membershipQuery(field: 'slug' | 'id', value: string | BatchQuery, userId: string | BatchQuery): BatchQuery {
   const user = typeof userId === 'string' ? { query: '?', params: [userId] } : userId
+  const target = typeof value === 'string' ? { query: '?', params: [value] } : value
   return {
     query: `SELECT o.id AS organization_id, o.name, o.slug, m.id AS member_id, m.userId AS user_id, m.role,
         ${roleMatchesSql('m.role', workspaceOperationsRoles)} AS organization_wide, ${DASHBOARD_ORGANIZATION_COLUMNS}
-      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ${user.query} WHERE o.${field} = ?`,
-    params: [...user.params ?? [], value],
+      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ${user.query} WHERE o.${field} = ${target.query}`,
+    params: [...user.params ?? [], ...target.params ?? []],
   }
 }
 
@@ -489,7 +490,7 @@ export function membershipBySlugQuery(slug: string, userId: string | BatchQuery)
   return membershipQuery('slug', slug, userId)
 }
 
-export function membershipByIdQuery(id: string, userId: string | BatchQuery): BatchQuery {
+export function membershipByIdQuery(id: string | BatchQuery, userId: string | BatchQuery): BatchQuery {
   return membershipQuery('id', id, userId)
 }
 

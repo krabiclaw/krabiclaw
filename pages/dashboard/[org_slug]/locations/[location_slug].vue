@@ -40,20 +40,12 @@
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
-import type { CatalogRow } from '~/shared/catalog-screen'
 import { NEW_LOCATION_SECTIONS, useNewLocation } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
 import { timezoneLabel } from '~/utils/timezone'
 
 // A location is a tile on Locations, a row on Menu; Locations is its pane and its Back.
 definePageMeta({ layout: 'dashboard' })
 
-interface LocationOverviewResource {
-  location: { success: boolean; location: { id: string; title: string } }
-  rows: CatalogRow[]
-  settings: CatalogRow
-}
-
-const dashboardApi = useDashboardApi()
 const dashboardLocation = useDashboardLocation()
 // The level runs while setup is still synchronous: it injects the record the
 // `<RouterView>` above rendered, and an `await` before it would bind nothing.
@@ -72,9 +64,9 @@ watchEffect(() => {
   }
 })
 
-const locationId = computed(() => dashboardLocation.currentLocationId.value)
-
-const location = computed(() => overview.value?.location.location ?? null)
+const location = dashboardLocation.currentLocation
+const overview = dashboardLocation.resource
+const overviewError = dashboardLocation.error
 
 const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   const draft = newLocation.draft.value
@@ -85,20 +77,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   return [{ id: 'location', items: rows.flatMap(item => item.to ? [{ ...item, to: item.to }] : []) }]
 })
 
-const isOverviewResponse = (value: unknown): value is LocationOverviewResource =>
-  isRecord(value) && isRecord(value.location) && isRecord(value.location.location)
-  && typeof value.location.location.title === 'string' && Array.isArray(value.rows) && isRecord(value.settings)
-
-const overviewKey = computed(() => `dashboard-location-overview:${organizationId}:${locationId.value}`)
-const { data: overview, error: overviewError } = await useAsyncData<LocationOverviewResource | null>(overviewKey, async () => {
-  if (isNew.value) return null
-  const requestedLocationId = locationId.value
-  if (!requestedLocationId) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
-  return await dashboardApi<LocationOverviewResource>(
-    `/api/dashboard/organizations/${organizationId}/locations/${requestedLocationId}/overview`,
-    { validate: isOverviewResponse },
-  )
-})
+await dashboardLocation.ready
 
 useSeoMeta({ title: () => `${isNew.value ? newLocation.title.value : location.value?.title || 'Location'} | Blawby`, robots: 'noindex, nofollow' })
 </script>

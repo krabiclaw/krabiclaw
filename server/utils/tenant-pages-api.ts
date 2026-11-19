@@ -1,10 +1,9 @@
 import { HTTPError, type H3Event } from 'nitro'
-import { executeBatch, type BatchQuery } from '~/server/db'
-import { cloudflareEnv } from '~/server/utils/api-response'
-import { dashboardSessionUserQuery, getAuthSession, type CloudflareEnv, type DashboardAuthRead } from '~/server/utils/auth'
+import type { BatchQuery } from '~/server/db'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { prepareTenantPageEditorSnapshot } from '~/server/utils/content/pages'
-import { dashboardOrganizationFrom, type DashboardOrganizationRow } from '~/server/utils/dashboard-context'
-import { BATCH_VIEWER, isOrganizationWideRole, membershipByIdQuery, withViewer } from '~/server/utils/member-access'
+import { readDashboardMemberResources, type DashboardOrganizationRow } from '~/server/utils/dashboard-context'
+import { BATCH_VIEWER, isOrganizationWideRole } from '~/server/utils/member-access'
 import { createPreviewToken, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 import { roleMatchesSql, workspaceManagementRoles } from '~/utils/organization-access'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
@@ -39,26 +38,8 @@ export function prepareTenantPageEditor(variantId: string) {
   }
 }
 
-export async function readWebsiteMember(event: H3Event, organizationId: string, statements: BatchQuery[] = []) {
-  const env = cloudflareEnv(event)
-  const db = env.DB
-  if (!db) throw new HTTPError({ statusCode: 503, message: 'Database unavailable' })
-  const queries = (membership: BatchQuery) => [membership, ...statements.map(query => withViewer(membership, query))]
-  const auth: DashboardAuthRead = {
-    queries: token => queries(membershipByIdQuery(organizationId, dashboardSessionUserQuery(token))),
-  }
-  const session = await getAuthSession(event, env, { document: auth, forwardCookies: true })
-  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
-  const [viewer, ...rows] = auth.results ?? await executeBatch(
-    db, queries(membershipByIdQuery(organizationId, session.user.id)), { operation: 'Read the authorized page editor' },
-  )
-  const organization = dashboardOrganizationFrom(viewer!.results[0])
-  if (organization.userId !== session.user.id) throw new Error('Page editor membership does not match the Better Auth session')
-  return { env, db, session, organization, userId: session.user.id, rows }
-}
-
 export async function requireWebsiteAccess(event: H3Event, organizationId: string, statements: BatchQuery[] = []) {
-  const context = await readWebsiteMember(event, organizationId, statements)
+  const context = await readDashboardMemberResources(event, organizationId, statements)
   if (!isOrganizationWideRole(context.organization.role)) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
   return context
 }

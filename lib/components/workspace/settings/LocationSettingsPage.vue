@@ -21,43 +21,18 @@
 </template>
 
 <script lang="ts">
+import { isDashboardLocationEditorResource, type BusinessLocation, type DashboardLocationEditorResource } from '~/composables/useDashboardLocation'
 import { businessChanged } from '~/composables/useDashboardInvalidations'
 import type { LocationHoursForm } from '~/lib/components/workspace/location/hours'
-import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
+import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 
 import type { Ref } from 'vue'
 import { getErrorMessage } from '~/utils/errors'
-import { coordinatesFailure } from '~/utils/location-map'
 import { parsePostalAddress, postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
 import { getPhoneCountry, toE164 } from '~/utils/phone'
-import { parseStayMapSharing, STAY_MAP_SHARING_MODES, type StayMapSharing } from '~/shared/stay-listing'
+import { parseStayMapSharing, type StayMapSharing } from '~/shared/stay-listing'
 
 
-export interface BusinessLocation {
-  id: string
-  slug: string
-  updated_at: string
-  title: string
-  address: PostalAddress | null
-  stay_map_sharing: StayMapSharing
-  latitude: number | null
-  longitude: number | null
-  phone: string | null
-  email: string | null
-  maps_url: string | null
-  google_review_url: string | null
-  description: string | null
-  short_description: string | null
-  price_level: string | null
-  google_place_id: string | null
-  opening_hours: OpeningHours
-  special_hours: SpecialHours
-  rating: number | null
-  review_count: number | null
-  status: string
-  last_synced_at: string | null
-  timezone: string
-}
 
 /**
  * The editors a guest sees the result of — name, description, hours, address,
@@ -158,32 +133,17 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const newLocation = useNewLocation(organizationId, key === 'name' || key === 'hours' ? key : null)
   const isNew = newLocation.isNew
   const dashboardApi = useDashboardApi()
-  const nuxtApp = useNuxtApp()
   const realtime = useDashboardInvalidations()
+  const dashboard = useDashboardOrganization()
+  const nuxt = useNuxtApp()
+  const orgSlug = String(route.params.org_slug)
+  const locationLists = ['', ':all'].map(suffix => useNuxtData<{ success: true; locations: import('~/composables/useDashboardOrganization').DashboardLocation[] }>(`dashboard-org-locations:${orgSlug}${suffix}`))
   const editorError = ref<string | null>(null)
 
 
 
   const originalSignature = ref('')
 
-  const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string'
-  const isBusinessLocation = (value: unknown): value is BusinessLocation => {
-    if (!isRecord(value)) return false
-    return typeof value.id === 'string'
-      && typeof value.slug === 'string'
-      && typeof value.updated_at === 'string'
-      && typeof value.title === 'string'
-      && typeof value.status === 'string'
-      && STAY_MAP_SHARING_MODES.includes(value.stay_map_sharing as StayMapSharing)
-      && (value.latitude === null || typeof value.latitude === 'number')
-      && (value.longitude === null || typeof value.longitude === 'number')
-      && !coordinatesFailure({ latitude: value.latitude, longitude: value.longitude })
-      && (value.address === null || isRecord(value.address))
-      && isNullableString(value.phone)
-      && isNullableString(value.google_place_id)
-  }
-  const isLocationResponse = (value: unknown): value is { success: true; location: BusinessLocation } =>
-    isRecord(value) && value.success === true && isBusinessLocation(value.location)
   const detailsSaving = ref(false)
 
   /**
@@ -323,26 +283,32 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
 
   async function patchLocation(body: Record<string, unknown>) {
     const requestedLocationId = locationId.value
+    const previousStatus = location.value?.status
     const addressDraft = key === 'address' ? addressDraftKeys.map(field => detailsForm[field]) : null
     const sharingDraft = key === 'stay-map-sharing' ? detailsForm.stay_map_sharing : undefined
     detailsSaving.value = true
     editorError.value = null
     try {
-      const saved = await dashboardApi<{ success: true; location: BusinessLocation }>(
+      const saved = await dashboardApi<DashboardLocationEditorResource>(
         `/api/dashboard/locations/${requestedLocationId}`,
-        { method: 'PATCH', body, validate: isLocationResponse },
+        { method: 'PATCH', query: { editor: '1' }, body, validate: isDashboardLocationEditorResource },
       )
       if (locationId.value !== requestedLocationId) return false
-      locationSettingsResource.value = { location: saved }
+      locationSettingsResource.value = saved
       const cached = realtime.held.begin(`website:${locationSettingsKey.value}`, businessChanged)
       realtime.held.hold(cached, locationSettingsResource.value, Date.now() + 30_000, 16)
-      if (locationConcern) await refreshLocationReads(requestedLocationId)
-      else await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
+      const record = saved.location.location
+      const update = (locations: import('~/composables/useDashboardOrganization').DashboardLocation[]) => locations.map(location => location.id === record.id ? { ...location, ...record } : location)
+      if (dashboard.state.value) dashboard.state.value.locations = update(dashboard.state.value.locations).filter(location => location.status === 'active')
+      for (const [index, cached] of locationLists.entries()) {
+        if (cached.data.value) cached.data.value = { ...cached.data.value, locations: update(cached.data.value.locations).filter(location => index === 1 || location.status === 'active') }
+      }
+      if (previousStatus !== record.status) await nuxt.runWithContext(() => Promise.all([dashboard.refresh(), refreshNuxtData([`dashboard-org-locations:${orgSlug}`, `dashboard-org-locations:${orgSlug}:all`])]))
       return true
     } catch (error) {
       const failures = [getErrorMessage(error, 'Failed to save location')]
       if ((addressDraft || sharingDraft !== undefined) && locationId.value === requestedLocationId) {
-        try { await locationSettings.refresh(); await refreshLocationReads(requestedLocationId) } catch (readError) { failures.push(getErrorMessage(readError, 'Failed to reload location')) }
+        try { await locationSettings.refresh(); if (locationSettingsError.value) throw locationSettingsError.value } catch (readError) { failures.push(getErrorMessage(readError, 'Failed to reload location')) }
         await nextTick()
         if (locationId.value === requestedLocationId) {
           if (addressDraft) addressDraftKeys.forEach((field, index) => { detailsForm[field] = addressDraft[index]! })
@@ -354,19 +320,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     } finally {
       detailsSaving.value = false
     }
-  }
-
-  async function refreshLocationReads(requestedLocationId: string | null) {
-    const orgSlug = String(route.params.org_slug)
-    const keys = [`dashboard-location-overview:${organizationId}:${requestedLocationId}`, `dashboard-org-locations:${orgSlug}`, `dashboard-org-locations:${orgSlug}:all`]
-    await refreshNuxtData(keys)
-    const failures: string[] = []
-    if (locationSettingsError.value) failures.push(getErrorMessage(locationSettingsError.value, 'Failed to reload location'))
-    for (const cacheKey of keys) {
-      const cacheError = nuxtApp.payload._errors[cacheKey]
-      if (cacheError) failures.push(getErrorMessage(cacheError, 'Failed to reload locations'))
-    }
-    if (failures.length) throw new Error([...new Set(failures)].join(' '))
   }
 
   async function saveCurrentEditor() {
@@ -407,23 +360,10 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     throw new Error(`The ${key ?? 'location'} setting has nothing to save.`)
   }
 
-  interface LocationSettingsResource {
-    location: { success: true; location: BusinessLocation }
-  }
-
-  const locationSettingsKey = computed(() => `dashboard-location-settings-${organizationId}-${isNew.value ? NEW_LOCATION_SLUG : locationId.value}`)
-  const locationSettings = useWebsiteIndexData<LocationSettingsResource | null>(locationSettingsKey, async () => {
-    if (isNew.value) return null
-    const requestedLocationId = locationId.value
-    if (!requestedLocationId) throw createError({ statusCode: 400, statusMessage: 'Location is required' })
-    const locationResponse = await dashboardApi<{ success: true; location: BusinessLocation }>(
-      `/api/dashboard/locations/${requestedLocationId}`,
-      { validate: isLocationResponse },
-    )
-    return { location: locationResponse }
-  })
-  const { data: locationSettingsResource, error: locationSettingsError } = locationSettings
-  await locationSettings
+  const locationSettings = useDashboardLocation()
+  const locationSettingsKey = locationSettings.key
+  const { resource: locationSettingsResource, error: locationSettingsError } = locationSettings
+  await locationSettings.ready
 
   // The location is what the request answered; only the drafts are this
   // editor's own, seeded from each answer.

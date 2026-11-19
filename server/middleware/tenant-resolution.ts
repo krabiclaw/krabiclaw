@@ -1,4 +1,4 @@
-import { prepareDashboardProductRead } from '~/server/utils/dashboard-editor-resources'
+import { prepareDashboardLocationOverview, prepareDashboardProductRead } from '~/server/utils/dashboard-editor-resources'
 import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/edge-cache'
 // Tenant resolution middleware: every host, Blawby's own included, resolves
 // to an organization. The organization's site decides whether it renders as
@@ -52,7 +52,7 @@ import { prepareSocialConnections, presentSocialConnections } from '~/server/uti
 import { preparePost, preparePostList } from '~/server/utils/post-management'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { prepareDashboardQa } from '~/server/utils/location-qa'
-import { dashboardProductId, rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteQuestion, websiteSocialPost } from '~/utils/dashboard-document'
+import { dashboardLocationSlug, dashboardProductId, rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteQuestion, websiteSocialPost } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -416,6 +416,12 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       organizationId: { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, catalogRoles)} THEN ${BATCH_VIEWER.organization} END` },
       assignedUserId: { user: BATCH_VIEWER.user, unrestricted: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: [...catalogRead.products] })) },
     }, query) : null
+  const locationSlug = dashboardLocationSlug(panel)
+  const location = locationSlug ? prepareDashboardLocationOverview({ slug: locationSlug }, /^\/locations\/[^/]+\/photos\/?$/.test(panel)) : null
+  const locationList = /^\/locations(?:\/[^/]+)?\/?$/.test(panel) ? prepareDashboardLocations(
+    { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, catalogRoles)} THEN ${BATCH_VIEWER.organization} END` },
+    { user: BATCH_VIEWER.user, unrestricted: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: [...catalogRead.products] })) },
+  ) : null
   const bookingId = /^\/bookings\/([^/]+)$/.exec(panel)?.[1]
   const booking = bookingId && bookingId !== 'new' ? prepareDashboardBookingRead(membership, bookingId) : null
   const calendar = /^\/calendar(?:\/|$)/.test(panel)
@@ -446,6 +452,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(connections?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(google?.map(query => withViewer(membership, query)) ?? []),
     ...(catalog?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...[...(locationList?.queries ?? []), ...(location?.queries ?? [])].map(query => withViewer(membership, query)),
     ...(product?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(booking?.queries ?? []),
     ...(calendar ? [calendar, ...agenda?.queries ?? []] : []),
@@ -476,6 +483,8 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       if (google) await readCalendarSettingsDocument(event, slug, calendarSettingsFromRows(panelRows.slice(connections.queries.length)))
     }
     if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
+    if (locationList) event.context.dashboardLocations = { organization_id: organization.id, resource: { success: true, locations: locationList.read(panelRows, organization.id).locations } }
+    if (location) event.context.dashboardLocation = { organization_id: organization.id, resource: location.read(panelRows.slice(locationList?.queries.length ?? 0), organization) }
     if (product && productId) {
       const locationId = typeof query.location_id === 'string' && query.location_id !== 'online' ? query.location_id : null
       event.context.dashboardProduct = { organization_id: organization.id, product_id: productId,

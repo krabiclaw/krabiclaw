@@ -1,10 +1,11 @@
+import { readDashboardMemberResources } from '~/server/utils/dashboard-context'
 import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { jsonResponse, readStrictBody } from '~/server/utils/api-response'
 import { preparePost, updatePost } from '~/server/utils/post-management'
 import { PostValidationError } from '~/shared/posts'
 import { assertResourceAccess, BATCH_VIEWER, memberAccessPrincipal } from '~/server/utils/member-access'
-import { readWebsiteMember } from '~/server/utils/tenant-pages-api'
+
 
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
@@ -18,7 +19,7 @@ export default defineHandler(async (event) => {
   if (!expectedUpdatedAt) return jsonResponse({ error: 'updated_at is required' }, { status: 400 })
 
   const plan = preparePost({ sql: BATCH_VIEWER.organization }, postId, BATCH_VIEWER)
-  const { db, env, organization, userId, rows } = await readWebsiteMember(event, organizationId, plan.queries)
+  const { db, env, organization, userId, rows } = await readDashboardMemberResources(event, organizationId, plan.queries)
   const snapshot = plan.snapshot(rows)
   if (!snapshot) return jsonResponse({ error: 'Post not found' }, { status: 404 })
 

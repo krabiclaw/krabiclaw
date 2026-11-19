@@ -8,7 +8,7 @@
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <MediaPicker v-model="editor.form.socialShareAssetId" :organization-id="editor.organizationId" accept="image" title="Select social sharing image" />
+    <MediaPicker v-model="editor.form.socialShareAssetId" :selected-summary="editor.mediaSummary(editor.form.socialShareAssetId)" :organization-id="editor.organizationId" accept="image" title="Select social sharing image" />
     <UAlert v-if="editor.validationMessage.value" class="mt-6" color="error" variant="soft" :description="editor.validationMessage.value" />
   </DashboardLeafPanel>
 </template>
