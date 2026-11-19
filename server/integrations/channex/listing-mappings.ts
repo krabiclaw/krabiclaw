@@ -11,12 +11,15 @@ export const AIRBNB_MAPPINGS = `(
 )`
 
 /** A provider property still identifies its reservations after the host merges its home. */
-export const CHANNEX_PROPERTY_HOMES = `(
-  SELECT origin.property_id, origin.organization_id, current.product_id, current.enabled, current.import_stage
-  FROM product_channel_mappings origin
-  LEFT JOIN activity_entries merge ON merge.organization_id = origin.organization_id AND merge.event_name = 'stay.updated'
-    AND json_extract(merge.payload_json, '$.metadata.merged_product_id') = origin.product_id
-  JOIN product_channel_mappings current ON current.organization_id = origin.organization_id AND current.provider = origin.provider
-    AND current.product_id = COALESCE(json_extract(merge.payload_json, '$.entityId'), origin.product_id)
-  WHERE origin.provider = 'channex' AND origin.property_id IS NOT NULL
-)`
+export const CHANNEX_PROPERTY_HOME = `WITH RECURSIVE home(organization_id, product_id, distance) AS (
+  SELECT organization_id, product_id, 0 FROM product_channel_mappings
+  WHERE provider = 'channex' AND property_id = ?
+  UNION ALL
+  SELECT home.organization_id, json_extract(merge.payload_json, '$.entityId'), home.distance + 1
+  FROM home JOIN activity_entries merge ON merge.organization_id = home.organization_id AND merge.event_name = 'stay.updated'
+    AND json_extract(merge.payload_json, '$.metadata.merged_product_id') = home.product_id
+)
+SELECT home.organization_id, home.product_id, mapped.enabled, mapped.import_stage
+FROM home JOIN product_channel_mappings mapped ON mapped.organization_id = home.organization_id
+  AND mapped.product_id = home.product_id AND mapped.provider = 'channex'
+ORDER BY home.distance DESC LIMIT 1`

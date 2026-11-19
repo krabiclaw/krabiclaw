@@ -586,7 +586,7 @@ export class ChannexConnection {
     }
     if (existing && await this.hasOtherChannel(existing)) fail(409, 'HOME_HAS_OTHER_LISTINGS', 'Disconnect the source home’s other listings before merging it.')
     const inventory = await queryFirst<InventoryMapping>(this.db, `SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ?
-      AND provider = 'channex' AND import_stage = 'complete'`, [this.organizationId, productId])
+      AND provider = 'channex' AND import_stage = 'complete' AND enabled = 1`, [this.organizationId, productId])
     if (!inventory) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'Choose a home that already syncs with Channex.')
     const home = await readStayHome(this.db, this.manager(), productId)
     const details = await listingDetails(this.env, row.channel_id, listingId, await this.organizationContact())

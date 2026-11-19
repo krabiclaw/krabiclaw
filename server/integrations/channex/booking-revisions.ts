@@ -1,4 +1,4 @@
-import { CHANNEX_PROPERTY_HOMES } from './listing-mappings'
+import { CHANNEX_PROPERTY_HOME } from './listing-mappings'
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import { applyChannelBooking, type ChannelBooking } from '~/server/domain/stays'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
@@ -122,7 +122,7 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
   let mapping: Mapping | null = null
   try {
     const propertyId = string(revision.attributes.property_id, 'property_id')
-    mapping = await queryFirst<Mapping>(db, `SELECT organization_id, product_id, enabled, import_stage FROM ${CHANNEX_PROPERTY_HOMES} WHERE property_id = ?`, [propertyId])
+    mapping = await queryFirst<Mapping>(db, CHANNEX_PROPERTY_HOME, [propertyId])
     // Vrbo can deliver a booking as soon as the host activates in Channex, before they close the setup frame.
     if (mapping && mapping.enabled !== 1 && ['draft', 'complete'].includes(mapping.import_stage)
       && String(revision.attributes.ota_name).toLowerCase() === 'vrbo' && env.CHANNEX_VRBO_ENABLED === 'true') {

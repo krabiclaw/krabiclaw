@@ -556,15 +556,13 @@ export async function activeAirbnbMappings(db: DbClient, organizationId: string,
  */
 export async function syncAirbnbListing(db: DbClient, env: ChannexEnv, organizationId: string, productId: string): Promise<void> {
   const mappings = await activeAirbnbMappings(db, organizationId, productId)
-  for (const mapping of mappings) {
-    try {
-      await channexRequest(env, `/meta/airbnb/${encodeURIComponent(mapping.channel_id)}/full_sync_listing`, 'POST', { listing_id: mapping.listing_id })
-    } catch (error) {
-      if (!(error instanceof ChannexError) || error.providerStatus !== 404) throw error
-      await execute(db, `UPDATE channel_night_pushes SET state = 'needs_review', detail = ? WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= date('now', '-1 day')`,
-        [MAPPING_MISSING, organizationId, productId])
-    }
+  const results = await Promise.allSettled(mappings.map(mapping => channexRequest(env, `/meta/airbnb/${encodeURIComponent(mapping.channel_id)}/full_sync_listing`, 'POST', { listing_id: mapping.listing_id })))
+  const failures = results.filter(result => result.status === 'rejected').map(result => result.reason)
+  if (failures.some(error => error instanceof ChannexError && error.providerStatus === 404)) {
+    await execute(db, `UPDATE channel_night_pushes SET state = 'needs_review', detail = ? WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= date('now', '-1 day')`,
+      [MAPPING_MISSING, organizationId, productId])
   }
+  if (failures.length) throw new AggregateError(failures, 'Channex could not sync every Airbnb listing on this home')
 }
 
 /**
