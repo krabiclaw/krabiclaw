@@ -122,18 +122,32 @@ test('guest table cancellation refunds until 24 hours before the start, through 
     const paid = await paidTable(db, env, key)
     const input = { ...paid, ...(credential === 'buyer' ? { buyerUserId: 'verified' } : { tokenHash: `${key}-token-hash` }), now: policy.now }
     const originalFetch = globalThis.fetch
-    let creations = 0
+    const refundKey = `guest-cancelled-booking:${paid.bookingId}`
+    const replay = credential === 'token' && policy.refundable
+    let earlierRefundId: string | null = null
+    const metadataRequests: string[] = []
     const fetchMock = t.mock.method(globalThis, 'fetch', async (request, init) => {
      const url = new URL(request instanceof Request ? request.url : String(request))
      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
      if (url.pathname === '/v1/refunds' && init?.method === 'POST') {
-      creations++
       const params = new URLSearchParams(String(init.body))
       assert.equal(params.get('payment_intent'), `pi_${key}`)
       assert.equal(params.has('amount'), false)
-      assert.equal(new Headers(init.headers).get('idempotency-key'), `krabiclaw-refund:${key}:guest-cancelled-booking:${paid.bookingId}`)
-      return Response.json({ id: `re_${key}`, object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { [credential === 'buyer' ? 'blawby_refund_id' : 'krabiclaw_refund_id']: params.get('metadata[krabiclaw_refund_id]') } })
+      assert.equal(new Headers(init.headers).get('idempotency-key'), `krabiclaw-refund:${key}:${refundKey}`)
+      const field = params.has('metadata[blawby_refund_id]') ? 'blawby_refund_id' : 'krabiclaw_refund_id'
+      const sentId = params.get(`metadata[${field}]`)
+      assert.ok(sentId)
+      metadataRequests.push(field)
+      if (replay && earlierRefundId === null) {
+       earlierRefundId = sentId
+       return Response.json({ error: { type: 'invalid_request_error', message: 'Stripe refund response unavailable' } }, { status: 400 })
+      }
+      if (replay) {
+       assert.equal(sentId, earlierRefundId)
+       if (field === 'blawby_refund_id') return Response.json({ error: { type: 'idempotency_error', message: 'Parameters already used with this key differ' } }, { status: 400 })
+      }
+      return Response.json({ id: `re_${key}`, object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { [field]: sentId } })
      }
      assert.equal(init?.method, 'GET')
      assert.equal(url.pathname, `/v1/charges/ch_${key}`)
@@ -141,12 +155,13 @@ test('guest table cancellation refunds until 24 hours before the start, through 
     })
     try {
      assert.equal(await seatingRemaining(db), 0)
-     assert.equal((await cancelBookingRequest(db, input))?.changed, true)
+     if (replay) await assert.rejects(() => cancelBookingRequest(db, input), /Stripe refund response unavailable/u)
+     assert.equal((await cancelBookingRequest(db, input))?.changed, !replay)
      assert.deepEqual(await db.prepare('SELECT status,cancellation_reason FROM bookings WHERE id=?').bind(paid.bookingId).first(), { status: 'cancelled', cancellation_reason: 'guest_cancelled' })
      assert.equal(await db.prepare("SELECT json_extract(payload_json,'$.cancellation.used_at') used_at FROM conversations WHERE id=?").bind(paid.id).first('used_at'), policy.now)
      assert.deepEqual(await db.prepare('SELECT refunded_amount FROM payments WHERE id=?').bind(key).first(), { refunded_amount: policy.refundable ? 10500 : 0 })
      assert.deepEqual((await db.prepare('SELECT amount,status,created_by FROM payment_refunds WHERE payment_id=?').bind(key).all()).results, policy.refundable ? [{ amount: 10500, status: 'succeeded', created_by: credential === 'buyer' ? 'verified' : null }] : [])
-     assert.equal(creations, Number(policy.refundable))
+     assert.deepEqual(metadataRequests, !policy.refundable ? [] : replay ? ['blawby_refund_id', 'blawby_refund_id', 'krabiclaw_refund_id'] : ['blawby_refund_id'])
      assert.equal(await seatingRemaining(db), 1)
     } finally { fetchMock.mock.restore() }
    }
@@ -316,7 +331,7 @@ test('an advance notice closes a guest\'s own class cancellation at the notice, 
      // A full remaining refund of the booking's own payment: Stripe decides what is left.
      assert.equal(params.get('payment_intent'), `pi_${key}`)
      assert.equal(params.has('amount'), false)
-     return Response.json({ id: `re_${key}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } })
+     return Response.json({ id: `re_${key}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: `pi_${key}`, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[blawby_refund_id]') } })
     }
     return Response.json({ id: `ch_${key}`, object: 'charge', livemode: false, amount: 10000, amount_refunded: 10000, currency: 'usd', payment_intent: `pi_${key}`, billing_details: { email: 'verified@example.com' } })
    })
@@ -1173,7 +1188,7 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
   }
   if (resource === 'payment_intents' && init?.method === 'GET') { calls.read.push(paymentId!); return Response.json(intent()) }
   if (resource === 'charges') return Response.json(charge)
-  if (resource === 'refunds' && init?.method === 'POST') { const paid = new URLSearchParams(String(init.body)).get('payment_intent')!; calls.refund.push(paid); return Response.json({ id: `re_${paid}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: paid, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: new URLSearchParams(String(init.body)).get('metadata[krabiclaw_refund_id]') } }) }
+  if (resource === 'refunds' && init?.method === 'POST') { const paid = new URLSearchParams(String(init.body)).get('payment_intent')!; calls.refund.push(paid); return Response.json({ id: `re_${paid}`, object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: paid, reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: new URLSearchParams(String(init.body)).get('metadata[blawby_refund_id]') } }) }
   throw new Error(`Unexpected Stripe request ${init?.method} ${url.pathname}`)
  })
  return calls

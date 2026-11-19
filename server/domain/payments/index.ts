@@ -1,4 +1,4 @@
-import { stripeMetadataId } from './stripe-metadata'
+import { createWithStripeMetadata, stripeMetadataId } from './stripe-metadata'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -243,7 +243,10 @@ export async function executeRefund(db: DbClient, stripe: Stripe, payment: Payme
   try {
     await execute(db,"UPDATE payment_refunds SET status='creating',attempted_at=COALESCE(attempted_at,?),updated_at=? WHERE id=?",[now,now,id])
     const message=existing?.note??note
-    refund=await stripe.refunds.create({payment_intent:payment.stripe_payment_intent_id,...(amount===null?{}:{amount}),reason,metadata:{krabiclaw_refund_id:id,...(message?{note:message.slice(0,500)}:{})}},{stripeAccount:payment.stripe_account_id,idempotencyKey:`krabiclaw-refund:${payment.id}:${key}`})
+    const params: Stripe.RefundCreateParams = { payment_intent: payment.stripe_payment_intent_id, ...(amount === null ? {} : { amount }), reason }
+    const options = { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-refund:${payment.id}:${key}` }
+    refund = await createWithStripeMetadata(stripe, 'refund', id, Boolean(existing?.attempted_at), metadata =>
+      stripe.refunds.create({ ...params, metadata: { ...metadata, ...(message ? { note: message.slice(0, 500) } : {}) } }, options))
   }catch(error){
     await execute(db,'UPDATE payment_refunds SET error=?,updated_at=? WHERE id=?',[error instanceof Error?error.message:String(error),new Date().toISOString(),id])
     throw error
