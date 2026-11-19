@@ -17,6 +17,7 @@ import type { ProductFeature } from '~/config/cms-registry'
  */
 export interface DashboardOrganization {
   id: string
+  userId: string
   name: string
   slug: string
   role: string
@@ -56,6 +57,7 @@ interface DashboardContextResponse {
   success: boolean
   organization: DashboardOrganization
   locations: DashboardLocation[]
+  has_unread: boolean
 }
 
 const isSocialImage = (value: unknown): value is { url: string } | null =>
@@ -75,6 +77,7 @@ const isMediaList = (value: unknown): boolean =>
 const isDashboardOrganization = (value: unknown): value is DashboardOrganization =>
   isRecord(value)
   && typeof value.id === 'string'
+  && typeof value.userId === 'string'
   && typeof value.name === 'string'
   && typeof value.slug === 'string'
   && typeof value.role === 'string'
@@ -109,6 +112,7 @@ const isDashboardContextResponse = (value: unknown): value is DashboardContextRe
   isRecord(value)
   && value.success === true
   && isDashboardOrganization(value.organization)
+  && typeof value.has_unread === 'boolean'
   && Array.isArray(value.locations)
   && value.locations.every(isDashboardLocation)
 

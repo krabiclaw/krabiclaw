@@ -2,21 +2,35 @@ import type { H3Event } from 'nitro'
 import {
   dashboardOrgQueryParam,
   getDashboardMemberContext,
-  readDashboardLocations,
+  prepareDashboardLocations,
 } from '~/server/utils/dashboard-context'
-import { getOrganizationPlan } from '~/server/utils/billing-access'
-import { loadOrganizationFeatures } from '~/server/utils/cms-capabilities'
+import { executeBatch } from '~/server/db'
+import { prepareOrganizationPlan } from '~/server/utils/billing-access'
+import { organizationFeaturesFromRow, organizationFeaturesQuery } from '~/server/utils/cms-capabilities'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { oncePerRequest } from '~/server/utils/request-scope'
+import { hasUnreadQuery, presentHasUnread } from '~/server/domain/guest-threads/repository'
 
 export function readDashboardWorkspaceAccess(
   event: H3Event,
-  { db, env, organization }: Pick<Awaited<ReturnType<typeof getDashboardMemberContext>>, 'db' | 'env' | 'organization'>,
+  { db, organization }: Pick<Awaited<ReturnType<typeof getDashboardMemberContext>>, 'db' | 'env' | 'organization'>,
+  includeLocations = Boolean(event.context.dashboardDocumentProvider),
 ) {
-  return oncePerRequest(event, `dashboard-workspace-access:${organization.id}`, () => Promise.all([
-    getOrganizationPlan(env, organization.id),
-    loadOrganizationFeatures(db, organization.id),
-  ]))
+  return oncePerRequest(event, `dashboard-workspace-access:${organization.id}:${includeLocations}`, async () => {
+    const plan = prepareOrganizationPlan(organization.id)
+    const locations = includeLocations ? prepareDashboardLocations(organization.id, undefined, false, true) : null
+    const [subscription, featureRows, unread, ...locationRows] = await executeBatch(db, [
+      plan.query,
+      organizationFeaturesQuery(organization.id),
+      ...(locations ? [hasUnreadQuery(organization.id, { userId: organization.userId }, new Date()), ...locations.queries] : []),
+    ], { operation: 'Read dashboard workspace access' })
+    return {
+      effective_plan: plan.read(subscription!),
+      features: organizationFeaturesFromRow(featureRows!.results[0] as Parameters<typeof organizationFeaturesFromRow>[0]),
+      locationData: locations?.read(locationRows),
+      has_unread: locations ? presentHasUnread(unread) : undefined,
+    }
+  })
 }
 
 // The scope is the route's `org` query param. No organization is a 400 and one
@@ -34,14 +48,12 @@ export async function loadDashboardContext(
   const context = await getDashboardMemberContext(event, {
     organizationSlug: scope.orgSlug,
   })
-  const { db, organization } = context
+  const { organization } = context
   recordRequestPhase(event, 'context', contextStartedAt)
 
   const resourcesStartedAt = performance.now()
-  const [[effective_plan, features], { locations, media }] = await Promise.all([
-    readDashboardWorkspaceAccess(event, context),
-    readDashboardLocations(db, organization.id, undefined, false, true),
-  ])
+  const { effective_plan, features, locationData, has_unread } = await readDashboardWorkspaceAccess(event, context, true)
+  const { locations, media } = locationData!
   recordRequestPhase(event, 'resources', resourcesStartedAt)
 
   const { memberId, ...business } = organization
@@ -49,5 +61,6 @@ export async function loadDashboardContext(
     success: true as const,
     organization: { ...business, effective_plan, media, features, member_id: memberId },
     locations,
+    has_unread,
   }
 }

@@ -53,8 +53,8 @@ export async function connectionRows(
   event: H3Event, context: Parameters<typeof readDashboardWorkspaceAccess>[1], summary: Summary,
 ): Promise<ConnectionRow[]> {
   const { env, organization } = context
-  const [effectivePlan, features] = await readDashboardWorkspaceAccess(event, context)
-  const allowed = getPlanEntitlements(effectivePlan)
+  const { effective_plan, features } = await readDashboardWorkspaceAccess(event, context)
+  const allowed = getPlanEntitlements(effective_plan)
   const base = `/dashboard/${encodeURIComponent(organization.slug)}/integrations`
   const maps = summary.google_maps
   const mapped = maps.filter(location => location.google_place_id).length

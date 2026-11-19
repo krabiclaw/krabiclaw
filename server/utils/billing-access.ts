@@ -1,7 +1,7 @@
 import type { Subscription } from '@better-auth/stripe'
 import { and, asc, eq, exists, getTableColumns, inArray } from 'drizzle-orm'
 import { HTTPError } from 'nitro'
-import { createDb, type DbClient } from '~/server/db'
+import { createDb, executeBatch, type DbClient } from '~/server/db'
 import { organization, payment_servicing_tenants, stripe_connected_accounts, subscription } from '~/server/db/schema'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
@@ -139,7 +139,7 @@ function subscriptionPlan(current: EntitlementRow | null): string {
 
 export function planFromSubscriptions(
   organizationId: string,
-  rows: Subscription[],
+  rows: EntitlementRow[],
   now = new Date(),
 ): string {
   return subscriptionPlan(entitlingSubscription(organizationId, rows, now))
@@ -163,9 +163,27 @@ export async function getOrganizationPlan(
   organizationId: string,
   now = new Date(),
 ): Promise<string> {
-  const plan = (await getOrganizationPlans(env, [organizationId], now)).get(organizationId)
-  if (!plan) throw new Error(`Organization ${organizationId} plan could not be resolved`)
-  return plan
+  const plan = prepareOrganizationPlan(organizationId, now)
+  const [result] = await executeBatch(env.DB, [plan.query], { operation: 'Read the organization plan' })
+  return plan.read(result!)
+}
+
+export function prepareOrganizationPlan(organizationId: string, now = new Date()) {
+  if (!organizationId.trim()) throw new Error('An organization ID is required for the plan read')
+  const query = {
+    query: `SELECT id, referenceId, plan, status, periodEnd FROM subscription
+      WHERE referenceId = ? AND status IN (${ENTITLING_STATUSES.map(() => '?').join(', ')})`,
+    params: [organizationId, ...ENTITLING_STATUSES],
+  }
+  return {
+    query,
+    read(result: D1Result) {
+      const rows = result.results as (Omit<EntitlementRow, 'periodEnd'> & { periodEnd: number | null })[]
+      return planFromSubscriptions(organizationId, rows.map(row => ({
+        ...row, periodEnd: row.periodEnd === null ? null : new Date(row.periodEnd * 1000),
+      })), now)
+    },
+  }
 }
 
 export async function getOrganizationEntitlements(

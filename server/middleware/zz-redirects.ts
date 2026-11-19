@@ -184,6 +184,12 @@ export default defineHandler(async (event) => {
     return redirect(targetWithParams, 301)
   }
 
+  if (event.context.tenantType === TENANT_TYPES.PLATFORM
+    && (normalizedPathname === '/dashboard' || normalizedPathname.startsWith('/dashboard/'))) {
+    markTranscriptMiddlewareComplete(event)
+    return
+  }
+
   const tenantRedirect = (event.context.tenantRedirect as {
     toPath: string | null
     statusCode: number | null

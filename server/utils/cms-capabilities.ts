@@ -18,13 +18,23 @@ export function resolveOrganizationCmsCapabilities(verticalValue: string, themeI
   }
 }
 
-/** The modules this organization has: its vertical's, and `stays` once it has a stay product. */
-export async function loadOrganizationFeatures(db: DbClient, organizationId: string): Promise<readonly ProductFeature[]> {
-  const row = await queryFirst<{ vertical: string; theme_id: string; has_stay_product: number }>(db, `SELECT vertical, theme_id,
+type OrganizationFeatureRow = { vertical: string; theme_id: string; has_stay_product: number }
+
+export function organizationFeaturesQuery(organizationId: string) {
+  return { query: `SELECT vertical, theme_id,
     EXISTS(SELECT 1 FROM products WHERE organization_id = organization.id AND kind = 'stay') AS has_stay_product
-    FROM organization WHERE id = ?`, [organizationId])
+    FROM organization WHERE id = ?`, params: [organizationId] }
+}
+
+export function organizationFeaturesFromRow(row: OrganizationFeatureRow | null | undefined): readonly ProductFeature[] {
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND' } })
   return resolveOrganizationCmsCapabilities(row.vertical, row.theme_id, { hasStayProduct: row.has_stay_product === 1 }).capabilities.features
+}
+
+/** The modules this organization has: its vertical's, and `stays` once it has a stay product. */
+export async function loadOrganizationFeatures(db: DbClient, organizationId: string) {
+  const { query, params } = organizationFeaturesQuery(organizationId)
+  return organizationFeaturesFromRow(await queryFirst<OrganizationFeatureRow>(db, query, params))
 }
 
 /** Places to stay, Airbnb and guest automation exist only for an organization with `stays`. */
