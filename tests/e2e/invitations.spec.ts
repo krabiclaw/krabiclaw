@@ -20,7 +20,7 @@ test('the email link returns through normal sign-in and only the invited account
     expect(form.status(), await form.text()).toBe(200)
     const { organization_id, roles } = await form.json() as { organization_id: string; roles: Array<{ value: string }> }
     expect(organization_id).toBe(workspace.organizationId)
-    expect(roles.map(role => role.value).sort()).toEqual(['member', 'owner', 'admin', ...specialtyRoles].sort())
+    expect(roles.map(role => role.value).sort()).toEqual(['member', 'owner', 'admin', 'maintenance', ...specialtyRoles].sort())
   }
   const owner = await browser.newContext({ baseURL, viewport: { width: 360, height: 780 } })
   let invitationId: string

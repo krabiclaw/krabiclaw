@@ -4,7 +4,7 @@ import { publishChangedJobs } from '~/server/events'
 import { HTTPError } from 'nitro'
 import type { ProductKind } from '~/shared/product-details'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, locationMemberSql, roleAllows, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
+import { assertRoleAllows, isOrganizationWideRole, locationMemberSql, roleAllows, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { conversationMemberSql, messageQueries, participantGuard } from '~/server/domain/conversations'
@@ -22,18 +22,19 @@ import { guestGroup } from '~/shared/dashboard-today'
 
 /*
   A turnover or failed scheduled message follows changes to its subject.
-  People create custom tasks. People assign, reschedule, complete, skip and
-  reopen them here, from the dashboard, MCP and the app alike.
+  People create custom tasks and maintenance jobs, a maintenance job from a
+  guest's message when one reported the problem. People assign, reschedule,
+  complete, skip and reopen them here, from the dashboard, MCP and the app alike.
 */
 
-export const TASK_KINDS = ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'consultation_prep', 'consultation_follow_up'] as const
+export const TASK_KINDS = ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'consultation_prep', 'consultation_follow_up', 'maintenance'] as const
 export const SUPPORTED_TASK_KINDS = d1JsonStringSet(TASK_KINDS)
 export type TaskKind = typeof TASK_KINDS[number]
 export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
 export interface TaskRow {
   id: string; organization_id: string; kind: TaskKind
-  subject_type: 'scheduled_guest_message' | 'booking' | 'product_session' | null; subject_id: string | null
+  subject_type: 'scheduled_guest_message' | 'booking' | 'product_session' | 'message' | null; subject_id: string | null
   product_id: string | null; location_id: string | null
   title: string | null; notes: string | null
   assigned_member_id: string | null
@@ -57,7 +58,7 @@ function fail(statusCode: number, code: string, message: string, field?: string)
 // ---------------------------------------------------------------------------
 
 export function isJobTask(row: Pick<TaskRow, 'kind'>): boolean {
-  return row.kind === 'turnover' || row.kind === 'consultation_follow_up'
+  return row.kind === 'turnover' || row.kind === 'consultation_follow_up' || row.kind === 'maintenance'
 }
 
 // A private legal appointment's prep can be discussed in the one client's
@@ -77,11 +78,19 @@ export const jobBookingIdSql = (alias: string) => `CASE
     THEN ${consultationBookingSql(`${alias}.subject_id`, `${alias}.organization_id`)}
 END`
 
-/** The booking a job is about, and what it holds: a home's nights (a turnover or a make-ready job) or a session's seats (a visit follow-up). */
-export type JobSubject = { id: string; unit: 'slot' | 'nights' }
+/**
+ * What a job's conversation is tied to: a booking and what it holds, a home's
+ * nights (a turnover or a make-ready job) or a session's seats (a visit
+ * follow-up); or, for maintenance, the place being repaired.
+ */
+export type JobSubject = { id: string; unit: 'slot' | 'nights' | 'location' }
 
-/** The booking a job is about, which its conversation is tied to. */
-export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'kind' | 'subject_type' | 'subject_id'>): JobSubject {
+/** The booking or place a job is about, which its conversation is tied to. */
+export function jobSubject(row: Pick<TaskRow, 'dedupe_key' | 'kind' | 'subject_type' | 'subject_id' | 'location_id'>): JobSubject {
+  if (row.kind === 'maintenance') {
+    if (!row.location_id) throw new Error(`Maintenance job ${row.dedupe_key} names no location`)
+    return { id: row.location_id, unit: 'location' }
+  }
   if (!row.subject_id || row.subject_type !== 'booking') throw new Error(`Job task ${row.dedupe_key} names no booking`)
   return { id: row.subject_id, unit: row.kind === 'turnover' ? 'nights' : 'slot' }
 }
@@ -346,8 +355,8 @@ export async function taskViewer(principal: MemberAccessPrincipal): Promise<Task
 
 /**
  * A member reads the tasks given to them, every task at an offering or location
- * they are responsible for; an owner or admin reads every task. The member row
- * is matched in the same statement.
+ * they are responsible for except its maintenance; an owner, admin or manager
+ * reads every task. The member row is matched in the same statement.
  */
 const claimRoles = rolesAllowing({ task: ['claim'] })
 
@@ -366,7 +375,7 @@ export function taskScopeSql(alias: string, who: () => ViewerTerms): string {
         AND ${alias}.kind NOT IN ('message_delivery', 'booking_change', 'booking_review'))
       OR ((${alias}.assigned_member_id = m.id OR (${alias}.assigned_member_id IS NULL AND ${alias}.status = 'open'))
         AND ${claimAudienceSql(alias, 'm')})
-      OR (${alias}.claim_role IS NULL AND ${roleMatchesSql('m.role', assignedOperationsRoles)}
+      OR (${alias}.claim_role IS NULL AND ${alias}.kind <> 'maintenance' AND ${roleMatchesSql('m.role', assignedOperationsRoles)}
         AND NOT (${alias}.kind = 'booking_review' AND EXISTS (SELECT 1 FROM bookings b WHERE b.id = ${alias}.subject_id
           AND b.organization_id = ${alias}.organization_id AND b.product_session_id IS NULL))
         AND (${alias}.assigned_member_id = m.id
@@ -417,6 +426,8 @@ export interface TaskView {
   status_line: string | null
   /** What the work is: "Clean up after Parity’s group of 2", a person, or the task's own title. */
   title: string
+  /** The listing or location the work is at: "Ocean Avenue Studio", "Raleigh office". */
+  place: string | null
   /** The stored window: "11:00 AM – 3:00 PM", "11:00 AM". */
   when: string | null
   /** One sentence of context. */
@@ -480,6 +491,8 @@ interface Context {
   /** A booking's conversation, when it is and what was booked. */
   records: Map<string, BookedRow>
   outcomes: Map<string, { note: string | null; photos: TaskPhoto[] }>
+  /** The guest message a maintenance job was reported in, by message id. */
+  reports: Map<string, { conversation_id: string; guest_name: string | null; participant: string | null; body: string | null }>
 }
 
 /**
@@ -533,17 +546,21 @@ function taskContextQueries(organizationId: string, listed: { sql: string; param
     { query: `WITH listed AS (${listed.sql}), closure AS (${closure})
       SELECT closure.*, photos.* FROM closure LEFT JOIN (${outcomePhotos}) photos ON photos.owner_id = closure.message_id
       ORDER BY closure.task_id, photos.sort_order`, params: [...listed.params, userId] },
+    query(`SELECT m.id, m.body, m.conversation_id, json_extract(c.payload_json, '$.guest.name') AS guest_name, json_extract(c.payload_json, '$.participant.title') AS participant
+      FROM messages m JOIN conversations c ON c.organization_id = m.organization_id AND c.id = m.conversation_id
+      WHERE m.organization_id = ${org} AND m.id IN ${subjects('message')}`),
   ]
 }
 
 function taskContext(organizationId: string, rows: TaskRow[], results: Array<{ results: unknown[] }>): Context {
-  const [organizations, members, locations, messages, privateConsultations, booked, stayRows, requests, products, pictures, closureRows]
+  const [organizations, members, locations, messages, privateConsultations, booked, stayRows, requests, products, pictures, closureRows, reportRows]
     = results.map(result => result.results) as [
       Array<{ slug: string; vertical: string }>, Array<{ id: string; userId: string; name: string }>, Array<{ id: string; title: string }>,
       DeliveryTaskMessage[],
       Array<{ id: string; booking_id: string | null }>, BookedRow[], StayRow[], Array<{ id: string; guest_name: string | null; participant: string | null }>,
       Array<{ id: string; name: string | null; kind: ProductKind }>, unknown[],
       Array<{ task_id: string; message_id: string; body: string | null } & (MessagePhotoRow | { owner_id: null })>,
+      Array<{ id: string; conversation_id: string; guest_name: string | null; participant: string | null; body: string | null }>,
     ]
   const organization = organizations[0]
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
@@ -584,6 +601,7 @@ function taskContext(organizationId: string, rows: TaskRow[], results: Array<{ r
     records: new Map(records.map(record => [record.id, record])),
     outcomes: new Map(closureRows.map(row => [row.task_id, { note: row.body, photos: (photos.get(row.message_id) ?? [])
       .map(photo => ({ id: photo.id, url: photo.url, thumbnail_url: photo.thumbnailUrl })) }])),
+    reports: new Map(reportRows.map(({ id, ...report }) => [id, report])),
   }
 }
 
@@ -770,6 +788,19 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       avatar = { initial: initialOf(title), tone: 'cool' }
       break
     }
+    case 'maintenance': {
+      const report = row.subject_type === 'message' ? context.reports.get(row.subject_id!) : undefined
+      if (row.subject_type === 'message' && !report) throw new Error(`Maintenance job ${row.id} has no reporting message`)
+      title = row.title!
+      status_line = ['Maintenance', place].filter(Boolean).join(' · ')
+      // What the guest said, by first name: the job's people read it without the guest's conversation.
+      if (report?.body) detail = `${report.guest_name ? firstName(report.guest_name) : report.participant ?? 'The guest'} wrote: “${report.body}”`
+      // The guest's conversation opens for the people who manage the business.
+      conversation_id = viewer.manage && report ? report.conversation_id : null
+      path = conversation(conversation_id)
+      sheet = { heading: 'Maintenance', title, date: row.due_at ? day(row.due_at) : null }
+      break
+    }
     case 'custom':
       status_line = ['Task', place].filter(Boolean).join(' · ')
       title = row.title!
@@ -813,8 +844,8 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   const outcome = row.closed_at === null ? null : { note: authored?.note ?? null, photos: authored?.photos ?? [], closed_at: row.closed_at, closed_by: closerName }
   return {
     id: row.id, kind: row.kind, status: row.status, version: row.version,
-    face, tag: row.status === 'open' && row.kind === 'turnover' ? 'Turnover' : null, avatar,
-    image_url: product?.imageUrl ?? null, status_line, title, when, detail, error, note: outcome?.note ? `“${outcome.note}”` : null,
+    face, tag: row.status !== 'open' ? null : row.kind === 'turnover' ? 'Turnover' : row.kind === 'maintenance' ? 'Maintenance' : null, avatar,
+    image_url: product?.imageUrl ?? null, status_line, title, place, when, detail, error, note: outcome?.note ? `“${outcome.note}”` : null,
     person: row.status === 'open' ? assignee : closer, assignee, action, sheet: { ...sheet, checkout: checkoutSide, checkin: checkinSide },
     ...(available ? { claim: { label: 'Claim', path: taskUpdatePath(row.organization_id, row.id), version: row.version } } : {}),
     starts_at: row.starts_at, due_at: row.due_at, timezone: zone, notes: available ? null : row.notes,
@@ -845,8 +876,8 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, then everything else. */
 /** Work a person does and closes themselves: they Skip it, and say what they found when they finish. Everything else is Dismissed. */
-const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'consultation_prep', 'consultation_follow_up'])
-const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, consultation_follow_up: 3 }
+const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'consultation_prep', 'consultation_follow_up', 'maintenance'])
+const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, maintenance: 1, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, consultation_follow_up: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */
 export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskListQuery, now = new Date()): Promise<{ sections: TaskSection[]; resolved_at: string }> {
@@ -938,7 +969,7 @@ export interface OpenWorkRow {
 
 /**
  * The viewer's open work that Today shows beside its bookings, as one statement:
- * jobs (a turnover, a home to get ready, a follow-up, a consultation's prep),
+ * jobs (a turnover, a home to get ready, a follow-up, a consultation's prep, a repair),
  * a message that did not send, a change waiting on the business and a task
  * someone added, starting or due on or before `to` (an untimed turnover by its
  * checkout, an untimed make-ready by the arrival; a message, a change or an
@@ -957,11 +988,11 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
         r.id AS guest_conversation_id,
         ${conversationMemberSql('r', viewer.user)} AS viewer_seated,
         (SELECT c.id FROM conversations c JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.user_id = ${viewer.user} AND seat.role = 'member'
-          WHERE c.organization_id = x.organization_id AND c.kind = 'team' AND c.booking_id = x.booking_id
+          WHERE c.organization_id = x.organization_id AND c.kind = 'team' AND c.booking_id IS x.booking_id
             AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.author_kind = 'krabiclaw' AND instr(json_extract(m.payload_json, '$.key'), 'job:' || x.id || ':') = 1)
           ORDER BY c.created_at DESC, c.id LIMIT 1) AS team_conversation_id
       FROM (SELECT t.id, t.organization_id, t.kind, t.version, t.subject_type, t.subject_id, t.product_id, t.location_id, t.title, t.timezone, t.starts_at, t.due_at, t.claim_role, t.assigned_member_id,
-          CASE WHEN t.kind = 'custom' AND t.assigned_member_id = ${viewer.member} THEN t.notes END AS notes,
+          CASE WHEN t.kind IN ('custom', 'maintenance') AND t.assigned_member_id = ${viewer.member} THEN t.notes END AS notes,
           (SELECT u.name FROM member am JOIN user u ON u.id = am.userId WHERE am.id = t.assigned_member_id AND am.organizationId = t.organization_id) AS assignee_name,
           t.assigned_member_id IS NOT NULL AND t.assigned_member_id = ${viewer.member} AS assigned_to_viewer,
           (SELECT u.name FROM user u WHERE u.id = t.created_by_user_id) AS creator_name, COALESCE(t.created_by_user_id = ${viewer.user}, 0) AS created_by_viewer,
@@ -971,12 +1002,13 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
         FROM tasks t
         LEFT JOIN scheduled_guest_messages g ON t.kind = 'message_delivery' AND g.organization_id = t.organization_id AND g.id = t.subject_id
         WHERE t.organization_id = ${viewer.organization} AND t.status = 'open'
-          AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'message_delivery', 'booking_change', 'custom')
+          AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'message_delivery', 'booking_change', 'custom', 'maintenance')
           AND ${taskScopeSql('t', () => viewer)}) x
       LEFT JOIN bookings b ON b.organization_id = x.organization_id AND b.id = x.booking_id
       LEFT JOIN products p ON p.organization_id = x.organization_id AND p.id = COALESCE(b.product_id, x.product_id)
       LEFT JOIN product_stay_configs sc ON b.product_session_id IS NULL AND sc.organization_id = b.organization_id AND sc.product_id = b.product_id
-      LEFT JOIN business_locations l ON l.organization_id = b.organization_id AND l.id = COALESCE(b.location_id, sc.location_id)
+      LEFT JOIN business_locations l ON l.organization_id = x.organization_id
+        AND l.id = COALESCE(b.location_id, sc.location_id, CASE WHEN x.kind = 'maintenance' THEN x.location_id END)
       LEFT JOIN conversations r ON r.organization_id = b.organization_id AND r.booking_id = b.id AND r.kind = 'booking'
      WHERE x.kind IN ('message_delivery', 'booking_change') OR COALESCE(x.starts_at, x.due_at, ${UNTIMED_JOB_DAY_SQL}, '') <= ?
      ORDER BY COALESCE(x.starts_at, x.due_at, ${UNTIMED_JOB_DAY_SQL}), x.id`,
@@ -986,7 +1018,32 @@ export function openWorkQuery(viewer: ViewerTerms, to: string): BatchQuery {
 
 /** The members a manager can give work to, as a statement for the caller's batch; `organization` is a bound id or a SQL term (NULL reads nothing). */
 export function taskAssigneesQuery(organization: { sql: string; params?: unknown[] }): BatchQuery {
-  return { query: `SELECT m.id, m.userId, u.name FROM member m JOIN user u ON u.id = m.userId WHERE m.organizationId = ${organization.sql} ORDER BY u.name, m.id`, params: organization.params ?? [] }
+  return { query: `SELECT m.id, m.userId, u.name, m.role FROM member m JOIN user u ON u.id = m.userId WHERE m.organizationId = ${organization.sql} ORDER BY u.name, m.id`, params: organization.params ?? [] }
+}
+
+/** A listing at one of its locations, or a location by itself. */
+export interface MaintenancePlace { product_id: string | null; location_id: string; label: string }
+
+/** What a repair can be sent to, for whoever creates one: where it can be, and who can do it (maintenance members, owners and admins). */
+export async function maintenanceOptions(db: DbClient, viewer: TaskViewer): Promise<{ places: MaintenancePlace[]; assignees: TaskPerson[] }> {
+  await assertRoleAllows({ ...viewer.principal, permissions: { task: ['create'] } })
+  const organization = { sql: '?', params: [viewer.principal.organizationId] }
+  const [places, members] = await executeBatch(db, [maintenancePlacesQuery(organization), taskAssigneesQuery(organization)], { operation: 'Read maintenance options' })
+  const eligible = (members!.results as Array<{ role: string }>).filter(member => member.role.split(',').some(role => role.trim() === 'maintenance') || isOrganizationWideRole(member.role))
+  return { places: places!.results as MaintenancePlace[], assignees: taskAssignees(eligible, viewer.principal.userId) }
+}
+
+/** Where repair work can be: each listing at each of its locations, then each location. */
+function maintenancePlacesQuery(organization: { sql: string; params?: unknown[] }): BatchQuery {
+  return { query: `SELECT * FROM (SELECT p.id AS product_id, l.id AS location_id,
+      COALESCE(NULLIF(s.internal_name, ''), p.name) || CASE WHEN (SELECT count(*) FROM product_locations other
+        WHERE other.organization_id = p.organization_id AND other.product_id = p.id) > 1 THEN ' · ' || l.title ELSE '' END AS label
+    FROM products p JOIN product_locations pl ON pl.organization_id = p.organization_id AND pl.product_id = p.id
+    JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
+    LEFT JOIN product_stay_configs s ON s.organization_id = p.organization_id AND s.product_id = p.id
+    WHERE p.organization_id = ${organization.sql}
+    UNION ALL SELECT NULL, l.id, l.title FROM business_locations l WHERE l.organization_id = ${organization.sql})
+    ORDER BY product_id IS NULL, lower(label), product_id, location_id`, params: [...organization.params ?? [], ...organization.params ?? []] }
 }
 
 /** `taskAssigneesQuery`'s rows as people, the viewer as "You". */
@@ -1052,6 +1109,15 @@ export async function readTaskAssignee(db: DbClient, organizationId: string, inp
   return member as string | null
 }
 
+/** Repair work goes to a maintenance member, or to an owner or admin. */
+async function assertMaintenanceAssignee(db: DbClient, organizationId: string, memberId: string): Promise<void> {
+  const member = await queryFirst<{ role: string }>(db, 'SELECT role FROM member WHERE organizationId = ? AND id = ?', [organizationId, memberId])
+  if (!member) fail(422, 'INVALID_RESPONSIBILITY', 'The member must belong to this organization', 'assigned_member_id')
+  if (!member.role.split(',').some(role => role.trim() === 'maintenance') && !isOrganizationWideRole(member.role)) {
+    fail(422, 'INVALID_RESPONSIBILITY', 'Maintenance goes to a maintenance member, an owner or an admin', 'assigned_member_id')
+  }
+}
+
 function taskEventQuery(viewer: TaskViewer, row: Pick<TaskRow, 'id' | 'kind' | 'location_id'>, eventType: 'task.assigned' | 'task.updated' | 'task.completed' | 'task.skipped' | 'task.reopened', state: { before?: unknown; after?: unknown }, guarded = true): BatchQuery {
   return organizationEventQuery({ organizationId: viewer.principal.organizationId, locationId: row.location_id, actorId: viewer.principal.userId, eventType,
     entityType: 'task', entityId: row.id, metadata: { kind: row.kind }, beforeState: state.before, afterState: state.after, onlyIfPreviousChangedOneRow: guarded })
@@ -1083,6 +1149,9 @@ async function afterWrite(db: DbClient, viewer: TaskViewer, taskId: string, assi
 export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<string, unknown>): Promise<{ task: TaskView; created: boolean }> {
   await assertRoleAllows({ ...viewer.principal, permissions: { task: ['create'] } })
   const organizationId = viewer.principal.organizationId
+  const kind = body.kind ?? 'custom'
+  if (kind !== 'custom' && kind !== 'maintenance') fail(422, 'INVALID_TASK_FIELD', 'kind must be custom or maintenance', 'kind')
+  const maintenance = kind === 'maintenance'
   const key = text(body.idempotency_key, 'idempotency_key', 200, true)!
   const title = text(body.title, 'title', 200, true)!
   const notes = text(body.notes, 'notes', 5000)
@@ -1092,6 +1161,15 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
   const productId = body.product_id ?? null, locationId = body.location_id ?? null
   const assignedMemberId = body.assigned_member_id ?? null
   const claimRole = body.claim_role ?? null
+  const sourceMessageId = body.source_message_id ?? null
+  if (!maintenance && sourceMessageId !== null) fail(422, 'INVALID_TASK_FIELD', 'Only a maintenance job is created from a message', 'source_message_id')
+  // A repair is always someone's: it is never offered for claiming.
+  if (maintenance && claimRole !== null) fail(422, 'INVALID_TASK_CLAIM_ROLE', 'A maintenance job is assigned, not offered for claiming', 'claim_role')
+  if (sourceMessageId !== null && (typeof sourceMessageId !== 'string' || !await queryFirst(db, `SELECT 1 FROM messages m
+      JOIN conversations c ON c.organization_id = m.organization_id AND c.id = m.conversation_id AND c.kind IN ('contact', 'booking')
+      WHERE m.organization_id = ? AND m.id = ? AND m.author_kind = 'guest'`, [organizationId, sourceMessageId]))) {
+    fail(422, 'INVALID_TASK_FIELD', 'The message must be a guest’s message in this organization', 'source_message_id')
+  }
   if (claimRole !== null) {
     if (!staffAccessWritesEnabled(viewer.principal.env)) fail(503, 'STAFF_ACCESS_ROLLOUT', 'Offering work for claiming is not available yet')
     if (typeof claimRole !== 'string' || !isOrganizationRole(claimRole) || !claimRoles.includes(claimRole)
@@ -1104,9 +1182,10 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
     [organizationId, productId, roleVertical ?? null, roleVertical ?? null])
     if (!listing) fail(422, 'INVALID_TASK_CLAIM_ROLE', 'Choose an eligible role and listing for available work', 'claim_role')
   }
-  const dedupeKey = `custom:${organizationId}:${key}`
+  const dedupeKey = `${kind}:${organizationId}:${key}`
   const eventKey = creationDedupeKey('task', organizationId, key)
-  const requestHash = await creationRequestHash({ actorId, title, notes, startsAt, dueAt, productId, locationId, assignedMemberId, ...(claimRole ? { claim_role: claimRole } : {}) })
+  const requestHash = await creationRequestHash({ actorId, title, notes, startsAt, dueAt, productId, locationId, assignedMemberId, ...(claimRole ? { claim_role: claimRole } : {}),
+    ...(maintenance ? { kind, source_message_id: sourceMessageId } : {}) })
   const readReplay = async (): Promise<string | null> => {
     const record = await readCreationRecord(db, eventKey)
     if (!record) return null
@@ -1116,7 +1195,15 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
   const replayId = await readReplay()
   if (replayId) return { task: await afterWrite(db, viewer, replayId), created: false }
 
-  const assigned = await readTaskAssignee(db, organizationId, body)
+  const chosen = await readTaskAssignee(db, organizationId, body)
+  // A job is never nobody's: with no one chosen it is the owner's, by the one fallback jobs are written with.
+  const assigned = maintenance
+    ? (await queryFirst<{ id: string | null }>(db, `SELECT ${jobAssigneeSql('?', '?')} AS id`, [chosen, organizationId]))?.id ?? null
+    : chosen
+  if (maintenance) {
+    if (!assigned) throw new Error(`Organization ${organizationId} has no owner to give a maintenance job`)
+    await assertMaintenanceAssignee(db, organizationId, assigned)
+  }
   type Place = { location_id: string; timezone: string }
   const places = productId !== null
     ? await queryAll<Place>(db, `SELECT pl.location_id, l.timezone FROM product_locations pl
@@ -1126,17 +1213,18 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
     : locationId !== null ? await queryAll<Place>(db, 'SELECT id AS location_id, timezone FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId]) : []
   if (places.length > 1 && !claimRole) fail(422, 'TASK_LOCATION_REQUIRED', 'Choose a location for a product linked to multiple locations', 'location_id')
   const place = places.length === 1 ? places[0] : undefined
+  if (maintenance && productId === null && locationId === null) fail(422, 'TASK_LOCATION_REQUIRED', 'Choose the listing or location that needs the repair', 'location_id')
   if ((locationId !== null || (productId !== null && !claimRole)) && !place) fail(422, 'INVALID_TASK_FIELD', productId !== null ? 'The offering is not at that location in this organization' : 'The location is not in this organization', productId !== null ? 'product_id' : 'location_id')
   const organization = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [organizationId])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const id = crypto.randomUUID(), now = new Date().toISOString()
   const resolvedLocationId = place?.location_id ?? null
   const results = await executeBatch(db, [{
-    query: `INSERT INTO tasks (id, organization_id, kind, product_id, location_id, title, notes, assigned_member_id, claim_role, starts_at, due_at, timezone, status, dedupe_key, version, created_by_user_id, created_at, updated_at)
-      VALUES (?, ?, 'custom', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING`,
-    params: [id, organizationId, productId, resolvedLocationId, title, notes, assigned, claimRole, startsAt, dueAt, place?.timezone ?? organization.timezone, dedupeKey, actorId, now, now],
+    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, title, notes, assigned_member_id, claim_role, starts_at, due_at, timezone, status, dedupe_key, version, created_by_user_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING`,
+    params: [id, organizationId, kind, sourceMessageId === null ? null : 'message', sourceMessageId, productId, resolvedLocationId, title, notes, assigned, claimRole, startsAt, dueAt, place?.timezone ?? organization.timezone, dedupeKey, actorId, now, now],
   }, organizationEventQuery({ organizationId, locationId: resolvedLocationId, actorId, eventType: 'task.created', entityType: 'task', entityId: id,
-    dedupeKey: eventKey, metadata: { kind: 'custom', request_hash: requestHash }, onlyIfPreviousChangedOneRow: true,
+    dedupeKey: eventKey, metadata: { kind, request_hash: requestHash }, onlyIfPreviousChangedOneRow: true,
     afterState: { title, assigned_member_id: assigned, starts_at: startsAt, due_at: dueAt },
   })], { operation: 'Create task' })
   if (results[0]?.meta.changes !== 1) {
@@ -1182,11 +1270,12 @@ export async function updateTask(db: DbClient, viewer: TaskViewer, taskId: strin
   if (current.status !== 'open') fail(409, 'TASK_CLOSED', 'Reopen the task before changing it', 'status')
   const assigned = touchesAssignee ? await readTaskAssignee(db, viewer.principal.organizationId, body) : current.assigned_member_id
   if (assigned === null && (isJobTask(current) || current.kind === 'consultation_prep')) fail(422, 'JOB_ASSIGNEE_REQUIRED', 'A job always has someone doing it: choose a member', 'assigned_member_id')
+  if (current.kind === 'maintenance' && touchesAssignee && assigned) await assertMaintenanceAssignee(db, viewer.principal.organizationId, assigned)
   const startsAt = body.starts_at === undefined ? current.starts_at : instant(body.starts_at, 'starts_at')
   const dueAt = body.due_at === undefined ? current.due_at : instant(body.due_at, 'due_at')
   if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'starts_at must not be after due_at', 'starts_at')
   const notes = body.notes === undefined ? current.notes : text(body.notes, 'notes', 5000)
-  const title = body.title === undefined ? current.title : current.kind === 'custom' ? text(body.title, 'title', 200, true) : fail(422, 'INVALID_TASK_FIELD', 'This task takes its title from what it is about', 'title')
+  const title = body.title === undefined ? current.title : current.kind === 'custom' || current.kind === 'maintenance' ? text(body.title, 'title', 200, true) : fail(422, 'INVALID_TASK_FIELD', 'This task takes its title from what it is about', 'title')
   const after = { assigned_member_id: assigned, starts_at: startsAt, due_at: dueAt, notes, title }
   const before = { assigned_member_id: current.assigned_member_id, starts_at: current.starts_at, due_at: current.due_at, notes: current.notes, title: current.title }
   if (JSON.stringify(after) === JSON.stringify(before)) fail(422, 'INVALID_TASK_FIELD', 'Provide at least one change', 'task')
@@ -1217,11 +1306,12 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   // A job closes in its conversation too: "Done" is the person's own message there, and nobody is alerted.
   // The conversation that carries this job is the one its automatic post went to, and the closer must still sit in it.
   const privatePrep = current.subject_type === 'product_session'
-  const hasThread = view.booking_id && (isJobTask(current) || privatePrep)
+  // A maintenance job's conversation is its place's, with no booking.
+  const hasThread = current.kind === 'maintenance' || (view.booking_id && (isJobTask(current) || privatePrep))
   const thread = hasThread ? await queryFirst<{ id: string }>(db, `SELECT c.id FROM conversations c
       JOIN messages m ON m.conversation_id = c.id AND m.author_kind = 'krabiclaw'
       JOIN conversation_participants seat ON seat.conversation_id = c.id AND seat.role = 'member' AND seat.user_id = ?
-     WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id = ?
+     WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id IS ?
        AND (? = 0 OR EXISTS (SELECT 1 FROM conversation_participants assignee
          JOIN member assigned ON assigned.organizationId = c.organization_id AND assigned.userId = assignee.user_id
          WHERE assignee.conversation_id = c.id AND assignee.role = 'member' AND assigned.id = ?))

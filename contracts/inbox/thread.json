@@ -182,6 +182,11 @@
       "unshown_files": 0
     }
   ],
+  "maintenance": {
+    "guest": "Mililani",
+    "location_id": "location",
+    "product_id": "00000000-0000-4000-8000-000000000012"
+  },
   "page": {
     "before": null,
     "newest": 8,
@@ -190,7 +195,7 @@
   },
   "viewer_role": "member",
   "work": {
-    "task_id": "00000000-0000-4000-8000-000000000012",
+    "task_id": "00000000-0000-4000-8000-000000000013",
     "type": "done",
     "version": 1
   }

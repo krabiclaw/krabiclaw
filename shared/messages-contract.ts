@@ -107,6 +107,8 @@ export interface ConversationPage extends Omit<ConversationEntriesPage, 'convers
   work: { type: 'done'; task_id: string; version: number } | { type: 'review' } | null
   /** The open task each actionable job message represents, keyed by message ID. */
   job_actions?: Record<string, string>
+  /** For whoever creates tasks in a guest conversation: where a guest's report is, to make a maintenance job of it. */
+  maintenance?: { product_id: string | null; location_id: string | null; guest: string }
 }
 
 export interface ConversationDetails {

@@ -60,7 +60,7 @@
       "automatic": false,
       "body": "74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.",
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000013",
+      "id": "00000000-0000-4000-8000-000000000014",
       "job": false,
       "photos": [],
       "receipt": null,
@@ -78,7 +78,7 @@
       "automatic": false,
       "body": "We arrive late, around 9 PM.",
       "deliveries": [],
-      "id": "00000000-0000-4000-8000-000000000014",
+      "id": "00000000-0000-4000-8000-000000000015",
       "job": false,
       "photos": [],
       "receipt": null,
@@ -91,6 +91,11 @@
       "unshown_files": 0
     }
   ],
+  "maintenance": {
+    "guest": "Ana",
+    "location_id": "location",
+    "product_id": "00000000-0000-4000-8000-000000000012"
+  },
   "page": {
     "before": null,
     "newest": 2,

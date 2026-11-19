@@ -11,9 +11,11 @@ import { cancelStay, createStay, updateStayHome, type StayAccess } from '../../s
 import { conversationPageFor } from './support/conversation-page.ts'
 import { sendConversationMessage } from '../../server/domain/send-conversation-message.ts'
 import { createTeamThread } from '../../server/domain/team-messages.ts'
-import { closeTask, getTask, jobKey, reopenTask, taskViewer, updateTask, type TaskRow, type TaskView } from '../../server/domain/tasks.ts'
+import { closeTask, createTask, getTask, jobKey, maintenanceOptions, reopenTask, taskViewer, updateTask, type TaskRow, type TaskView } from '../../server/domain/tasks.ts'
 import { listConversations } from '../../server/domain/guest-threads/repository.ts'
-import { markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
+import { appendMessage, markConversationRead, resolveConversationAccess } from '../../server/domain/conversations.ts'
+import { messagePhotoPlacements, uploadMessagePhotos } from '../../server/domain/guest-threads/attachments.ts'
+import { readToday } from '../../server/domain/today.ts'
 import { captureEvents } from './support/events.ts'
 import { sendDueOutbox } from '../../server/domain/scheduled-guest-messages.ts'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
@@ -27,7 +29,8 @@ import { applySchema } from './support/schema.ts'
 // theirs, reminders follow in it, a reassignment or cancellation is told
 // there, and Done is their own message in it. Owners and admins read along and
 // are warned when a home is not ready two hours before the guests arrive. A
-// job an owner keeps for themselves stays a task alert.
+// job an owner keeps for themselves stays a task alert. A repair a guest
+// reports is a maintenance job in the same way, in its place's conversation.
 
 const ORG = 'org'
 const ZONE = 'America/Denver'
@@ -73,10 +76,10 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Saltleaf', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, ZONE).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
-    for (const [id, name] of [['owner', 'Olive Owner'], ['admin', 'Ada Admin'], ['cleaner', 'Cleo Cleaner'], ['cook', 'Cam Cook']]) {
+    for (const [id, name] of [['owner', 'Olive Owner'], ['admin', 'Ada Admin'], ['cleaner', 'Cleo Cleaner'], ['cook', 'Cam Cook'], ['fixer', 'Fran Fixer']]) {
       await db.prepare('INSERT INTO user (id, name, email, "emailVerified", createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)').bind(id, name, `${id}@example.test`).run()
     }
-    for (const [id, userId, role] of [['m-owner', 'owner', 'owner'], ['m-admin', 'admin', 'admin'], ['m-cleaner', 'cleaner', 'member'], ['m-cook', 'cook', 'member']]) {
+    for (const [id, userId, role] of [['m-owner', 'owner', 'owner'], ['m-admin', 'admin', 'admin'], ['m-cleaner', 'cleaner', 'member'], ['m-cook', 'cook', 'member'], ['m-fixer', 'fixer', 'maintenance']]) {
       await db.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, 0)').bind(id, ORG, userId, role).run()
     }
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
@@ -246,6 +249,55 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     await sendConversationMessage(env, { ...await resolveConversationAccess(db, owner.userId, thread.id), userId: owner.userId, body: 'Thanks Cleo', photos: [], idempotencyKey: 'thanks-cleo', senderName: 'Olive Owner' })
     assert.equal(await isUnread(db, cleaner, thread.id), true)
     assert.equal(await isUnread(db, owner, thread.id), false)
+
+    // Dee writes that the AC blows warm air, with a photo.
+    const deeConversation = (await db.prepare("SELECT id FROM conversations WHERE booking_id = ? AND kind = 'booking'").bind(dee.id).first<string>('id'))!
+    const [acPhoto] = await uploadMessagePhotos(db, env, ORG, [{ bytes: pixels, filename: 'ac.avif' }], { source: 'external', userId: null })
+    await appendMessage(db, { id: 'ac-report', conversationId: deeConversation, authorKind: 'guest', authorUserId: null, body: 'The AC is blowing warm air.' },
+      messagePhotoPlacements(ORG, 'ac-report', [acPhoto!], new Date().toISOString()))
+    // The owner's conversation offers to make a maintenance job of it, at the place it is about.
+    assert.deepEqual((await conversationPageFor(db, owner, deeConversation)).maintenance, { product_id: cabin.id, location_id: 'cabin-site', guest: 'Dee' })
+    // Repair goes to the maintenance member, an owner or an admin, at the cabin or its location.
+    const options = await maintenanceOptions(db, ownerViewer)
+    assert.deepEqual(options.assignees.map(person => person.id).sort(), ['m-admin', 'm-fixer', 'm-owner'])
+    assert.deepEqual(options.places, [{ product_id: cabin.id, location_id: 'cabin-site', label: 'Cabin' }, { product_id: null, location_id: 'cabin-site', label: 'Pine Cabin' }])
+    const repair = { kind: 'maintenance', title: 'AC not cooling', product_id: cabin.id, location_id: 'cabin-site', source_message_id: 'ac-report', due_at: at(day(5), '17:00').toISOString() }
+    await assert.rejects(createTask(db, ownerViewer, { ...repair, assigned_member_id: 'm-cleaner', idempotency_key: 'ac-cleaner' }), { status: 422, data: { code: 'INVALID_RESPONSIBILITY', field: 'assigned_member_id' } })
+    await assert.rejects(createTask(db, ownerViewer, { ...repair, product_id: null, location_id: null, assigned_member_id: 'm-fixer', idempotency_key: 'ac-nowhere' }), { status: 422, data: { code: 'TASK_LOCATION_REQUIRED', field: 'location_id' } })
+    const { task: ac } = await createTask(db, ownerViewer, { ...repair, assigned_member_id: 'm-fixer', idempotency_key: 'ac' })
+    // Stored as the job of the guest's message, at the cabin, Fran's.
+    assert.deepEqual(await db.prepare('SELECT kind, subject_type, subject_id, product_id, location_id, assigned_member_id, claim_role FROM tasks WHERE id = ?').bind(ac.id).first(),
+      { kind: 'maintenance', subject_type: 'message', subject_id: 'ac-report', product_id: cabin.id, location_id: 'cabin-site', assigned_member_id: 'm-fixer', claim_role: null })
+    await runOrganizationJobs(queue, env, db, ORG, at(day(5), '09:00'))
+
+    // Fran's job is posted in the cabin's conversation with Fran and every owner and admin, with what Dee wrote and Dee's photo.
+    const fixer = principal('fixer', 'maintenance', 'm-fixer')
+    const [repairThread, ...otherRepairThreads] = await teamThreads(fixer)
+    assert.deepEqual([otherRepairThreads.length, repairThread!.booking_id, repairThread!.participants.map(person => person.id).sort()], [0, null, ['admin', 'fixer', 'owner']])
+    assert.equal((await db.prepare('SELECT location_id FROM conversations WHERE id = ?').bind(repairThread!.id).first<string>('location_id')), 'cabin-site')
+    const repairPage = await conversationPageFor(db, fixer, repairThread!.id)
+    const post = repairPage.entries.find(entry => entry.type === 'message' && entry.job)
+    assert(post?.type === 'message')
+    assert.equal(post.body, `Maintenance at Cabin: AC not cooling.\nDue ${ac.sheet.date}\nDee wrote: “The AC is blowing warm air.”`)
+    assert.equal(post.photos.length, 1)
+    // Its Done is on the post, for Fran.
+    assert.deepEqual(repairPage.job_actions, { [post.id]: ac.id })
+    // The cleaner, who looks after the cabin, does not see repair work; Fran sees only her own.
+    await assert.rejects(getTask(db, cleanerViewer, ac.id), { status: 404 })
+    const fixerViewer = await taskViewer(fixer)
+    assert.deepEqual([(await getTask(db, fixerViewer, ac.id)).tag, (await getTask(db, fixerViewer, ac.id)).place], ['Maintenance', 'Cabin'])
+    // Fran's Today has the card: it opens the job's conversation and closes in one tap.
+    const fixerToday = await readToday(db, { slug: ORG, userId: 'fixer', range: 'today', now: new Date(at(day(5), '09:00')) })
+    const card = fixerToday.cards.find(item => item.id === `task:${ac.id}`)
+    assert.deepEqual([card?.when, card?.headline, card?.line, card?.to, card?.done?.path], ['Maintenance · Due today', 'AC not cooling', 'Cabin', `/dashboard/${ORG}/messages/${repairThread!.id}`, `/api/organizations/${ORG}/tasks/${ac.id}/complete`])
+
+    // Fran finishes with a note and a photo: her own message in the job's conversation, read back as the task's outcome.
+    const fixed = await closeTask(db, fixerViewer, ac.id, { status: 'done', env, note: 'Replaced the capacitor; cooling again.', photos: [{ bytes: pixels, filename: 'fixed.avif' }] })
+    assert.equal(fixed.status, 'done')
+    const finished = (await conversationPageFor(db, owner, repairThread!.id)).entries.find(entry => entry.type === 'message' && entry.body === 'Replaced the capacitor; cooling again.')
+    assert(finished?.type === 'message')
+    assert.deepEqual([finished.author_user_id, finished.photos.length], ['fixer', 1])
+    assert.deepEqual((await getTask(db, ownerViewer, ac.id)).outcome?.photos.map(photo => photo.id), finished.photos.map(photo => photo.id))
   } finally {
     await runtime.dispose()
   }

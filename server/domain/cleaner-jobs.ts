@@ -51,12 +51,20 @@ function rosterFor(task: TaskRow, members: Member[]): Roster | null {
 }
 
 function lines(view: TaskView): string {
-  // A clean says itself in one sentence; other jobs name their kind, place and day.
-  const head = view.kind === 'turnover' ? [view.detail] : [`${view.sheet.heading}: ${view.sheet.title}`, view.sheet.date, view.when, view.detail]
+  // A clean says itself in one sentence; a repair names its place, what is wrong and when it is due; other jobs name their kind, place and day.
+  const head = view.kind === 'turnover' ? [view.detail]
+    : view.kind === 'maintenance' ? [`${jobPhrase(view, 'at', '')}.`.replace(/^./, letter => letter.toUpperCase()), view.sheet.date ? `Due ${view.sheet.date}` : null, view.detail]
+      : [`${view.sheet.heading}: ${view.sheet.title}`, view.sheet.date, view.when, view.detail]
   return [...head, view.notes].filter((line): line is string => Boolean(line)).join('\n')
 }
 
-type ReminderTask = Pick<TaskRow, 'id' | 'starts_at' | 'due_at' | 'timezone' | 'kind' | 'subject_type' | 'subject_id' | 'dedupe_key'>
+/** How a post names the job in a sentence: "maintenance at Ocean Avenue Studio: AC not cooling", "follow up with Sam, 2:00 PM". */
+function jobPhrase(view: TaskView, about: 'at' | 'with', when: string): string {
+  if (view.kind === 'maintenance') return `maintenance at ${view.place}: ${view.title}`
+  return `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}`
+}
+
+type ReminderTask = Pick<TaskRow, 'id' | 'starts_at' | 'due_at' | 'timezone' | 'kind' | 'subject_type' | 'subject_id' | 'dedupe_key' | 'location_id'>
 
 /** The reminders a job gets, each with its key and delivery window. */
 function reminders(task: ReminderTask): Array<{ key: string; at: Date; until: Date; kind: 'evening' | 'morning' | 'warning' }> {
@@ -117,20 +125,24 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
   ])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const subjectIds = [...new Set(tasks.flatMap(task => task.job_booking_id && (isJobTask(task) || task.subject_type === 'product_session') ? [task.job_booking_id] : []))]
+  // A repair's conversation is its place's.
+  const placeIds = [...new Set(tasks.flatMap(task => task.kind === 'maintenance' && task.location_id ? [task.location_id] : []))]
   const prepKeys = tasks.filter(task => task.private_prep).map(task => jobKey(task))
-  const posted = subjectIds.length || prepKeys.length ? await queryAll<{ message_id: string; thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
+  const posted = subjectIds.length || placeIds.length || prepKeys.length ? await queryAll<{ message_id: string; thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
     WITH relevant_threads AS (
       SELECT id FROM conversations WHERE organization_id = ? AND kind = 'team' AND booking_id IN (SELECT value FROM json_each(?))
+      UNION
+      SELECT id FROM conversations WHERE organization_id = ? AND kind = 'team' AND booking_id IS NULL AND location_id IN (SELECT value FROM json_each(?))
       UNION
       SELECT c.id FROM conversations c JOIN messages m ON m.conversation_id = c.id
       WHERE c.organization_id = ? AND c.kind = 'team' AND c.booking_id IS NOT NULL AND m.author_kind = 'krabiclaw'
         AND json_extract(m.payload_json, '$.key') IN (SELECT value FROM json_each(?))
     )
-    SELECT m.id AS message_id, m.conversation_id AS thread_id, t.booking_id AS subject_id, t.participants_key,
+    SELECT m.id AS message_id, m.conversation_id AS thread_id, COALESCE(t.booking_id, t.location_id) AS subject_id, t.participants_key,
       json_extract(m.payload_json, '$.key') AS idempotency_key
     FROM relevant_threads r JOIN conversations t ON t.id = r.id JOIN messages m ON m.conversation_id = t.id
     WHERE m.author_kind = 'krabiclaw' AND json_type(m.payload_json, '$.key') = 'text' ORDER BY m.conversation_id, m.sequence`,
-    [organizationId, d1JsonStringSet(subjectIds), organizationId, d1JsonStringSet(prepKeys)]) : []
+    [organizationId, d1JsonStringSet(subjectIds), organizationId, d1JsonStringSet(placeIds), organizationId, d1JsonStringSet(prepKeys)]) : []
   const postsByThread = new Map<string, Map<string, string>>()
   const threads = new Map<string, { subject_id: string; participants_key: string }>()
   for (const row of posted) {
@@ -145,8 +157,8 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
     [organizationId, d1JsonStringSet([...threads.keys()])])) seatUsers.set(seat.thread_id, [...seatUsers.get(seat.thread_id) ?? [], seat.user_id])
   }
   const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
-  const post = async (subject: JobSubject, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[], threadId?: string) => {
-    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds: quiet ? [] : alertUserIds, senderName: organization.name, threadId })
+  const post = async (subject: JobSubject, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[], threadId?: string, photoAssetIds?: readonly string[]) => {
+    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds: quiet ? [] : alertUserIds, senderName: organization.name, threadId, photoAssetIds })
     postsByThread.set(result.threadId, (postsByThread.get(result.threadId) ?? new Map()).set(key, result.messageId))
     return result
   }
@@ -183,7 +195,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
       // next queue delivery instead of using a new client's card in an old thread.
       if (prep && view && view.version !== task.version) throw new Error(`Prep task ${task.id} changed while its job was being posted`)
       if (prep && view && view.booking_id !== (subject?.id ?? null)) throw new Error(`Prep task ${task.id} does not match its booking conversation`)
-      const about = subject?.unit === 'nights' ? 'at' : 'with'
+      const about = subject?.unit === 'nights' || subject?.unit === 'location' ? 'at' : 'with'
       const targetKey = roster && subject ? await jobThreadParticipantsKey(subject, roster.seats) : null
       let heldIn = elsewhere.find(([, thread]) => thread.subject_id === subject?.id && thread.participants_key === targetKey)?.[0] ?? null
       if (task.status === 'open' && roster && subject && heldIn === null) {
@@ -210,7 +222,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
         const endKey = alreadyTold && last ? `${end}:${last[1]}` : end
         const seated = seatUsers.get(threadId) ?? []
         // A prior booking's team only needs to know its prep is no longer theirs.
-        const details = subject?.id === thread.subject_id && view ? `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : prep ? 'prep for this session' : 'this job'
+        const details = subject?.id === thread.subject_id && view ? `${jobPhrase(view, about, '')}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : prep ? 'prep for this session' : 'this job'
         const label = { open: 'No longer yours', done: 'Completed', skipped: 'Skipped', cancelled: 'Cancelled' }[task.status]
         const body = `${label}: ${details}.`
         await post({ id: thread.subject_id, unit: subject?.unit ?? 'slot' }, [], endKey, body, seated.filter(userId => !hostUsers.includes(userId)), threadId)
@@ -231,7 +243,10 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
         ? last && (last[0] === baseKey || last[0].startsWith(`${baseKey}:after:`))
         : postsByThread.get(heldIn)?.has(baseKey))
       if (!postedForAssignment) {
-        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined)
+        // A repair reported by a guest carries the photos of their message.
+        const photos = task.subject_type === 'message' ? (await queryAll<{ asset_id: string }>(db, `SELECT asset_id FROM media_placements
+          WHERE organization_id = ? AND owner_type = 'message' AND owner_id = ? AND slot = 'attachments' ORDER BY sort_order`, [organizationId, task.subject_id])).map(row => row.asset_id) : []
+        const result = await post(subject, roster.seats, jobKey(task, prep ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined, photos)
         threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
         heldIn = result.threadId
       }
@@ -241,7 +256,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
         // A clean is "Today: clean Ocean Avenue Studio after the 11:00 AM checkout."
         const job = task.kind === 'turnover' && task.starts_at
           ? `clean ${view.sheet.title} after the ${formatTimestamp(task.starts_at, 'en', task.timezone, { hour: 'numeric', minute: '2-digit' })} checkout`
-          : `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}`
+          : jobPhrase(view, about, when)
         const body = reminder.kind === 'evening' ? `Tomorrow: ${job}.`
           : reminder.kind === 'morning' ? `Today: ${job}.`
             : `${view.sheet.title} is not marked done and the next guests arrive at ${formatTimestamp(task.due_at!, 'en', task.timezone, { hour: 'numeric', minute: '2-digit' })}.`
@@ -265,7 +280,7 @@ export async function sendTaskSend(env: CloudflareEnv, db: DbClient, row: { id: 
   // The organization's outbox alarm is the only sender. The post and alert each have a stable delivery key.
   const send = await queryFirst<ReminderTask & { body: string; conversation_id: string | null; status: TaskRow['status'] | null; assigned_member_id: string | null }>(db,
     `SELECT m.body, m.conversation_id, t.id, t.status, t.assigned_member_id, t.starts_at, t.due_at, t.timezone,
-      t.kind, t.subject_type, t.subject_id, t.dedupe_key
+      t.kind, t.subject_type, t.subject_id, t.dedupe_key, t.location_id
       FROM scheduled_guest_messages m LEFT JOIN tasks t ON t.organization_id = m.organization_id AND t.id = m.task_id
       WHERE m.id = ? AND m.organization_id = ? AND m.status = 'pending' AND m.due_at <= ?`, [row.id, row.organization_id, now])
   if (!send) return 'not_due'
@@ -291,10 +306,13 @@ export async function sendTaskSend(env: CloudflareEnv, db: DbClient, row: { id: 
     return 'sent'
   }
   const hosts = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
-  const conversation = await queryFirst<{ booking_id: string; unit: 'slot' | 'nights' }>(db,
-    "SELECT c.booking_id, CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit FROM conversations c JOIN bookings b ON b.id = c.booking_id WHERE c.organization_id = ? AND c.id = ?", [row.organization_id, send.conversation_id])
+  // A job's conversation is its booking's, or a repair's place's.
+  const conversation = await queryFirst<JobSubject>(db,
+    `SELECT COALESCE(c.booking_id, c.location_id) AS id, CASE WHEN c.booking_id IS NULL THEN 'location' WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit
+      FROM conversations c LEFT JOIN bookings b ON b.organization_id = c.organization_id AND b.id = c.booking_id
+      WHERE c.organization_id = ? AND c.id = ? AND (c.booking_id IS NULL) = (b.id IS NULL) AND COALESCE(c.booking_id, c.location_id) IS NOT NULL`, [row.organization_id, send.conversation_id])
   if (!conversation) throw new Error(`Job conversation ${send.conversation_id} of send ${row.id} is missing`)
-  const posted = await postAutomaticTeamMessage(env, db, { organizationId: row.organization_id, subject: { id: conversation.booking_id, unit: conversation.unit }, seatMemberIds: [], body: send.body,
+  const posted = await postAutomaticTeamMessage(env, db, { organizationId: row.organization_id, subject: conversation, seatMemberIds: [], body: send.body,
     idempotencyKey: row.id, alertUserIds: row.id.startsWith('warning:') ? hosts : doing, senderName: organization.name, threadId: send.conversation_id })
   await finish('sent', posted.messageId)
   return 'sent'

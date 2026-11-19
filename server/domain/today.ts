@@ -14,7 +14,7 @@ import { guestGroup, UPCOMING_RESERVATION_DAYS, type BusinessToday, type TodayIt
 import { isChannelManagedStay, STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { currencyFractionDigits } from '~/shared/currencies'
 import { formatMinorAmount } from '~/shared/prices'
-import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
+import { addLocalDays, formatCalendarDate, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { organizationPublicUrl } from '~/server/utils/domains'
@@ -70,7 +70,8 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
       sql: `SELECT product_id FROM bookings WHERE organization_id = ${org} AND status <> 'cancelled' AND ${window}
         UNION SELECT product_id FROM tasks WHERE organization_id = ${org} AND status = 'open' AND product_id IS NOT NULL`, params: [wideTo, wideFrom] } })),
     withViewer(membership, mediaPlacementsQuery({ organizationId: { sql: org }, ownerType: 'business_location', owners: {
-      sql: `SELECT location_id FROM bookings WHERE organization_id = ${org} AND location_id IS NOT NULL AND status <> 'cancelled' AND ${window}`, params: [wideTo, wideFrom] } })),
+      sql: `SELECT location_id FROM bookings WHERE organization_id = ${org} AND location_id IS NOT NULL AND status <> 'cancelled' AND ${window}
+        UNION SELECT location_id FROM tasks WHERE organization_id = ${org} AND status = 'open' AND kind = 'maintenance' AND product_id IS NULL`, params: [wideTo, wideFrom] } })),
     withViewer(membership, bookingWelcomesQuery(managed, { now })),
     // The setup the business has not finished is Today's, after the day's cards.
     ...setupQueries(range === 'today' ? management : { sql: 'NULL' }, { now }).map(query => withViewer(membership, query)),
@@ -180,7 +181,7 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
   }
 
   for (const work of workResult!.results as OpenWorkRow[]) {
-    const job = work.kind === 'turnover' || work.kind === 'consultation_follow_up' || work.kind === 'consultation_prep'
+    const job = work.kind === 'turnover' || work.kind === 'consultation_follow_up' || work.kind === 'consultation_prep' || work.kind === 'maintenance'
     const bookingZone = work.booking_timezone ?? work.timezone
     const at = work.starts_at ?? work.due_at
     // An untimed job is on its booking's day: a clean on the checkout.
@@ -201,6 +202,25 @@ export async function readToday(db: DbClient, input: { slug: string; userId: str
         action: available ? { title: 'Available to claim', detail: '' } : { title: 'Mark as done', detail: work.notes ?? 'One tap when it’s finished' }, to: null, draft: null,
         ...(available ? { claim: { path: taskUpdatePath(viewer.organization_id, work.id), version: work.version, label: 'Claim' } } : {}),
         done: available ? null : { path: `/api/organizations/${encodeURIComponent(viewer.organization_id)}/tasks/${encodeURIComponent(work.id)}/complete` } })
+      continue
+    }
+    if (work.kind === 'maintenance') {
+      // A repair: its person's card, which they close in one tap, and every repair for the people who manage the business.
+      if (!work.assigned_to_viewer && !manage) continue
+      if (day === null ? range !== 'today' : range === 'today' ? day > today(work.timezone) : !shows(day, work.timezone)) continue
+      if (!work.title) throw new Error(`Maintenance job ${work.id} has no title`)
+      const formatCalendarDay = (date: string) => formatCalendarDate(date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })
+      const due = day === null ? null : day === today(work.timezone) ? 'Due today' : day < today(work.timezone) ? `Overdue since ${formatCalendarDay(day)}` : `Due ${formatCalendarDay(day)}`
+      const team = work.team_conversation_id
+      add({ id: `task:${work.id}`, noun: 'task', order: [1, at ?? ''], bookings: [], day: day ?? today(work.timezone),
+        when: ['Maintenance', due].filter(Boolean).join(' · '),
+        image_url: work.product_id ? picture('product', work.product_id) : picture('business_location', work.location_id),
+        icon: work.product_kind ? iconOf(work.product_kind) : 'i-lucide-list-checks', headline: work.title, line: work.product_name ?? work.location_title,
+        // The job's conversation is where its note and photos go; the card's strip closes it.
+        action: work.assigned_to_viewer ? { title: 'Mark as done', detail: work.notes ?? 'Add a note and photos in the job’s conversation' }
+          : { title: `${first(work.assignee_name) ?? 'A teammate'} has it`, detail: 'Open the job' },
+        to: team ? guestConversationPath(viewer.slug, team) : null, draft: null,
+        done: work.assigned_to_viewer ? { path: `${taskUpdatePath(viewer.organization_id, work.id)}/complete` } : null })
       continue
     }
     if (!job) {
