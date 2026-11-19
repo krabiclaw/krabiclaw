@@ -2,7 +2,7 @@ import { testBaseUrl } from '../e2e/test-env'
 import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
 
 // The real customer sites the deployed checks read. Staging serves each at its
-// environment alias (<slug>-staging.krabiclaw.com); production at its own domain.
+// environment alias (<slug>-staging.blawby.com); production at its own domain.
 const POTTERY_HOUSE_CANONICAL_URL = 'https://www.potteryhousekrabi.com'
 const KIKUZUKI_CANONICAL_URL = 'https://www.kikuzuki-thailand.com'
 const NCLS_CANONICAL_URL = 'https://www.northcarolinalegalservices.org'

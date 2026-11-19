@@ -7,7 +7,7 @@ import { BLAWBY_FREE_SITE_HOST, environmentTenantAliasHostname, LEGACY_FREE_SITE
  * domain>`. Staging cannot: its free-site domain is the production one, and
  * Cloudflare's universal certificate does not cover a second-level wildcard, so
  * staging gives every tenant a first-level alias instead —
- * `<subdomain>-staging.krabiclaw.com`. Building the host by hand gets this
+ * `<subdomain>-staging.blawby.com`. Building the host by hand gets this
  * wrong in exactly the way that makes a staging preview frame the
  * production site, so every surface that needs a site's origin (the onboarding
  * pane, the page editor's preview, the dashboard's live-site links) calls this.
