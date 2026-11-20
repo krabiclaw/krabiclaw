@@ -114,7 +114,10 @@ function plannedSendQueries(task: Pick<TaskRow, 'id' | 'organization_id' | 'time
 /** Post and schedule only the tasks recorded by the write. */
 export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId: string, taskIds: string[], quiet: boolean): Promise<void> {
   const now = new Date()
-  const tasks = await queryAll<TaskRow & { job_booking_id: string | null; private_prep: number }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id,
+  // A repair reported by a guest carries the active photos of their message, read with the task.
+  const tasks = await queryAll<TaskRow & { job_booking_id: string | null; private_prep: number; report_photo_ids: string }>(db, `SELECT t.*, ${jobBookingIdSql('t')} AS job_booking_id,
+    (SELECT json_group_array(asset_id) FROM (SELECT mp.asset_id FROM media_placements mp WHERE t.subject_type = 'message' AND mp.organization_id = t.organization_id
+      AND mp.owner_type = 'message' AND mp.owner_id = t.subject_id AND mp.slot = 'attachments' AND mp.status = 'active' ORDER BY mp.sort_order)) AS report_photo_ids,
     (t.subject_type = 'product_session' AND EXISTS (SELECT 1 FROM products p WHERE p.organization_id = t.organization_id AND p.id = t.product_id AND p.kind = 'service')) AS private_prep
     FROM tasks t WHERE t.organization_id = ? AND t.id IN (SELECT value FROM json_each(?))`,
   [organizationId, d1JsonStringSet(taskIds)])
@@ -245,10 +248,7 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
         ? last && (last[0] === baseKey || last[0].startsWith(`${baseKey}:after:`))
         : postsByThread.get(heldIn)?.has(baseKey))
       if (!postedForAssignment) {
-        // A repair reported by a guest carries the photos of their message.
-        const photos = task.subject_type === 'message' ? (await queryAll<{ asset_id: string }>(db, `SELECT asset_id FROM media_placements
-          WHERE organization_id = ? AND owner_type = 'message' AND owner_id = ? AND slot = 'attachments' AND status = 'active' ORDER BY sort_order`, [organizationId, task.subject_id])).map(row => row.asset_id) : []
-        const result = await post(subject, roster.seats, jobKey(task, reannounced ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined, photos)
+        const result = await post(subject, roster.seats, jobKey(task, reannounced ? last?.[1] : undefined), lines(view), roster.cleaners, heldIn ?? undefined, JSON.parse(task.report_photo_ids) as string[])
         threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
         heldIn = result.threadId
       }

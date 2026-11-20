@@ -4,8 +4,8 @@ import { publishChangedJobs } from '~/server/events'
 import { HTTPError } from 'nitro'
 import type { ProductKind } from '~/shared/product-details'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, isOrganizationWideRole, locationMemberSql, organizationOwnerSql, roleAllows, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
-import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
+import { assertRoleAllows, BATCH_VIEWER, isOrganizationWideRole, locationMemberSql, membershipByIdQuery, organizationOwnerSql, roleAllows, withViewer, type MemberAccessPrincipal, type ViewerTerms } from '~/server/utils/member-access'
+import { creationDedupeKey, creationRecordOf, creationRecordQuery, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation, publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { conversationMemberSql, messageQueries, participantGuard } from '~/server/domain/conversations'
 import { firstName } from '~/server/domain/guest-threads/presentation'
@@ -1028,12 +1028,16 @@ export function taskAssigneesQuery(organization: { sql: string; params?: unknown
 export interface MaintenancePlace { product_id: string | null; location_id: string; label: string }
 
 /** What a repair can be sent to, for whoever creates one: where it can be, and who can do it (maintenance members, owners and admins). */
-export async function maintenanceOptions(db: DbClient, viewer: TaskViewer): Promise<{ places: MaintenancePlace[]; assignees: TaskPerson[] }> {
-  await assertRoleAllows({ ...viewer.principal, permissions: { task: ['create'] } })
-  const organization = { sql: '?', params: [viewer.principal.organizationId] }
-  const [places, members] = await executeBatch(db, [maintenancePlacesQuery(organization), taskAssigneesQuery(organization)], { operation: 'Read maintenance options' })
-  const eligible = (members!.results as Array<{ role: string }>).filter(member => member.role.split(',').some(role => role.trim() === 'maintenance') || isOrganizationWideRole(member.role))
-  return { places: places!.results as MaintenancePlace[], assignees: taskAssignees(eligible, viewer.principal.userId) }
+export async function maintenanceOptions(db: DbClient, input: { organizationId: string; userId: string }): Promise<{ places: MaintenancePlace[]; assignees: TaskPerson[] }> {
+  // The caller's membership and what it may see, in one round trip; a member who cannot create tasks reads nothing.
+  const membership = membershipByIdQuery(input.organizationId, input.userId)
+  const organization = { sql: `(SELECT organization_id FROM viewer WHERE organization_wide = 1 OR ${roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ task: ['create'] }))})` }
+  const [viewerRows, places, members] = await executeBatch(db, [membership, withViewer(membership, maintenancePlacesQuery(organization)), withViewer(membership, taskAssigneesQuery(organization))],
+    { operation: 'Read maintenance options' })
+  const viewer = viewerRows!.results[0] as { organization_id: string; role: string } | undefined
+  if (!viewer) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
+  await assertRoleAllows({ organizationId: viewer.organization_id, role: viewer.role, permissions: { task: ['create'] } })
+  return { places: places!.results as MaintenancePlace[], assignees: taskAssignees((members!.results as Array<{ role: string }>).filter(member => doesMaintenance(member.role)), input.userId) }
 }
 
 /** Where repair work can be: each listing at each of its locations, then each location. */
@@ -1113,21 +1117,37 @@ function instant(value: unknown, field: string): string | null {
   return new Date(value as string).toISOString()
 }
 
-export async function readTaskAssignee(db: DbClient, organizationId: string, input: { assigned_member_id?: unknown }): Promise<string | null> {
+/** Repair work goes to a maintenance member, or to an owner or admin. */
+const doesMaintenance = (role: string) => role.split(',').some(value => value.trim() === 'maintenance') || isOrganizationWideRole(role)
+
+/** The member asked for, as a statement for the caller's batch; NULL reads nothing. */
+const assigneeQuery = (organizationId: string, memberId: string | null): BatchQuery =>
+  ({ query: 'SELECT role FROM member WHERE organizationId = ? AND id = ?', params: [organizationId, memberId] })
+
+/** `assigned_member_id` before any read: a member id or nobody. */
+function requestedAssignee(input: { assigned_member_id?: unknown }): string | null {
   const member = input.assigned_member_id ?? null
-  if (member !== null && (typeof member !== 'string' || !await queryFirst(db, 'SELECT id FROM member WHERE organizationId = ? AND id = ?', [organizationId, member]))) {
-    fail(422, 'INVALID_RESPONSIBILITY', 'The member must belong to this organization', 'assigned_member_id')
-  }
-  return member as string | null
+  if (member !== null && typeof member !== 'string') fail(422, 'INVALID_RESPONSIBILITY', 'The member must belong to this organization', 'assigned_member_id')
+  return member
 }
 
-/** Repair work goes to a maintenance member, or to an owner or admin. */
-async function assertMaintenanceAssignee(db: DbClient, organizationId: string, memberId: string): Promise<void> {
-  const member = await queryFirst<{ role: string }>(db, 'SELECT role FROM member WHERE organizationId = ? AND id = ?', [organizationId, memberId])
-  if (!member) fail(422, 'INVALID_RESPONSIBILITY', 'The member must belong to this organization', 'assigned_member_id')
-  if (!member.role.split(',').some(role => role.trim() === 'maintenance') && !isOrganizationWideRole(member.role)) {
-    fail(422, 'INVALID_RESPONSIBILITY', 'Maintenance goes to a maintenance member, an owner or an admin', 'assigned_member_id')
+/** The requested assignee checked against their member row: theirs, and someone who does repairs for a repair. */
+function checkedAssignee(member: string | null, row: { role: string } | undefined, maintenance: boolean): string | null {
+  if (member === null) {
+    // A repair is someone's from the start: whoever creates or reassigns it says whose.
+    if (maintenance) fail(422, 'JOB_ASSIGNEE_REQUIRED', 'Choose who does the repair: a maintenance member, an owner or an admin', 'assigned_member_id')
+    return null
   }
+  if (!row) fail(422, 'INVALID_RESPONSIBILITY', 'The member must belong to this organization', 'assigned_member_id')
+  if (maintenance && !doesMaintenance(row.role)) fail(422, 'INVALID_RESPONSIBILITY', 'Maintenance goes to a maintenance member, an owner or an admin', 'assigned_member_id')
+  return member
+}
+
+export async function readTaskAssignee(db: DbClient, organizationId: string, input: { assigned_member_id?: unknown }, maintenance = false): Promise<string | null> {
+  const member = requestedAssignee(input)
+  if (member === null) return checkedAssignee(null, undefined, maintenance)
+  const query = assigneeQuery(organizationId, member)
+  return checkedAssignee(member, await queryFirst<{ role: string }>(db, query.query, query.params) ?? undefined, maintenance)
 }
 
 function taskEventQuery(viewer: TaskViewer, row: Pick<TaskRow, 'id' | 'kind' | 'location_id'>, eventType: 'task.assigned' | 'task.updated' | 'task.completed' | 'task.skipped' | 'task.reopened', state: { before?: unknown; after?: unknown }, guarded = true): BatchQuery {
@@ -1177,55 +1197,58 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
   if (!maintenance && sourceMessageId !== null) fail(422, 'INVALID_TASK_FIELD', 'Only a maintenance job is created from a message', 'source_message_id')
   // A repair is always someone's: it is never offered for claiming.
   if (maintenance && claimRole !== null) fail(422, 'INVALID_TASK_CLAIM_ROLE', 'A maintenance job is assigned, not offered for claiming', 'claim_role')
-  if (sourceMessageId !== null && (typeof sourceMessageId !== 'string' || !await queryFirst(db, `SELECT 1 FROM messages m
-      JOIN conversations c ON c.organization_id = m.organization_id AND c.id = m.conversation_id AND c.kind IN ('contact', 'booking')
-      WHERE m.organization_id = ? AND m.id = ? AND m.author_kind = 'guest'`, [organizationId, sourceMessageId]))) {
-    fail(422, 'INVALID_TASK_FIELD', 'The message must be a guest’s message in this organization', 'source_message_id')
-  }
+  if (sourceMessageId !== null && typeof sourceMessageId !== 'string') fail(422, 'INVALID_TASK_FIELD', 'The message must be a guest’s message in this organization', 'source_message_id')
   if (claimRole !== null) {
     if (!staffAccessWritesEnabled(viewer.principal.env)) fail(503, 'STAFF_ACCESS_ROLLOUT', 'Offering work for claiming is not available yet')
     if (typeof claimRole !== 'string' || !isOrganizationRole(claimRole) || !claimRoles.includes(claimRole)
       || !organizationRoleCards[claimRole].access.includes('tasks') || typeof productId !== 'string' || assignedMemberId !== null) {
       fail(422, 'INVALID_TASK_CLAIM_ROLE', 'Choose an eligible role and listing for available work', 'claim_role')
     }
-    const roleVertical = organizationRoleCards[claimRole].vertical
-    const listing = await queryFirst(db, `SELECT 1 FROM products p JOIN organization o ON o.id = p.organization_id
-      WHERE p.organization_id = ? AND p.id = ? AND p.kind IN ('stay', 'table', 'service', 'experience') AND (? IS NULL OR o.vertical = ?)`,
-    [organizationId, productId, roleVertical ?? null, roleVertical ?? null])
-    if (!listing) fail(422, 'INVALID_TASK_CLAIM_ROLE', 'Choose an eligible role and listing for available work', 'claim_role')
   }
+  if ((productId !== null && typeof productId !== 'string') || (locationId !== null && typeof locationId !== 'string')) fail(422, 'INVALID_TASK_FIELD', 'product_id and location_id must name a listing and a location', productId !== null && typeof productId !== 'string' ? 'product_id' : 'location_id')
+  const requested = requestedAssignee(body)
   // One namespace per key, whatever the kind: a key reused for another kind replays or conflicts, never makes a second task.
   const dedupeKey = `custom:${organizationId}:${key}`
   const eventKey = creationDedupeKey('task', organizationId, key)
   const requestHash = await creationRequestHash({ actorId, title, notes, startsAt, dueAt, productId, locationId, assignedMemberId, ...(claimRole ? { claim_role: claimRole } : {}),
     ...(maintenance ? { kind, source_message_id: sourceMessageId } : {}) })
-  const readReplay = async (): Promise<string | null> => {
-    const record = await readCreationRecord(db, eventKey)
+  const checkReplay = (record: ReturnType<typeof creationRecordOf>): string | null => {
     if (!record) return null
     if (record.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a different task request', 'idempotency_key')
     return record.entityId
   }
-  const replayId = await readReplay()
+  const readReplay = async () => checkReplay(await readCreationRecord(db, eventKey))
+
+  // Everything the write checks, read in one round trip: a replay, the assignee, the place, the organization, the reported message, the listing offered for claiming.
+  type Place = { location_id: string; timezone: string }
+  const roleVertical = typeof claimRole === 'string' && isOrganizationRole(claimRole) ? organizationRoleCards[claimRole].vertical ?? null : null
+  const [replayRows, assigneeRows, placeRows, organizationRows, reportRows, listingRows] = (await executeBatch(db, [
+    creationRecordQuery(eventKey),
+    assigneeQuery(organizationId, requested),
+    productId !== null
+      ? { query: `SELECT pl.location_id, l.timezone FROM product_locations pl
+          JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
+          WHERE pl.organization_id = ? AND pl.product_id = ? AND (? IS NULL OR pl.location_id = ?) LIMIT 2`, params: [organizationId, productId, locationId, locationId] }
+      : { query: 'SELECT id AS location_id, timezone FROM business_locations WHERE organization_id = ? AND id = ?', params: [organizationId, locationId] },
+    { query: 'SELECT timezone FROM organization WHERE id = ?', params: [organizationId] },
+    { query: `SELECT 1 FROM messages m JOIN conversations c ON c.organization_id = m.organization_id AND c.id = m.conversation_id AND c.kind IN ('contact', 'booking')
+      WHERE m.organization_id = ? AND m.id = ? AND m.author_kind = 'guest'`, params: [organizationId, sourceMessageId] },
+    { query: `SELECT 1 FROM products p JOIN organization o ON o.id = p.organization_id
+      WHERE ? IS NOT NULL AND p.organization_id = ? AND p.id = ? AND p.kind IN ('stay', 'table', 'service', 'experience') AND (? IS NULL OR o.vertical = ?)`,
+    params: [claimRole, organizationId, productId, roleVertical, roleVertical] },
+  ], { operation: 'Read a task to create' })).map(result => result.results)
+  if (sourceMessageId !== null && !reportRows!.length) fail(422, 'INVALID_TASK_FIELD', 'The message must be a guest’s message in this organization', 'source_message_id')
+  if (claimRole !== null && !listingRows!.length) fail(422, 'INVALID_TASK_CLAIM_ROLE', 'Choose an eligible role and listing for available work', 'claim_role')
+  const replayId = checkReplay(creationRecordOf(replayRows![0] as { payload_json: string } | undefined, eventKey))
   if (replayId) return { task: await afterWrite(db, viewer, replayId), created: false }
 
-  const assigned = await readTaskAssignee(db, organizationId, body)
-  // A repair is someone's from the start: whoever creates it says whose.
-  if (maintenance) {
-    if (!assigned) fail(422, 'JOB_ASSIGNEE_REQUIRED', 'Choose who does the repair: a maintenance member, an owner or an admin', 'assigned_member_id')
-    await assertMaintenanceAssignee(db, organizationId, assigned)
-  }
-  type Place = { location_id: string; timezone: string }
-  const places = productId !== null
-    ? await queryAll<Place>(db, `SELECT pl.location_id, l.timezone FROM product_locations pl
-        JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
-        WHERE pl.organization_id = ? AND pl.product_id = ? ${locationId !== null ? 'AND pl.location_id = ?' : ''} LIMIT 2`,
-      [organizationId, productId, ...(locationId !== null ? [locationId] : [])])
-    : locationId !== null ? await queryAll<Place>(db, 'SELECT id AS location_id, timezone FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId]) : []
+  const assigned = checkedAssignee(requested, assigneeRows![0] as { role: string } | undefined, maintenance)
+  const places = productId !== null || locationId !== null ? placeRows as Place[] : []
   if (places.length > 1 && !claimRole) fail(422, 'TASK_LOCATION_REQUIRED', 'Choose a location for a product linked to multiple locations', 'location_id')
   const place = places.length === 1 ? places[0] : undefined
   if (maintenance && productId === null && locationId === null) fail(422, 'TASK_LOCATION_REQUIRED', 'Choose the listing or location that needs the repair', 'location_id')
   if ((locationId !== null || (productId !== null && !claimRole)) && !place) fail(422, 'INVALID_TASK_FIELD', productId !== null ? 'The offering is not at that location in this organization' : 'The location is not in this organization', productId !== null ? 'product_id' : 'location_id')
-  const organization = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [organizationId])
+  const organization = organizationRows![0] as { timezone: string } | undefined
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const id = crypto.randomUUID(), now = new Date().toISOString()
   const resolvedLocationId = place?.location_id ?? null
@@ -1278,9 +1301,8 @@ export async function updateTask(db: DbClient, viewer: TaskViewer, taskId: strin
   await assertRoleAllows({ ...viewer.principal, permissions: { task: touchesAssignee ? ['assign'] : ['update'] } })
   if (body.version !== current.version) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'version')
   if (current.status !== 'open') fail(409, 'TASK_CLOSED', 'Reopen the task before changing it', 'status')
-  const assigned = touchesAssignee ? await readTaskAssignee(db, viewer.principal.organizationId, body) : current.assigned_member_id
+  const assigned = touchesAssignee ? await readTaskAssignee(db, viewer.principal.organizationId, body, current.kind === 'maintenance') : current.assigned_member_id
   if (assigned === null && (isJobTask(current) || current.kind === 'consultation_prep')) fail(422, 'JOB_ASSIGNEE_REQUIRED', 'A job always has someone doing it: choose a member', 'assigned_member_id')
-  if (current.kind === 'maintenance' && touchesAssignee && assigned) await assertMaintenanceAssignee(db, viewer.principal.organizationId, assigned)
   const startsAt = body.starts_at === undefined ? current.starts_at : instant(body.starts_at, 'starts_at')
   const dueAt = body.due_at === undefined ? current.due_at : instant(body.due_at, 'due_at')
   if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'starts_at must not be after due_at', 'starts_at')

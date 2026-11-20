@@ -260,7 +260,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual(deePage.maintenance, { product_id: cabin.id, location_id: 'cabin-site', guest: 'Dee' })
     assert.deepEqual(deePage.entries.flatMap(entry => entry.type === 'message' && entry.author_kind === 'guest' ? [entry.id] : []), ['ac-report'])
     // Repair goes to the maintenance member, an owner or an admin, at the cabin or its location.
-    const options = await maintenanceOptions(db, ownerViewer)
+    const options = await maintenanceOptions(db, { organizationId: ORG, userId: 'owner' })
     assert.deepEqual(options.assignees.map(person => person.id).sort(), ['m-admin', 'm-fixer', 'm-owner'])
     assert.deepEqual(options.places, [{ product_id: cabin.id, location_id: 'cabin-site', label: 'Cabin' }, { product_id: null, location_id: 'cabin-site', label: 'Pine Cabin' }])
     const repair = { kind: 'maintenance', title: 'AC not cooling', product_id: cabin.id, location_id: 'cabin-site', source_message_id: 'ac-report', due_at: at(day(5), '17:00').toISOString() }
