@@ -29,7 +29,7 @@ export async function publishPaymentNotification(env: CloudflareEnv, payment: Pi
 }
 
 export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, env: CloudflareEnv, payment: Payment, input: PaymentFinancialEvent) {
-  const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [payment.organization_id])
+  const organization = await queryFirst<{ name: string; slug: string; contact_email: string | null }>(db, 'SELECT name,slug,contact_email FROM organization WHERE id=?', [payment.organization_id])
   if (!organization && !await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) throw new Error('Payments notification has no tenant or retained servicing identity')
   // A booking or stay paid on the site is alerted to its owner and
   // confirmed to its guest by the visit notification, which states what was
@@ -54,13 +54,35 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     if (typeof booked !== 'string' || !booked) throw new Error('Paid checkout has no guest email to notify')
     email = booked
   } else if (guestKind) {
-    // The address the buyer gave Stripe with the card, from the charge the intent made.
     if (input.email !== undefined) email = input.email
-    else if (payment.stripe_charge_id) {
-      const charge = await stripe.charges.retrieve(payment.stripe_charge_id, {}, { stripeAccount: payment.stripe_account_id })
-      if (charge.livemode !== Boolean(payment.livemode) || charge.currency.toUpperCase() !== payment.currency || (payment.stripe_payment_intent_id && charge.payment_intent !== payment.stripe_payment_intent_id)) throw new Error('Stripe charge does not match the payment')
-      email = charge.billing_details.email ?? null
+  }
+  let charge: Stripe.Charge | null = null
+  if (payment.stripe_charge_id && (guestKind || !email)) {
+    charge = await stripe.charges.retrieve(payment.stripe_charge_id, {}, { stripeAccount: payment.stripe_account_id })
+    if (charge.livemode !== Boolean(payment.livemode) || charge.currency.toUpperCase() !== payment.currency || (payment.stripe_payment_intent_id && charge.payment_intent !== payment.stripe_payment_intent_id)) throw new Error('Stripe charge does not match the payment')
+    if (!email && charge.billing_details.email) email = charge.billing_details.email
+  }
+  let receiptNumber: string | null = null
+  let invoiceNumber: string | null = null
+  let paymentMethod: string | null = null
+  let paidAt: string | null = null
+  if (charge) {
+    receiptNumber = charge.receipt_number ?? null
+    const rawCharge = charge as unknown as Record<string, unknown>
+    if (typeof rawCharge.invoice === 'string') invoiceNumber = rawCharge.invoice
+    if (charge.payment_method_details?.card) {
+      const card = charge.payment_method_details.card
+      const brand = card.brand ? (card.brand.charAt(0).toUpperCase() + card.brand.slice(1)) : ''
+      paymentMethod = card.last4 ? (brand ? `${brand} - ${card.last4}` : `- ${card.last4}`) : brand || null
+    } else if (charge.payment_method_details?.type) {
+      paymentMethod = charge.payment_method_details.type
     }
+    if (charge.created) {
+      paidAt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(charge.created * 1000))
+    }
+  }
+  if (!paidAt && payment.created_at) {
+    paidAt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(payment.created_at))
   }
   const eventKey = `payments:${payment.stripe_account_id}:${payment.livemode}:${input.nativeId}:${input.status}:${input.kind}`
   // Session and approved stay checkouts already have a guest conversation.
@@ -75,12 +97,20 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   // A purchase refunded because its capacity had gone is refunded without being asked, so the buyer is told why.
   const refundedForCapacity = (input.kind === 'refund_pending' || input.kind === 'refund_succeeded') && await queryFirst(db, "SELECT 1 FROM payment_refunds WHERE payment_id=? AND stripe_refund_id=? AND idempotency_key LIKE 'unfulfillable:%'", [payment.id, input.nativeId])
   const refundReason = !refundedForCapacity ? null : `What you paid for was taken before your payment completed, so your booking could not be made and your payment ${input.kind === 'refund_pending' ? 'will be' : 'has been'} refunded in full.`
+  const actionLabel = input.kind === 'payment_captured' ? 'View in Dashboard' : 'View details'
   const details = {
-    organizationName: organization?.name ?? null, amount: input.amount, currency: payment.currency, productTitle: snapshot.title, action: deepLink ? { url: deepLink, label: 'View details' } : null,
+    organizationName: organization?.name ?? null, amount: input.amount, currency: payment.currency, productTitle: snapshot.title, action: deepLink ? { url: deepLink, label: actionLabel } : null,
     refundReason,
+    customerEmail: email,
+    paymentId: payment.stripe_payment_intent_id ?? input.nativeId,
+    receiptNumber,
+    invoiceNumber,
+    paymentMethod,
+    paidAt,
+    supportEmail: organization?.contact_email ?? null,
   }
   const event: PaymentNotificationEvent = input.kind === 'dispute_needs_response' ? { ...details, kind: input.kind, responseDueBy: input.responseDueBy } : { ...details, kind: input.kind }
-  const ownerMessage = deepLink ? ownerPaymentMessage({ ...event, action: { url: deepLink, label: 'View details' } }) : undefined
+  const ownerMessage = deepLink ? ownerPaymentMessage({ ...event, action: { url: deepLink, label: actionLabel } }) : undefined
   let sourceEntryId: string | null = null
   if (threadId && ownerMessage) {
     const message = await appendMessage(db, {
@@ -96,9 +126,10 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   // An account opens its own activity; a guest who never made one reads Stripe's receipt.
   const buyer = guestKind ? payment.buyer_user_id : null
   const account = buyer ? await queryFirst<{ isAnonymous: number }>(db, 'SELECT isAnonymous FROM user WHERE id=?', [buyer]) : null
+  const receiptUrl = payment.receipt_url ?? charge?.receipt_url ?? null
   const guestAction = buyer && account && !account.isAnonymous
     ? {url:new URL(await buyerPaymentActivityPath(db,buyer,payment.id),env.NUXT_PUBLIC_PLATFORM_DOMAIN).toString(),label:'View details'}
-    : payment.receipt_url?{url:payment.receipt_url,label:'View receipt'}:null
+    : receiptUrl?{url:receiptUrl,label:'View receipt'}:null
   await notifyFinancialNotification(env, db, {
     organizationId: organization ? payment.organization_id : null,
     eventKey,
@@ -117,7 +148,7 @@ export async function reconcilePayoutEvent(db: DbClient, stripe: Stripe, env: Cl
   if ((event.type !== 'payout.paid' && event.type !== 'payout.failed') || event.livemode !== scope.livemode || (event.account && event.account !== scope.stripeAccountId)) throw new Error('Payout event native scope mismatch')
   const object = event.data.object as Stripe.Payout
   if (object.object !== 'payout' || !object.id) throw new Error('Payout event has no native payout identity')
-  const payout = await stripe.payouts.retrieve(object.id, {}, { stripeAccount: scope.stripeAccountId })
+  const payout = await stripe.payouts.retrieve(object.id, { expand: ['destination'] }, { stripeAccount: scope.stripeAccountId })
   if (payout.id !== object.id) throw new Error('Payout native identity mismatch')
   await notifyPayoutState(db, env, scope, payout)
 }
@@ -133,10 +164,34 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
   const currency = payout.currency.toUpperCase()
   if (!isCurrencyCode(currency)) throw new Error('Payout currency is unsupported')
   const deepLink = `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}/earnings/payouts`
-  const details = { organizationName: organization.name, amount: payout.amount, currency, action: { url: deepLink, label: 'View payout' } }
+  let destinationBank: string | null = null
+  let destinationLast4: string | null = null
+  if (payout.destination && typeof payout.destination === 'object') {
+    const dest = payout.destination as unknown as Record<string, unknown>
+    if (typeof dest.bank_name === 'string') destinationBank = dest.bank_name
+    if (typeof dest.last4 === 'string') destinationLast4 = dest.last4
+  }
+  const details = {
+    organizationName: organization.name,
+    amount: payout.amount,
+    currency,
+    destinationBank,
+    destinationLast4,
+    payoutId: payout.id,
+    action: { url: deepLink, label: 'Track payout' },
+  }
   const event: PaymentNotificationEvent = payout.status === 'paid'
-    ? { ...details, kind: 'payout_paid', arrivalDate: new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'medium' }).format(new Date(payout.arrival_date * 1000)) }
-    : { ...details, kind: 'payout_failed' }
+    ? {
+        ...details,
+        kind: 'payout_paid',
+        arrivalDate: new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', dateStyle: 'medium' }).format(new Date(payout.arrival_date * 1000)),
+      }
+    : {
+        ...details,
+        kind: 'payout_failed',
+        failureMessage: payout.failure_message,
+        failureCode: payout.failure_code,
+      }
   await notifyFinancialNotification(env, db, {
     organizationId: scope.organizationId,
     eventKey: `payments:${scope.stripeAccountId}:${Number(scope.livemode)}:${payout.id}:${payout.status}`,
