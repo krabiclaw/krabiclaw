@@ -26,7 +26,7 @@ import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { sendPasswordResetEmail, sendVerificationEmail } from '~/server/utils/auth-email'
 import { validatePassword } from '~/utils/password-validation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { assertStaffRole, staffAccessWritesEnabled, validateInvitationGrants } from '~/server/domain/listing-access'
+import { assertStaffRoles, staffAccessWritesEnabled, validateInvitationGrants } from '~/server/domain/listing-access'
 import { organizationAccessControl, organizationRoleCards, organizationRoles } from '~/utils/organization-access'
 import { platformAdminAccessControl, platformAdminRoles } from '~/utils/platform-admin-access'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
@@ -452,8 +452,8 @@ function buildAuth(env: CloudflareEnv) {
   // Deletion removes memberships and clears guest ownership before the after hook runs.
   type AccountDeparture = { kind: 'member' | 'calendar'; id: string; organizationId: string; userId: string }
   const accountDepartures = new Map<string, AccountDeparture[]>()
-  const verifyNewStaffAccess = (role: keyof typeof organizationRoles, grants?: unknown) => {
-    if (!staffAccessWritesEnabled(env) && (organizationRoleCards[role].vertical || grants != null)) {
+  const verifyNewStaffAccess = (roles: (keyof typeof organizationRoles)[], grants?: unknown) => {
+    if (!staffAccessWritesEnabled(env) && (roles.some(role => organizationRoleCards[role].vertical) || grants != null)) {
       throw new APIError('SERVICE_UNAVAILABLE', { code: 'STAFF_ACCESS_ROLLOUT', message: 'New staff access is not available yet.' })
     }
   }
@@ -461,22 +461,19 @@ function buildAuth(env: CloudflareEnv) {
     ...organizationOptions,
     organizationHooks: {
       beforeCreateInvitation: async ({ invitation, organization }: { invitation: { role: string; listing_access?: unknown }; organization: { id: string; vertical?: string } }) => {
-        const role = assertStaffRole(organization.vertical ?? null, invitation.role)
-        verifyNewStaffAccess(role, invitation.listing_access)
-        await validateInvitationGrants(db, { id: organization.id, vertical: organization.vertical ?? null }, role, invitation.listing_access)
+        const roles = assertStaffRoles(organization.vertical ?? null, invitation.role)
+        verifyNewStaffAccess(roles, invitation.listing_access)
+        await validateInvitationGrants(db, { id: organization.id, vertical: organization.vertical ?? null }, roles, invitation.listing_access)
       },
       beforeAcceptInvitation: async ({ invitation, organization, user }: { invitation: { role: string; listing_access?: unknown }; organization: { id: string; vertical?: string }; user: { emailVerified: boolean } }) => {
         const grants = invitation.listing_access
-        if (grants == null) {
-          for (const role of invitation.role.split(',')) assertStaffRole(organization.vertical ?? null, role.trim())
-          return
-        }
+        const roles = assertStaffRoles(organization.vertical ?? null, invitation.role)
+        if (grants == null) return
         if (!user.emailVerified) throw new APIError('FORBIDDEN', { code: 'INVITATION_EMAIL_UNVERIFIED', message: 'Verify your email before accepting listing access.' })
-        const role = assertStaffRole(organization.vertical ?? null, invitation.role)
-        await validateInvitationGrants(db, { id: organization.id, vertical: organization.vertical ?? null }, role, grants)
+        await validateInvitationGrants(db, { id: organization.id, vertical: organization.vertical ?? null }, roles, grants)
       },
       beforeUpdateMemberRole: async ({ newRole, organization }: { newRole: string; organization: { id: string; vertical?: string } }) => {
-        verifyNewStaffAccess(assertStaffRole(organization.vertical ?? null, newRole))
+        verifyNewStaffAccess(assertStaffRoles(organization.vertical ?? null, newRole))
       },
       beforeCreateOrganization: async ({ organization, user }: { organization: Record<string, unknown>; user: { email: string } }) => {
         assertOrganizationFacts(organization)

@@ -144,7 +144,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.equal(listed[0]!.id, ana.conversation_id)
     const homeToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
     const arrivalIn = Math.round((Date.parse(`${day(3)}T00:00:00Z`) - Date.parse(`${homeToday}T00:00:00Z`)) / 86_400_000)
-    assert.deepEqual({ ...listed[0]!, time: undefined }, { id: ana.conversation_id, kind: 'guest', title: 'Ana Silva', avatar_initial: 'A', channel: 'direct', home: 'Cabin',
+    assert.deepEqual({ ...listed[0]!, time: undefined }, { id: ana.conversation_id, kind: 'guest', title: 'Ana Silva', avatar_initial: 'A', image_url: null, channel: 'direct', home: 'Cabin',
       when: `In ${arrivalIn} days`, preview: 'The gate code is in your confirmation.', preview_from: 'You', time: undefined, unread: false })
     assert.deepEqual(await db.prepare("SELECT b.product_id, b.channel, c.id AS conversation_id FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ?").bind(ana.id).first(), { product_id: cabin.id, channel: 'direct', conversation_id: ana.conversation_id })
     assert.equal((await sheet())?.actions.archive, true)

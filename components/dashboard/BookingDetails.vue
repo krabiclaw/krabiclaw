@@ -89,7 +89,7 @@
           <div v-if="recordGuestName" class="mt-4 flex items-center">
             <span class="relative">
               <UAvatar :src="recordGuestImage || undefined" :alt="recordGuestName" :text="recordGuestName.slice(0, 1).toUpperCase()" size="lg" class="bg-accented ring-2 ring-default" :ui="{ fallback: 'font-semibold text-highlighted' }" />
-              <ChannelMark v-if="detail" :channel="detail.channel" class="absolute -bottom-1 -right-1" />
+              <ChannelMark v-if="detail" :channel="detail.channel" class="absolute -bottom-1 -right-1 border-2 border-(--ui-bg)" />
             </span>
             <span v-if="partySize > 1" class="-ms-2 flex size-8 items-center justify-center rounded-full bg-accented text-xs font-bold text-highlighted ring-2 ring-default" :aria-label="otherGuestLabel">+{{ partySize - 1 }}</span>
             <UButton v-if="guestManagement?.available.value" type="button" :aria-label="manageGuestsLabel" icon="i-lucide-pencil" color="neutral" variant="outline" size="sm" class="ms-1 size-8 justify-center rounded-full" @click="manageBookingParty" />
@@ -252,15 +252,12 @@
           <div v-if="detail || (booking?.type === 'booking' && booking.payments !== null) || booking?.payments?.length" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Payment info</h2>
             <template v-if="detail">
-              <!-- A channel's guest pays the channel, so the booking's total is what was paid; the host records nothing here. -->
-              <template v-if="channelManaged">
-                <h3 class="mt-5 text-sm font-semibold text-highlighted">Paid through {{ channelName }}</h3>
-                <p class="mt-1 text-sm text-muted" data-testid="stay-amount-paid">{{ money(detail.total_minor) }}</p>
-              </template>
-              <template v-else>
-                <h3 class="mt-5 text-sm font-semibold text-highlighted">Amount paid</h3>
-                <p class="mt-1 text-sm text-muted" data-testid="stay-amount-paid">{{ money(detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</p>
-              </template>
+              <!-- Airbnb's payment rows: the label on the left, the amount on the right, both in the body colour. A channel's guest pays the channel, so its total is the booking's. -->
+              <p class="mt-5 flex items-baseline justify-between gap-4 text-base font-semibold text-highlighted">
+                <span>{{ channelManaged ? 'Total' : 'Amount paid' }}</span>
+                <span data-testid="stay-amount-paid">{{ money(channelManaged ? detail.total_minor : detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</span>
+              </p>
+              <p v-if="channelManaged" class="mt-1 text-sm text-muted">Payments, changes and cancellations are managed on {{ channelName }}.</p>
               <template v-if="!personalScope">
                 <ul v-if="!channelManaged && detail.payments.length" class="mt-4 space-y-3">
                   <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4">

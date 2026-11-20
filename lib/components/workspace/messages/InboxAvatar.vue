@@ -8,7 +8,7 @@
   >
     <img v-if="image && !support" :src="image" alt="" class="size-full rounded-full object-cover">
     <span v-else :class="support ? sizes[size].support : undefined" aria-hidden="true">{{ support ? 'Airbnb' : initial }}</span>
-    <ChannelMark v-if="channel && size === 'lg'" :channel="channel" class="absolute -bottom-1 -right-1" />
+    <ChannelMark v-if="channel && size === 'lg'" :channel="channel" class="absolute -bottom-1 -right-1 border-2 border-(--ui-bg)" />
   </span>
 </template>
 

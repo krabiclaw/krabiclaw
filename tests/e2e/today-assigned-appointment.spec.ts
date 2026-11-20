@@ -314,14 +314,16 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await page.goto(new URL(conversationPath, baseURL!).toString())
     await waitForNuxtHydration(page)
     await expect(page.locator('[data-message]').first()).toBeVisible()
-    await expect(page.getByTestId('conversation-create-maintenance')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Actions for .* message$/ })).toHaveCount(0)
     const report = await body<{ conversation_id: string }>(await clientContext.request.post('/api/public/contact', {
       headers: seededSiteHeaders('legal'),
       data: { name: guestName, email: `today-repair-${Date.now()}@playwright.example`, subject: 'general', message: 'The lobby door at your office sticks and is hard to open.', location_id: office.id, consent: true },
     }), 201)
     await page.goto(new URL(`${DASHBOARD}/messages/${report.conversation_id}`, baseURL!).toString())
     await waitForNuxtHydration(page)
-    await page.getByTestId('conversation-create-maintenance').first().click()
+    // The job is made from the message's ⋯ menu, as Airbnb keeps per-message actions.
+    await page.getByRole('button', { name: /^Actions for .* message$/ }).first().click()
+    await page.getByRole('menuitem', { name: 'Create maintenance job', exact: true }).click()
     const sheet = page.getByRole('dialog', { name: 'New maintenance job', exact: true })
     await sheet.getByLabel(/^What needs fixing/).fill(repairTitle)
     await expect(sheet.getByRole('combobox', { name: /^Where/ })).toContainText(office.title)
