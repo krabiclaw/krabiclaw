@@ -1,5 +1,5 @@
 import { listingGrantSql } from '~/server/domain/listing-access'
-import { paginationInputSchema, pageInfoObject, organizationTool, type McpToolDefinition } from './shared'
+import { chatgptFileInput, paginationInputSchema, pageInfoObject, organizationTool, type McpToolDefinition } from './shared'
 import { PRODUCT_KINDS } from '~/shared/product-details'
 import { HTTPError } from 'nitro'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
@@ -17,7 +17,9 @@ import { executeBookingStatus } from '~/server/domain/guest-threads/operations'
 import { changeBooking } from '~/server/domain/guest-threads/booking-changes'
 import { setBookingNote } from '~/server/domain/bookings'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
-import { NOT_HANDLED, requiredString, optionalString, type McpExecutorContext } from './execution'
+import { NOT_HANDLED, requiredString, optionalString, resolveUserUploadedMediaFile, toolFileReference, type McpExecutorContext } from './execution'
+import { readBookingAgreement, sendAgreement } from '~/server/domain/agreements'
+import type { ConversationRow } from '~/server/domain/conversations'
 import { BOOKING_STATUSES, isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { formAnswerInputJsonSchema, formAnswerSnapshotsJsonSchema, formAnswerSnapshotsSchema } from '~/shared/form-questions'
 
@@ -81,8 +83,8 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     }, required: ['product_slug', 'guest_name', 'guest_email', 'idempotency_key'],
   }),
   organizationTool({ name: 'get_product_booking', outputSchema: { type: 'object', anyOf: [
-    { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, conversation_id: text, version, updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record }, required: ['booking_id', 'unit', 'conversation_id', 'version', 'updated_at', 'guest', 'answers', 'provenance', 'record'] },
-    { type: 'object', description: 'A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.', properties: { booking_id: text, unit: { const: 'nights' }, record: { anyOf: [stayDetail, stayTurnover] } }, required: ['booking_id', 'unit', 'record'], additionalProperties: false },
+    { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, conversation_id: text, version, updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record , agreement: { type: ['object', 'null'], description: 'The booking’s agreement: its document, who signed and when, and what is still waiting.' }, agreement_signers: { type: 'array', description: 'Who the business may ask to sign, as keys for send_booking_agreement.', items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } } }, required: ['booking_id', 'unit', 'conversation_id', 'version', 'updated_at', 'guest', 'answers', 'provenance', 'record'] },
+    { type: 'object', description: 'A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.', properties: { booking_id: text, unit: { const: 'nights' }, record: { anyOf: [stayDetail, stayTurnover] }, agreement: { type: ['object', 'null'], description: 'The booking’s agreement: its document, who signed and when, and what is still waiting.' }, agreement_signers: { type: 'array', description: 'Who the business may ask to sign, as keys for send_booking_agreement.', items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } } }, required: ['booking_id', 'unit', 'record'], additionalProperties: false },
   ] }, domain: 'bookings', minimumRole: 'member', description: 'Read one booking — an experience, consultation, table or stay at a home — when the user wants its guest details, answers to the offering\'s questions, status or current session. Use the booking version when making a change.', inputSchema: { booking_id: bookingId }, required: ['booking_id'],
   }),
   ...([
@@ -99,6 +101,19 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
       apply: { type: 'boolean' }, idempotency_key: key, anyOf: [{ required: ['product_session_id'] }, { required: ['product_id', 'apply'], properties: { apply: { const: true } } }] },
     required: ['booking_id', 'version', 'idempotency_key'],
   }),
+  organizationTool({ name: 'send_booking_agreement', domain: 'bookings', minimumRole: 'member',
+    description: 'Send a PDF for a booking’s guests to sign — a lease, engagement letter, waiver or event contract — with each signer’s signature and date placed on its pages. Each guest is emailed a link and signs with their typed name; the business signs last. Signers are the keys get_product_booking lists in agreement_signers, or email:<address> for someone invited by email. Fields are fractions of a page from its top-left corner.',
+    inputSchema: {
+      booking_id: bookingId, file: chatgptFileInput,
+      signers: { type: 'array', minItems: 1, items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } },
+      fields: { type: 'array', minItems: 1, items: { type: 'object', properties: {
+        signer_key: text, kind: { type: 'string', enum: ['signature', 'date'] }, page: { type: 'integer', minimum: 1 },
+        x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+      }, required: ['signer_key', 'kind', 'page', 'x', 'y', 'width', 'height'] } },
+    },
+    required: ['booking_id', 'file', 'signers', 'fields'], fileParams: ['file'],
+    outputSchema: { type: 'object', properties: { sent: { const: true }, agreement: { type: ['object', 'null'] } }, required: ['sent', 'agreement'] },
+  }),
   organizationTool({ name: 'update_product_booking', outputSchema: { type: 'object', anyOf: [nightBookingReceipt,
     { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, version, private_notes: nullableText }, required: ['booking_id', 'unit', 'version', 'private_notes'] }] }, domain: 'bookings', minimumRole: 'member',
     description: 'Edit the team’s private notes, or update the dates, party and guest details of a host-entered stay. Use the latest booking version. Use request_product_booking_change for timed inventory changes.',
@@ -112,6 +127,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   const { db, env, organizationId } = organization
   const principal = memberAccessPrincipal(organization.membership, { env })
   const managesBookings = await roleAllows({ ...principal, permissions: { operations: ['update'] } })
+  let agreementRead: Awaited<ReturnType<typeof readBookingAgreement>> | null = null
   if (toolName === 'create_product_session' || toolName === 'update_product_session') {
     const productId = requiredString(args, 'product_id')
     await assertProductAccess(db, { ...principal, productId })
@@ -204,6 +220,30 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     if (result.kind === 'stay') return { success: true, ...nightBookingMutation(result.stay) }
     return renderStructuredResponse({ success: result.status < 400, ...result.body, http_status: result.status }, undefined, undefined, result.status >= 400)
   }
+  if (toolName === 'send_booking_agreement' || toolName === 'get_product_booking') {
+    const id = requiredString(args, 'booking_id')
+    await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: toolName === 'get_product_booking' ? 'read' : 'update' })
+    const conversation = await queryFirst<ConversationRow>(db, "SELECT * FROM conversations WHERE booking_id = ? AND organization_id = ? AND kind = 'booking'", [id, organizationId])
+    const actorRow = await queryFirst<{ name: string }>(db, 'SELECT name FROM user WHERE id = ?', [organization.userId])
+    if (!actorRow) throw new HTTPError({ statusCode: 401, message: 'The signed-in account was not found' })
+    const actor = { userId: organization.userId, name: actorRow.name }
+    const canManage = toolName === 'send_booking_agreement' || await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: 'update' }).then(() => true, (error: unknown) => {
+      if (error instanceof HTTPError && error.statusCode === 404) return false
+      throw error
+    })
+    const viewer = { userId: organization.userId, verifiedEmail: null, canManage }
+    if (toolName === 'send_booking_agreement') {
+      if (!conversation) throw new HTTPError({ statusCode: 404, message: 'This booking has no guest conversation to send the document in' })
+      const resolved = await resolveUserUploadedMediaFile(toolFileReference(args.file, 'file'))
+      if (resolved.contentType !== 'application/pdf') throw new HTTPError({ statusCode: 415, message: 'Attach a PDF' })
+      await sendAgreement(env, conversation, actor, {
+        file: new File([resolved.buffer], resolved.filename, { type: 'application/pdf' }),
+        signers: Array.isArray(args.signers) ? args.signers : [], fields: Array.isArray(args.fields) ? args.fields : [],
+      })
+      return { sent: true, agreement: (await readBookingAgreement(db, conversation, viewer, actor)).agreement }
+    }
+    agreementRead = conversation ? await readBookingAgreement(db, conversation, viewer, actor) : null
+  }
   const statusActions: Record<string, 'confirm' | 'reject' | 'cancel'> = {
     confirm_product_booking: 'confirm', reject_product_booking: 'reject', cancel_product_booking: 'cancel',
   }
@@ -225,7 +265,8 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     await publishConversationEvent(env, db, { conversationId: row.conversation_id, type: 'MESSAGE_UPDATE' })
     return { ...booking, unit: 'slot' }
   }
-  if (access && toolName === 'get_product_booking') return { booking_id: id, unit: 'nights', record: await getStay(db, access, id) }
+  const agreementFields = agreementRead ? { agreement: agreementRead.agreement, ...(agreementRead.available_signers ? { agreement_signers: agreementRead.available_signers } : {}) } : {}
+  if (access && toolName === 'get_product_booking') return { booking_id: id, unit: 'nights', record: await getStay(db, access, id), ...agreementFields }
   const thread = await getGuestRequest(db, row.conversation_id, organizationId, 'booking')
   if (!thread || thread.kind !== 'booking') {
     throw new HTTPError({
@@ -246,7 +287,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const provenance = thread.payload.provenance
     return { booking_id: id, unit: row.unit, conversation_id: thread.id, version: row.version, updated_at: row.updated_at, guest: thread.payload.guest, answers: formAnswerSnapshotsSchema.parse(JSON.parse(row.answers)),
       provenance: mcpBookingProvenance(provenance),
-      record: mcpBookingRecord(operationalRecord) }
+      record: mcpBookingRecord(operationalRecord), ...agreementFields }
   }
   const key = requiredString(args, 'idempotency_key')
   if (toolName === 'request_product_booking_change') {

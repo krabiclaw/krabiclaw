@@ -9,7 +9,7 @@
       <p class="text-xs font-semibold text-muted">{{ t('agreement.your_signature') }}</p>
       <!-- The adopted signature: the typed name in a handwriting face, never drawn. -->
       <p class="mt-1.5 flex min-h-16 items-end border-b border-current px-1 pb-1.5 text-4xl leading-none text-default" style="font-family: 'Snell Roundhand', 'Segoe Script', 'Brush Script MT', cursive" aria-hidden="true">
-        {{ name.trim() || ' ' }}
+        {{ name.trim() }}
       </p>
     </div>
     <label class="flex items-start gap-3 text-sm leading-5 text-default">

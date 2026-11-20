@@ -772,6 +772,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   reject_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   cancel_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   request_product_booking_change: { ...D, openWorldHint: true, idempotentHint: true },
+  send_booking_agreement: { ...W, openWorldHint: true },
   get_stay_calendar: R,
   create_home_room: { ...W, openWorldHint: true },
   update_home_room: { ...D, openWorldHint: true },

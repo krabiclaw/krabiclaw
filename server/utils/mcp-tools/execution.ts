@@ -81,6 +81,8 @@ function filenameExtension(contentType: string, fallback = "bin"): string {
       return "avi";
     case "text/markdown":
       return "md";
+    case "application/pdf":
+      return "pdf";
     default:
       return fallback;
   }
@@ -254,6 +256,8 @@ async function readMediaBufferWithLimit(
 }
 
 /** Resolve a ChatGPT file reference and verify its type from its bytes. */
+const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
+
 export async function resolveUserUploadedMediaFile(
   file: ToolFileReference,
   maxBytes = MAX_VIDEO_BYTES,
@@ -299,12 +303,19 @@ export async function resolveUserUploadedMediaFile(
     }
 
     const sniffedContentType = sniffMediaMimeType(bytes);
+    // A PDF: a listing's agreement or a firm's compliance document.
+    if (sniffedContentType === "application/pdf") {
+      if (bytes.byteLength > MAX_DOCUMENT_BYTES) {
+        throw new HTTPError({ statusCode: 413, statusMessage: `Attachment ${file.file_id} is larger than the 20 MB PDF limit.` });
+      }
+      return { buffer, contentType: sniffedContentType, filename: safeAttachmentFilename(file, sniffedContentType), kind: "file" };
+    }
     const isVideo = VIDEO_MIME_TYPES.has(sniffedContentType);
     const isImage = RESOLVED_MEDIA_IMAGE_TYPES.has(sniffedContentType);
     if (!isVideo && !isImage) {
       throw mcpProtocolError(
         MCP_ERROR.invalidParams,
-        `Attachment ${file.file_id} is not a supported image or video type.`,
+        `Attachment ${file.file_id} is not a supported image, video or PDF.`,
       );
     }
     if (isImage && bytes.byteLength > Math.min(MAX_IMAGE_BYTES, maxBytes)) {

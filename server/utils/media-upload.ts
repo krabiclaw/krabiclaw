@@ -346,7 +346,7 @@ export async function uploadPrivateDocument(input: {
     try {
       await deleteFromR2(input.env, r2Key)
     } catch (cleanupError) {
-      throw new AggregateError([uploadFailure(error), uploadFailure(cleanupError)], `Private document ${assetId} could not be saved or removed`, { cause: error })
+      throw new AggregateError([uploadFailure(error), uploadFailure(cleanupError)], `Private document ${assetId} could not be saved or removed`, { cause: cleanupError })
     }
     throw error
   }

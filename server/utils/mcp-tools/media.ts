@@ -166,7 +166,7 @@ export const MEDIA_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'save_media_attachment',
-      description: 'Save an attached image, video with poster, or Markdown file. Uses the host’s file reference. An optional placement puts it on the requested website owner in this operation. Repeat the same idempotency key for a retry.',
+      description: 'Save an attached image, video with poster, PDF or Markdown file. Uses the host’s file reference. An optional placement puts it on the requested website owner in this operation: a PDF placed on a product’s agreement slot is what every guest signs when booking it. Repeat the same idempotency key for a retry.',
       domain: 'media',
       minimumRole: 'admin',
       inputSchema: {

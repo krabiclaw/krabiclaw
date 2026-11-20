@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d24504f6e256f034889396d2c69bed8cf47a2ac764981e50bd1998ee748fd7d9",
-  "documentationFingerprint": "sha256:93fe67ff64315ec12643ff3921fe2bdce052a1a88e8f84f174d9281f87fd8ca4",
+  "fingerprint": "sha256:41b8f89ebf7074bcd34f3f9387b3baab295603a07d0109019fb422ee6f859bc9",
+  "documentationFingerprint": "sha256:937affa4eca0dd81b66fda7d2901d931daa8c687d8040c7f1ce7219f9af4ab61",
   "tools": [
     {
       "name": "add_organization_language",
@@ -8018,7 +8018,8 @@
                   "slot": {
                     "enum": [
                       "image",
-                      "gallery"
+                      "gallery",
+                      "agreement"
                     ],
                     "type": "string"
                   }
@@ -54343,6 +54344,42 @@
         "anyOf": [
           {
             "properties": {
+              "agreement": {
+                "description": "The booking’s agreement: its document, who signed and when, and what is still waiting.",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "agreement_signers": {
+                "description": "Who the business may ask to sign, as keys for send_booking_agreement.",
+                "items": {
+                  "properties": {
+                    "key": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "name": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "role": {
+                      "enum": [
+                        "guest",
+                        "host"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "name",
+                    "role"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "answers": {
                 "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
                 "items": {
@@ -54594,6 +54631,42 @@
             "additionalProperties": false,
             "description": "A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.",
             "properties": {
+              "agreement": {
+                "description": "The booking’s agreement: its document, who signed and when, and what is still waiting.",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "agreement_signers": {
+                "description": "Who the business may ask to sign, as keys for send_booking_agreement.",
+                "items": {
+                  "properties": {
+                    "key": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "name": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "role": {
+                      "enum": [
+                        "guest",
+                        "host"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "name",
+                    "role"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "booking_id": {
                 "minLength": 1,
                 "type": "string"
@@ -88030,7 +88103,8 @@
                   "slot": {
                     "enum": [
                       "image",
-                      "gallery"
+                      "gallery",
+                      "agreement"
                     ],
                     "type": "string"
                   }
@@ -89464,7 +89538,8 @@
                   "slot": {
                     "enum": [
                       "image",
-                      "gallery"
+                      "gallery",
+                      "agreement"
                     ],
                     "type": "string"
                   }
@@ -97208,7 +97283,7 @@
     {
       "name": "save_media_attachment",
       "title": "Save media attachment",
-      "description": "Save an attached image, video with poster, or Markdown file. Uses the host’s file reference. An optional placement puts it on the requested website owner in this operation. Repeat the same idempotency key for a retry.",
+      "description": "Save an attached image, video with poster, PDF or Markdown file. Uses the host’s file reference. An optional placement puts it on the requested website owner in this operation: a PDF placed on a product’s agreement slot is what every guest signs when booking it. Repeat the same idempotency key for a retry.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -97336,7 +97411,8 @@
                   "slot": {
                     "enum": [
                       "image",
-                      "gallery"
+                      "gallery",
+                      "agreement"
                     ],
                     "type": "string"
                   }
@@ -97669,7 +97745,8 @@
                       "slot": {
                         "enum": [
                           "image",
-                          "gallery"
+                          "gallery",
+                          "agreement"
                         ],
                         "type": "string"
                       }
@@ -98465,6 +98542,178 @@
       "uiResourceUri": null
     },
     {
+      "name": "send_booking_agreement",
+      "title": "Send booking agreement",
+      "description": "Send a PDF for a booking’s guests to sign — a lease, engagement letter, waiver or event contract — with each signer’s signature and date placed on its pages. Each guest is emailed a link and signs with their typed name; the business signs last. Signers are the keys get_product_booking lists in agreement_signers, or email:<address> for someone invited by email. Fields are fractions of a page from its top-left corner.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "properties": {
+                "height": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 1,
+                  "type": "number"
+                },
+                "kind": {
+                  "enum": [
+                    "signature",
+                    "date"
+                  ],
+                  "type": "string"
+                },
+                "page": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "signer_key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "width": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 1,
+                  "type": "number"
+                },
+                "x": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "y": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "signer_key",
+                "kind",
+                "page",
+                "x",
+                "y",
+                "width",
+                "height"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "file": {
+            "description": "Authorized file reference supplied by ChatGPT after rewriting the declared top-level file argument, including a temporary download_url and file_id.",
+            "properties": {
+              "download_url": {
+                "type": "string"
+              },
+              "file_id": {
+                "type": "string"
+              },
+              "file_name": {
+                "type": "string"
+              },
+              "mime_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "download_url",
+              "file_id"
+            ],
+            "type": "object"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "signers": {
+            "items": {
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "role": {
+                  "enum": [
+                    "guest",
+                    "host"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "name",
+                "role"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "booking_id",
+          "file",
+          "signers",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "agreement": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "sent": {
+            "const": true
+          }
+        },
+        "required": [
+          "sent",
+          "agreement"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Send booking agreement"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "bookings",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [
+        "file"
+      ],
+      "uiResourceUri": null
+    },
+    {
       "name": "send_message",
       "title": "Send message",
       "description": "Send text and/or one photo in a conversation, as you. Check conversation.composer.channel from get_conversation. Airbnb replies accept text or one photo, sent separately. Email replies accept text, a photo or both. A guest with neither email nor account is refused with GUEST_UNREACHABLE. Team replies reach participants according to their notification choices. Reuse the same idempotency_key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true; a realtime failure may report committed:true and must retry that same request. A saved message does not prove delivery.",
@@ -99105,7 +99354,8 @@
                   },
                   "slot": {
                     "enum": [
-                      "image"
+                      "image",
+                      "agreement"
                     ],
                     "type": "string"
                   }
@@ -99570,7 +99820,8 @@
                   "slot": {
                     "enum": [
                       "image",
-                      "gallery"
+                      "gallery",
+                      "agreement"
                     ],
                     "type": "string"
                   }
@@ -126683,14 +126934,14 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
+        "attach_media": "sha256:9672fcb85c4ff355f5c2b00f1d22fe0a961e65e4bc4bdecf93bb882084faad70",
         "create_product": "sha256:8193c55ebac41ea1c0bd72472ac43585af9a384aaa0c704339c94172fd80364f",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:3649a6bc69afde8d124ed5c8452177c30a70dad2c9301cc7d3f10c9522536376",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
-        "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93"
+        "save_media_attachment": "sha256:7cbb4294cadce5efc38e1c6556e8db4ce41c49b7cf4c450179c1971251b1cbb7"
       }
     },
     {
@@ -126705,7 +126956,7 @@
         "cancel_product_booking": "sha256:4649ba23b5d73655c2ba9b2f26ef92757c2c7a809b1dceda3e7caed8ff49b08a",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_product_booking": "sha256:4e30cd5e821e090ab6c79b8ba38f884ace34d17f80b0ff022e8a706cf8b004be",
+        "get_product_booking": "sha256:dcc26fe72974dcbcda6ad5c582435c7261a4fa1d06cbc8bcd4cfc4b4106ad5e0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",
@@ -126729,14 +126980,14 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and list_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Check if hero media, brand logo, favicon, and bookable offerings (such as places to stay or menu items via product_grid) are present, and ask the user for any missing brand assets. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
+        "attach_media": "sha256:9672fcb85c4ff355f5c2b00f1d22fe0a961e65e4bc4bdecf93bb882084faad70",
         "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "remove_media": "sha256:2d9f580ca9664c93e76640ab4144fea1fa9187ec88f70a42c4ced0a409a42f21",
-        "reorder_media": "sha256:124ff79867ad14cb56b197e28383d915b24f88f2e74a076d305c4bac1fe55a63",
-        "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26",
+        "remove_media": "sha256:db9885504444403b6463efaf9bff273da2a5bc3b885b725ea5f060a99157be65",
+        "reorder_media": "sha256:fceb9898afc5f987629fff60066f75375e086b45283441f26676b039e02f5193",
+        "set_media": "sha256:b4b12affd9e8180146a39d5d30b6f044c5eaa91e43e136f883b41f5d41b64b8c",
         "update_site_page": "sha256:467bad83026861320c7ed582236f5c4b5f2cec39cbf5e7f74a8e976d34c9a7c1"
       }
     },
@@ -126749,14 +127000,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
+        "attach_media": "sha256:9672fcb85c4ff355f5c2b00f1d22fe0a961e65e4bc4bdecf93bb882084faad70",
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:fd95e9d97a5f0624dda58886752832eee80a1fef08c9c7a64d8c2af4ff3481d1",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
-        "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26"
+        "save_media_attachment": "sha256:7cbb4294cadce5efc38e1c6556e8db4ce41c49b7cf4c450179c1971251b1cbb7",
+        "set_media": "sha256:b4b12affd9e8180146a39d5d30b6f044c5eaa91e43e136f883b41f5d41b64b8c"
       }
     },
     {
@@ -126813,13 +127064,13 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, list_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language: high-impact hero image or video, logo and favicon, brand colors, offerings showcase on the homepage, and host story with portrait on the about page. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:170c6665556f77a7be9607052052581cfc9632f45d01b88cbbb5ff5683ff8f32",
+        "attach_media": "sha256:9672fcb85c4ff355f5c2b00f1d22fe0a961e65e4bc4bdecf93bb882084faad70",
         "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "set_media": "sha256:832f5f23b3136722fcba0f7e7769b9bdf5b1ed11275a38c1e0692ca297266a26",
+        "set_media": "sha256:b4b12affd9e8180146a39d5d30b6f044c5eaa91e43e136f883b41f5d41b64b8c",
         "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461",
         "update_site_page": "sha256:467bad83026861320c7ed582236f5c4b5f2cec39cbf5e7f74a8e976d34c9a7c1"
       }
