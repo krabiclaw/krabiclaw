@@ -223,8 +223,8 @@ WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "blawby-production-v28"
-database_id = "737276b7-41f7-4e05-8c6c-dc575b8d8e2a"
+database_name = "blawby-production-v29"
+database_id = "ba04f645-2820-4813-83fa-4567850be3e1"
 migrations_dir = "migrations"
 remote = false
 
@@ -421,8 +421,8 @@ WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]
 binding = "DB"
-database_name = "blawby-production-v28"
-database_id = "737276b7-41f7-4e05-8c6c-dc575b8d8e2a"
+database_name = "blawby-production-v29"
+database_id = "ba04f645-2820-4813-83fa-4567850be3e1"
 migrations_dir = "migrations"
 remote = false
 
