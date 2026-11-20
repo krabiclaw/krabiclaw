@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test'
+import { waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { readLocalTenant } from './test-env'
@@ -175,6 +176,8 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   // Visibility and accepting bookings are separate writes. A real nightly
   // price makes this home publishable without changing the earlier unpriced proof.
   await page.goto(`/dashboard/${slug}/products/${productId}/price`)
+  // A price typed before hydration never reaches the form, and Save stays disabled.
+  await waitForNuxtHydration(page)
   const nightlyPrice = page.locator('#dashboard-panel-product-price')
   await nightlyPrice.getByRole('textbox', { name: 'Per night (THB)', exact: true }).fill('150')
   const priceSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
