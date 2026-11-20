@@ -179,6 +179,8 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
       // What the job says later; a task that is not open says nothing more.
       const plan: PlannedSend[] = []
       const prep = Boolean(task.private_prep)
+      // Prep and a repair can come back to someone they left, in the same conversation: each assignment and release is told again.
+      const reannounced = prep || task.kind === 'maintenance'
       const subject: JobSubject | null = isJobTask(task) ? jobSubject(task) : prep && task.job_booking_id ? { id: task.job_booking_id, unit: 'slot' } : null
       const jobPrefix = `job:${task.id}:`
       const endKeys = jobEndKeys(task.id)
@@ -218,11 +220,11 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
       for (const [threadId, thread] of elsewhere) {
         if (threadId === heldIn && task.status === 'open') continue
         const last = lastPost(threadId)
-        if (prep && (!last || !isJobPost(last[0]))) continue
+        if (reannounced && (!last || !isJobPost(last[0]))) continue
         if (task.status !== 'open' && task.status !== 'cancelled' && task.closed_by_user_id !== null) continue
         const end = `${task.status === 'open' ? 'released' : task.status === 'cancelled' ? 'cancelled' : 'closed'}:${task.id}`
         const alreadyTold = postsByThread.get(threadId)?.has(end)
-        if (!prep && alreadyTold) continue
+        if (!reannounced && alreadyTold) continue
         const endKey = alreadyTold && last ? `${end}:${last[1]}` : end
         const seated = seatUsers.get(threadId) ?? []
         // A prior booking's team only needs to know its prep is no longer theirs.
@@ -243,8 +245,6 @@ export async function postJobs(env: CloudflareEnv, db: DbClient, organizationId:
       const baseKey = jobKey(task)
       // A newer release ends an assignment. A later reactivation is a new post
       // keyed by that message, so retries still announce it once.
-      // A repair can come back to someone it left, in the same place's conversation: it is announced again, like prep.
-      const reannounced = prep || task.kind === 'maintenance'
       const postedForAssignment = heldIn && (reannounced
         ? last && (last[0] === baseKey || last[0].startsWith(`${baseKey}:after:`))
         : postsByThread.get(heldIn)?.has(baseKey))

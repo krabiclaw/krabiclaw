@@ -312,8 +312,12 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     await runOrganizationJobs(queue, env, db, ORG, at(day(5), '10:10'))
     const hingePosts = (await automatic(repairThread!.id)).map(message => message.key).filter(key => key.includes(hinge.id))
     assert.equal(hingePosts.filter(key => key.startsWith(jobKey(hinge))).length, 2, `posts: ${hingePosts.join(', ')}`)
-    // Fran stops doing maintenance: her repairs leave her view, though they stay hers until someone reassigns them.
+    // Fran stops doing maintenance: her open repair goes to the owner, she is told it is no longer hers, and it leaves her view.
     await db.prepare("UPDATE member SET role = 'cleaner' WHERE id = 'm-fixer'").run()
+    await reconcileResponsibilities(env, db, { organizationId: ORG })
+    assert.equal(await db.prepare('SELECT assigned_member_id FROM tasks WHERE id = ?').bind(handedBack.id).first<string>('assigned_member_id'), 'm-owner')
+    await runOrganizationJobs(queue, env, db, ORG, at(day(5), '10:15'))
+    assert.equal((await automatic(repairThread!.id)).filter(message => message.key.startsWith(`released:${hinge.id}`)).length, 2, 'released again after it came back')
     await assert.rejects(getTask(db, await taskViewer(principal('fixer', 'cleaner', 'm-fixer')), handedBack.id), { status: 404 })
     await db.prepare("UPDATE member SET role = 'maintenance' WHERE id = 'm-fixer'").run()
 

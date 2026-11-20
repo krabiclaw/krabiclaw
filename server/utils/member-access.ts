@@ -404,7 +404,7 @@ export async function assertResponsibleMember(db: DbClient, organizationId: stri
   return memberId as string | null
 }
 
-/** Clear only departed/dangling current targets; booked-person history stays. */
+/** Clear only departed/dangling current targets, and repairs held by someone who no longer does maintenance; booked-person history stays. */
 export async function reconcileResponsibilities(env: GuestInboxPublicationEnv & EventsEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
   const now = new Date().toISOString()
   let changed = false
@@ -416,7 +416,9 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv & 
     const released = table === 'tasks'
       ? `CASE WHEN kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'maintenance') THEN ${organizationOwnerSql('tasks.organization_id')} END`
       : 'NULL'
-    const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
+    // A repair also leaves someone whose role no longer does maintenance.
+    const repairer = roleMatchesSql('m.role', [...workspaceManagementRoles, 'maintenance'])
+    const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id${table === 'tasks' ? ` AND (${table}.kind <> 'maintenance' OR ${repairer})` : ''})`
     const rows = await queryAll<{ resource_id: string; assigned_member_id: string }>(db,
       `SELECT ${key} AS resource_id, assigned_member_id FROM ${table} WHERE organization_id = ?${open} AND ${memberMissing}`,
       [input.organizationId])
