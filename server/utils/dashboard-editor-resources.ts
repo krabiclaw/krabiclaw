@@ -1,4 +1,4 @@
-import { getMediaAsset, listMediaAssets, listMediaAssetsQuery, groupMediaPlacements, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
+import { listMediaAssetsQuery, groupMediaPlacements, mediaPlacementsQuery, type MediaAsset } from '~/server/utils/media-asset-manager'
 import { dashboardLocationQuery, readDashboardMemberResources, type DashboardLocationContextRow, type DashboardOrganizationRow } from '~/server/utils/dashboard-context'
 import { listingAccessGrantsQuery, listingAccessGrantsFromRows, staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import { prepareMemberSchedulingList } from '~/server/domain/member-scheduling'
@@ -15,7 +15,7 @@ import { getRouterParam, readBody } from 'nitro/h3'
 import { qaEditQuery, updateQa } from '~/server/utils/location-qa'
 import { jsonResponse } from '~/server/utils/api-response'
 import { executeBatch, type BatchQuery, type DbClient } from '~/server/db'
-import { requireOrganizationAccess, type OrganizationAccessRow } from '~/server/utils/location-access'
+import type { OrganizationAccessRow } from '~/server/utils/location-access'
 import {
   BATCH_VIEWER,
   assignedOfferingCondition,
@@ -23,9 +23,8 @@ import {
   withViewer,
   type ResolvedMembership,
   resourceLocationScopeSql,
-  assertResourceAccess,
+  assertOrganizationWideAccess,
   memberAccessPrincipal,
-  isOrganizationWideRole,
   roleAllows,
 } from '~/server/utils/member-access'
 import { publicLocationSocialMediaFromPlacements, preparePublicSocialMedia } from '~/server/utils/public-social-image'
@@ -87,36 +86,31 @@ export async function loadDashboardMedia(
   organizationId: string,
   filters: DashboardMediaFilters = {},
 ) {
-  const { env, db, organization } = await requireOrganizationAccess(event, organizationId)
-  const principal = memberAccessPrincipal(organization.membership, { env, event })
-  if (filters.id) {
-    const asset = await getMediaAsset(db, filters.id, organizationId)
-    if (asset) {
-      await assertResourceAccess(db, {
-        ...principal,
-        resourceLocationId: null,
-      })
-    }
-    return { media: asset ? [asset] : [] }
-  }
-
-  await assertResourceAccess(db, {
-    ...principal,
-    resourceLocationId: null,
-  })
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 100)
   const offset = Math.max(filters.offset ?? 0, 0)
-  return {
-    media: await listMediaAssets(db, organizationId, {
-      kind: filters.kind,
-      ownerType: filters.ownerType,
-      ownerId: filters.ownerId,
-      slot: filters.slot,
-      search: filters.search,
-      limit,
-      offset,
-    }),
-  }
+  const statement = filters.id
+    ? {
+        query: `SELECT ma.id, ma.organization_id, ma.kind, ma.provider, ma.source,
+                ma.cloudflare_image_id, ma.r2_key,
+                ma.public_url, ma.thumbnail_url, ma.mime_type, ma.file_name, ma.file_size,
+                ma.width, ma.height, ma.duration, ma.alt_text, ma.category, ma.status, ma.created_by_user_id, ma.created_at, ma.updated_at
+         FROM media_assets ma WHERE ma.id = ? AND ma.organization_id = ? AND ma.status = 'active'`,
+        params: [filters.id, organizationId],
+      }
+    : listMediaAssetsQuery(organizationId, {
+        kind: filters.kind,
+        ownerType: filters.ownerType,
+        ownerId: filters.ownerId,
+        slot: filters.slot,
+        search: filters.search,
+        limit,
+        offset,
+      })
+
+  const { rows, organization, db, env } = await readDashboardMemberResources(event, organizationId, [statement])
+  await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
+  const media = (rows[0]?.results ?? []) as MediaAsset[]
+  return { media }
 }
 
 export interface LocationContentCounts {

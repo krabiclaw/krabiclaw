@@ -1,7 +1,7 @@
 import { RETENTION_HUB, retentionWakeAt } from '~/server/domain/due-business-work'
 import { publishEvent } from '~/server/events'
 import type Stripe from 'stripe'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import {
   invoiceLineIsProration,
@@ -336,9 +336,12 @@ const GA_IDENTIFIER_KEYS = [
  * who captured them.
  */
 export async function withdrawStripeGaIdentifiers(db: DbClient, getStripeClient: () => Stripe, userId: string): Promise<void> {
-  await execute(db, `UPDATE stripe_ga4_subscription_intents SET client_id = NULL, session_id = NULL, session_captured_at = NULL, updated_at = ? WHERE user_id = ?`, [new Date().toISOString(), userId])
-  const customers = await queryAll<{ customerId: string }>(db, `SELECT DISTINCT o."stripeCustomerId" AS customerId FROM member m JOIN organization o ON o.id = m."organizationId"
-    WHERE m."userId" = ? AND m.role = 'owner' AND o."stripeCustomerId" IS NOT NULL`, [userId])
+  const [, customersBatch] = await executeBatch(db, [
+    { query: `UPDATE stripe_ga4_subscription_intents SET client_id = NULL, session_id = NULL, session_captured_at = NULL, updated_at = ? WHERE user_id = ?`, params: [new Date().toISOString(), userId] },
+    { query: `SELECT DISTINCT o."stripeCustomerId" AS customerId FROM member m JOIN organization o ON o.id = m."organizationId"
+      WHERE m."userId" = ? AND m.role = 'owner' AND o."stripeCustomerId" IS NOT NULL`, params: [userId] },
+  ], { operation: 'Withdraw Stripe GA identifiers' })
+  const customers = (customersBatch?.results ?? []) as { customerId: string }[]
   if (customers.length === 0) return
   const stripe = getStripeClient()
   const blank = (metadata: Stripe.Metadata) => Object.fromEntries(GA_IDENTIFIER_KEYS.filter(key => metadata[key] !== undefined).map(key => [key, '']))

@@ -270,9 +270,7 @@ function readAhead(conversationId: string) {
   }
   prefetch(conversationId)?.then(page => { if (page) settle() }, settle)
 }
-watch([threads, realtime.status], ([rows]) => {
-  for (const thread of rows.slice(0, 5)) if (thread.id !== openThreadId.value) readAhead(thread.id)
-}, { immediate: true })
+
 
 async function loadMore() {
   const before = data.value
