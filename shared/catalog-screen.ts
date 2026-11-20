@@ -1,5 +1,3 @@
-import { z } from 'zod'
-
 export interface CatalogRow {
   id: string
   label: string
@@ -48,11 +46,3 @@ export interface CatalogScreen {
   allow_unchanged?: boolean
   empty_title?: string
 }
-
-export const catalogAnswer = z.object({
-  values: z.record(z.string(), z.string().max(10_000)),
-  revision: z.string(),
-  idempotency_key: z.uuid(),
-}).strict()
-
-export type CatalogAnswer = z.infer<typeof catalogAnswer>

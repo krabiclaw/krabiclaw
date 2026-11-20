@@ -17,13 +17,13 @@ export default defineHandler(async (event) => {
     }
     // The complete intended membership and order. A partial list would leave
     // unnamed products at whatever position they happened to hold.
-    await setCollectionProducts(db, {
+    const memberships = await setCollectionProducts(db, {
       organizationId: organization.id, collectionId,
       productIds: body.product_ids.map(id => String(id).trim()), actor: { actorId: session.user.id },
       ...(Object.hasOwn(body, 'expected_product_ids') ? { expectedProductIds: body.expected_product_ids } : {}),
       ...(Object.hasOwn(body, 'move_to') ? { moveTo: body.move_to } : {}),
     })
-    return jsonResponse({ success: true, products: await listCollectionProducts(db, { organizationId: organization.id, collectionId }) })
+    return jsonResponse({ success: true, memberships, products: await listCollectionProducts(db, { organizationId: organization.id, collectionId }) })
   } catch (error) {
     rethrowHttpError(error)
     console.error('collection_products_failed', { organizationId, collectionId, error: error instanceof Error ? error.message : String(error) })

@@ -35,7 +35,8 @@ function addStylesheetPreload(response: Response, event: HTTPEvent) {
   })
   if (!href) return
 
-  response.headers.set('link', [response.headers.get('link'), `<${href}>; rel=preload; as=style`].filter(Boolean).join(', '))
+  const cors = context.tenantType === 'tenant' ? '; crossorigin=anonymous' : ''
+  response.headers.set('link', [response.headers.get('link'), `<${href}>; rel=preload; as=style${cors}`].filter(Boolean).join(', '))
 }
 
 export default definePlugin((nitroApp) => {

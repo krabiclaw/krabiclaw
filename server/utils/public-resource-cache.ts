@@ -1,4 +1,4 @@
-import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
 import { normalizeHost, type TenantHostEnv } from '~/server/utils/tenant-hosts'
@@ -7,19 +7,7 @@ import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/se
 import { publishEvent, type EventsEnv } from '~/server/events'
 import { advanceOrganizationSocialCardRefresh, SOCIAL_CARD_REFRESH_LEASE_SECONDS, SOCIAL_CARD_REFRESH_PREFIX, type SocialCardEnv } from '~/server/utils/social-card'
 
-// KV read-through cache for public shell and page resource queries.
-// Mirrors edge-cache.ts's HTML cache shape, but keyed by organizationId + resource
-// params instead of host + pathname — public resources are looked up by organizationId
-// directly, not by tenant hostname, so no hostname resolution is needed here.
-//
-// Cache key: public~<organizationId>~v22~<revision>~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
-// each field percent-encoded (mirrors composables/usePublicPageRequest.ts's
-// usePublicResourceKey() — cached entries are never preview/draft-authorized,
-// see the preview authorization guard in the shell and page services).
-// Raised from 60s to 300s once every bootstrap-relevant write path was confirmed to call
-// purgePublicResourceCache/purgePublicResourceCacheNow (dashboard editor routes + MCP were already
-// covered; location CRUD, onboarding setup/commit, and Google Places sync were a
-// gap closed alongside this change — see those call sites for purgePublicResourceCacheNow).
+// Shell and payment methods share the tenant prefix and publishing invalidation.
 export const PUBLIC_RESOURCE_CACHE_TTL_SECONDS = 300
 
 export const CACHE_INVALIDATION_TERMINAL_RETENTION_DAYS = 7
@@ -97,15 +85,6 @@ export async function drainPublicResourceCacheInvalidations(
   return processed
 }
 
-export interface PublicResourceCacheParams {
-  contract: 'shell' | 'page'
-  page: string | null
-  location: string | null
-  datasets: readonly string[]
-  blogSlug: string | null
-  locale: string | undefined
-}
-
 // encodeURIComponent doesn't escape "~", so we replace it explicitly to avoid
 // delimiter collisions (mirrors composables/usePublicPageRequest.ts).
 const encodeKeyField = (value: string | null | undefined): string =>
@@ -116,20 +95,8 @@ export function buildPublicPaymentMethodsCacheKey(organizationId: string): strin
   return ['public', encodeKeyField(organizationId), 'v20', 'payment-methods'].join('~')
 }
 
-export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams, revision: string | null): string {
-  return [
-    'public',
-    encodeKeyField(organizationId),
-    // v22: public shell and page keys follow the current wire contract.
-    'v22',
-    encodeKeyField(revision),
-    params.contract,
-    encodeKeyField(params.page),
-    encodeKeyField(params.location),
-    encodeKeyField([...params.datasets].sort().join(',')),
-    encodeKeyField(params.blogSlug),
-    encodeKeyField(params.locale),
-  ].join('~')
+export function buildPublicShellCacheKey(organizationId: string, locale: string | undefined, revision: string | null): string {
+  return ['public', encodeKeyField(organizationId), 'v25', encodeKeyField(revision), 'shell', encodeKeyField(locale)].join('~')
 }
 
 export async function getPublicResourceCache(kv: KVNamespace, key: string): Promise<string | null> {
@@ -158,12 +125,12 @@ export async function putPublicResourceCache(
  */
 export async function purgeOrganizationCaches(db: DbClient, kv: KVNamespace, organizationId: string, env: TenantHostEnv): Promise<void> {
   const freeOrganizationDomain = normalizeHost(env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
-  const [domains, organizations] = await Promise.all([
-    queryAll<{ domain: string }>(db, "SELECT domain FROM organization_domains WHERE organization_id = ? AND status = 'active'", [organizationId]),
-    queryAll<{ subdomain: string | null; theme_id: string }>(db, 'SELECT subdomain, theme_id FROM organization WHERE id = ? LIMIT 1', [organizationId]),
-  ])
-  const hostnames = new Set<string>(domains.map(domain => domain.domain))
-  const organization = organizations[0]
+  const [domains, sites] = await executeBatch(db, [
+    { query: "SELECT domain FROM organization_domains WHERE organization_id = ? AND status = 'active'", params: [organizationId] },
+    { query: 'SELECT subdomain, theme_id FROM organization WHERE id = ? LIMIT 1', params: [organizationId] },
+  ], { operation: 'Read the changed site and its domains' })
+  const hostnames = new Set((domains!.results as Array<{ domain: string }>).map(domain => domain.domain))
+  const organization = sites!.results[0] as { subdomain: string | null; theme_id: string } | undefined
   if (organization?.subdomain && freeOrganizationDomain) hostnames.add(`${organization.subdomain}.${freeOrganizationDomain}`)
   if (isPlatformSite({ themeId: organization?.theme_id })) {
     // The platform's configured apex can move without changing the hosted

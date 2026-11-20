@@ -32,6 +32,16 @@ export function staffListingsQuery(organizationSql: string, verticalSql: string,
     ORDER BY lower(label), p.id`, params }
 }
 
+export function listingAccessGrantsQuery(organization: string | { sql: string }, listingId: string): BatchQuery {
+  return { query: `SELECT member_id, access FROM listing_message_members
+    WHERE organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND listing_id = ? ORDER BY member_id`,
+    params: [...(typeof organization === 'string' ? [organization] : []), listingId] }
+}
+
+export function listingAccessGrantsFromRows(rows: unknown[]) {
+  return rows as Array<{ member_id: string; access: StoredListingAccess }>
+}
+
 export async function staffListings(db: DbClient, organization: { id: string; vertical: string | null }) {
   const query = staffListingsQuery('?', '?', [organization.id, organization.vertical])
   return queryAll<{ listing_id: string; label: string }>(db, query.query, query.params)

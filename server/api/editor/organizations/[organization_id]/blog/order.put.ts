@@ -1,5 +1,5 @@
 import { jsonResponse, readStrictBody, rethrowHttpError } from '~/server/utils/api-response'
-import { requireBlogAccess } from '~/server/utils/blog-access'
+import { requireWebsiteAccess } from '~/server/utils/tenant-pages-api'
 import { reorderArticles } from '~/server/utils/content/publishing'
 import { isArticleCollection } from '~/utils/article-collections'
 import { defineHandler } from 'nitro'
@@ -11,7 +11,7 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })
   try {
-    const { db } = await requireBlogAccess(event, organizationId)
+    const { db } = await requireWebsiteAccess(event, organizationId)
     const body = await readStrictBody<{ collection: unknown; post_ids: unknown }>(event, { collection: 'unknown', post_ids: 'unknown' })
     if (!isArticleCollection(body.collection)) return jsonResponse({ error: 'collection must be blog or docs' }, { status: 400 })
     if (!Array.isArray(body.post_ids) || body.post_ids.some(id => typeof id !== 'string' || !id.trim())) {

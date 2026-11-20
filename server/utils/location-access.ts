@@ -25,6 +25,7 @@ export interface OrganizationAccessRow {
   onboarding_status: string | null
   vertical: string | null
   theme_id: string
+  default_currency: string | null
   user_id: string
   member_role: string
   // The membership this row's access was resolved from, keyed by
@@ -52,7 +53,7 @@ async function readMemberOrganizationRow(db: DbClient, env: CloudflareEnv, organ
   const row = await queryFirst<Omit<OrganizationAccessRow, 'slug' | 'name' | 'user_id' | 'member_role' | 'membership'>>(db, `
     SELECT id, subdomain,
            (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url,
-           status, onboarding_status, vertical, theme_id
+           status, onboarding_status, vertical, theme_id, default_currency
     FROM organization WHERE id = ? LIMIT 1
   `, [organizationId])
   if (!row) return null

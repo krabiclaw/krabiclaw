@@ -32,8 +32,16 @@ export const isQaResponse = (value: unknown): value is { qa: QaRow[] } =>
 // fields the response might not carry.
 export const isQaCreated = (value: unknown): value is QaRow => isQaRow(value)
 
-export const isQaUpdated = (value: unknown): value is { updated: true; qa_id: string } =>
-  isRecord(value) && value.updated === true && typeof value.qa_id === 'string'
+export const isQaUpdated = (value: unknown): value is { updated: true; qa_id: string; qa: QaRow } =>
+  isRecord(value) && value.updated === true && isQaRow(value.qa) && value.qa_id === value.qa.id
+
+export function qaIndexKey(organizationId: string, locationId: string | null, pagePath: string | null) {
+  return locationId ? `dashboard-location-qa-${organizationId}-${locationId}` : `dashboard-organization-qa-${organizationId}-${pagePath ?? 'general'}`
+}
+
+export function qaRecordKey(organizationId: string, locationId: string | null, id: string) {
+  return `dashboard-qa-record-${organizationId}-${locationId ?? 'organization'}-${id}`
+}
 
 export const isQaDeleted = (value: unknown): value is { qa_id: string; deleted: true } =>
   isRecord(value) && typeof value.qa_id === 'string' && value.deleted === true

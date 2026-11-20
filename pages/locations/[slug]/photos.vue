@@ -78,7 +78,7 @@ const { organization } = useTenantOrganization()
 const slug = computed(() => String(route.params.slug))
 const organizationName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 
-const { location, media: photos } = await usePublicPageData({ lazy: false })
+const { location, media: photos } = await usePublicPageData()
 // A slug naming no location is a URL that does not exist. Rendering the page
 // around a null location answered 200 with an empty shell — a soft 404 a
 // crawler indexes. The sibling menu and product indexes already refuse it.

@@ -1,10 +1,12 @@
+import { executeBatch } from '~/server/db'
+import { membershipByIdQuery, withViewer } from '~/server/utils/member-access'
+import { prepareDashboardLocationOverview } from '~/server/utils/dashboard-editor-resources'
 // PATCH /api/dashboard/locations/[id] — Update a location
 
 import { jsonResponse } from '~/server/utils/api-response'
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
 import { updateLocation, type LocationRecord, type UpdateLocationInput } from '~/server/utils/location-management'
 import { parseLocationPayload } from '~/server/utils/location-payload'
-import { assertMemberScope, memberAccessPrincipal } from '~/server/utils/member-access'
 
 export default defineHandler(async (event) => {
   const locationId = getRouterParam(event, 'id')
@@ -20,8 +22,6 @@ export default defineHandler(async (event) => {
   if (typeof body !== 'object' || body === null) {
     return jsonResponse({ error: 'Invalid request body' }, { status: 400 })
   }
-
-  await assertMemberScope(db, { ...memberAccessPrincipal(organization, { env, event }), locationId, patch: body })
 
   const rating = body.rating === undefined || body.rating === null || String(body.rating).trim() === ''
     ? undefined
@@ -43,12 +43,18 @@ export default defineHandler(async (event) => {
         ? undefined
         : body.special_hours === null
           ? null
-          : body.special_hours as UpdateLocationInput['special_hours'], updated_at: typeof body.updated_at === 'string' ? body.updated_at : undefined, description: typeof body.description === 'string' ? body.description : body.description === null ? null : undefined, short_description: typeof body.short_description === 'string' ? body.short_description : body.short_description === null ? null : undefined, price_level: typeof body.price_level === 'string' ? body.price_level : body.price_level === null ? null : undefined, google_place_id: typeof body.google_place_id === 'string' ? body.google_place_id : body.google_place_id === null ? null : undefined, timezone: typeof body.timezone === 'string' ? body.timezone.trim() || null : body.timezone === null ? null : undefined, rating, review_count: reviewCount, status: body.status as UpdateLocationInput['status'], }, session.user.id, env, )
+          : body.special_hours as UpdateLocationInput['special_hours'], updated_at: typeof body.updated_at === 'string' ? body.updated_at : undefined, description: typeof body.description === 'string' ? body.description : body.description === null ? null : undefined, short_description: typeof body.short_description === 'string' ? body.short_description : body.short_description === null ? null : undefined, price_level: typeof body.price_level === 'string' ? body.price_level : body.price_level === null ? null : undefined, google_place_id: typeof body.google_place_id === 'string' ? body.google_place_id : body.google_place_id === null ? null : undefined, timezone: typeof body.timezone === 'string' ? body.timezone.trim() || null : body.timezone === null ? null : undefined, rating, review_count: reviewCount, status: body.status as UpdateLocationInput['status'], }, session.user.id, env, undefined, { current: locationContext })
 
   if (result.status >= 400) {
     return jsonResponse(result.data, { status: result.status })
   }
 
+  if (getQuery(event).editor === '1') {
+    const plan = prepareDashboardLocationOverview({ id: locationId })
+    const member = membershipByIdQuery(organization.id, session.user.id)
+    const rows = await executeBatch(db, plan.queries.map(query => withViewer(member, query)), { operation: 'Read saved location editor' })
+    return jsonResponse(plan.read(rows, organization), { status: result.status })
+  }
   const { location } = result.data as { location: LocationRecord }
   return jsonResponse({
     success: true,
@@ -56,4 +62,4 @@ export default defineHandler(async (event) => {
   }, { status: result.status })
 })
 import { defineHandler } from 'nitro';
-import { getRouterParam, readBody  } from 'nitro/h3';
+import { getQuery, getRouterParam, readBody } from 'nitro/h3';

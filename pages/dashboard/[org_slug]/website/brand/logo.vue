@@ -16,6 +16,7 @@
         </div>
         <MediaPicker
           :model-value="editor.form[logo.assetKey]"
+          :selected-summary="editor.mediaSummary(editor.form[logo.assetKey])"
           :organization-id="editor.organizationId"
           accept="image"
           :title="logo.pickerTitle"
@@ -107,7 +108,7 @@ const pickedUrls = reactive<Record<string, string | null>>({})
 function urlFor(logo: LogoEntry) {
   const assetId = editor.form[logo.assetKey]
   if (!assetId) return null
-  return pickedUrls[assetId] ?? editor.logoUrl(assetId)
+  return pickedUrls[assetId] ?? mediaStillUrl(editor.mediaSummary(assetId))
 }
 function setShape(logo: LogoEntry, shape: LogoShape) {
   editor.form[logo.presentationKey] = { ...editor.form[logo.presentationKey], shape }

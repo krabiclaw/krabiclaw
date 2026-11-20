@@ -6,7 +6,7 @@ import { projectPublicLocation, type PublicLocationPrivacySource } from '~/share
 import { projectPublicLocationReview, publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { readPublicBookingSessions } from '~/server/utils/public-session-booking'
-import { getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
+import { hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { assertProductKind } from '~/shared/product-details'
 import type { Collection, ProductBookingConfig, ProductPresentation, ProductSurface, PublicProduct, SiteProductSurface, StaffAssignment } from '~/server/types/products'
 import { productSurfaceOf, resolveProductPresentation, presentationForSurface } from '~/utils/product-presentation'
@@ -172,7 +172,9 @@ async function loadProductOrganization(db: DbClient, organizationId: string, rou
   return { organization, presentation, currency: organization.default_currency }
 }
 
-export async function loadPublicProductCollection(
+type CollectionTarget = { slug: string } | { id: string }
+
+async function loadPublicProductCollection(
   db: DbClient,
   organizationId: string,
   routeKind: ProductSurface,
@@ -180,8 +182,9 @@ export async function loadPublicProductCollection(
   locationSlug?: string | null,
   env?: CloudflareEnv,
   localizations?: readonly ExactPublicLocalization[],
+  target?: CollectionTarget,
 ): Promise<PublicProductCollection | null> {
-  const [resolved, locationRows] = await Promise.all([
+  const [resolved, locations, scopedProducts] = await Promise.all([
     loadProductOrganization(db, organizationId, routeKind, previewAuthorized),
     queryAll<PublicProductLocationRow>(db, `
       SELECT bl.id, bl.slug, bl.title, bl.timezone, bl.address, bl.phone, bl.maps_url, bl.latitude, bl.longitude, ${publicLocationPrivacySql('bl')}
@@ -190,11 +193,16 @@ export async function loadPublicProductCollection(
          ${locationSlug ? 'AND bl.slug = ?' : ''}
        ORDER BY bl.title, bl.id
     `, [organizationId, ...(locationSlug ? [locationSlug] : [])]).then(rows => publicProductLocations(rows, localizations)),
+    target ? queryAll<{ id: string }>(db, `
+      WITH selected AS (SELECT id FROM products WHERE organization_id = ? AND ${'id' in target ? 'id' : 'slug'} = ?)
+      SELECT id FROM selected UNION
+      SELECT sibling.product_id FROM collection_products own
+      JOIN collection_products sibling ON sibling.organization_id = own.organization_id AND sibling.collection_id = own.collection_id
+      WHERE own.organization_id = ? AND own.product_id IN (SELECT id FROM selected)
+    `, [organizationId, 'id' in target ? target.id : target.slug, organizationId]) : undefined,
   ])
-  if (!resolved) return null
-  if (locationSlug && locationRows.length !== 1) return null
-  const locations = locationRows
-  if (locationSlug && locations.length !== 1) return null
+  if (!resolved || (locationSlug && locations.length !== 1) || scopedProducts?.length === 0) return null
+  const productIds = scopedProducts?.map(row => row.id)
   const kind = routeKind === 'experiences' ? 'experience' : routeKind === 'menu' ? 'dish' : routeKind === 'stays' ? 'stay' : undefined
   let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
   const paymentSetup = () => {
@@ -205,8 +213,8 @@ export async function loadPublicProductCollection(
   // the same saved catalog before publication and booking setup are complete.
   const [catalogProducts, allCollections] = await Promise.all([
     locationSlug
-      ? listLocationProducts(db, { organizationId, locationId: locations[0]!.id, kind, publishedOnly: !previewAuthorized, env, paymentSetup })
-      : listOrganizationProducts(db, { organizationId, kind, publishedOnly: !previewAuthorized, env, paymentSetup }),
+      ? listLocationProducts(db, { organizationId, locationId: locations[0]!.id, kind, productIds, publishedOnly: !previewAuthorized, env, paymentSetup })
+      : listOrganizationProducts(db, { organizationId, kind, productIds, publishedOnly: !previewAuthorized, env, paymentSetup }),
     listCollections(db, { organizationId }),
   ])
   // Hydrated products already include their location publication flags. Reuse
@@ -238,86 +246,21 @@ export async function loadPublicProductDetail(
   productSlug: string,
   locale?: string,
 ): Promise<(PublicProductDetail & { location: PublicProductLocation }) | null> {
-  const sourceLocale = await getSourceLocale(db, organizationId)
-  locale ??= sourceLocale
-  if (locale === sourceLocale) {
-    const collection = await loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, locationSlug, env)
-    const location = collection?.locations[0]
-    if (!collection || !location) return null
-    const found = collection.products.find(product => product.slug === productSlug)
-    // A preview may show a withheld offering, but it still belongs to this
-    // branch. The guest route also requires both publication switches.
-    const offeredHere = found?.locations.some(entry => entry.location_id === location.id && (previewAuthorized || entry.published))
-    const publishedHere = previewAuthorized || found?.publications.some(entry => entry.organization_id === organizationId && entry.published)
-    const onThisSurface = found ? productSurfaceOf(collection.organization.vertical, found) === routeKind : false
-    if (!found || !offeredHere || !publishedHere || !onThisSurface) return null
-    const product = found
-    if (!product) return null
-    const locale_representations = await listPublicLocaleRepresentations(env, db, {
-      organizationId: collection.organization.id,
-      
-      sourcePath: collection.presentation.productPath(location.slug, product.slug),
-      resource: { type: 'product', id: product.id },
-    })
-    return {
-      ...collection,
-      location,
-      product,
-      booking: product.booking,
-      locale_representations,
-    }
-  }
-
-  const resolved = await loadProductOrganization(db, organizationId, routeKind, previewAuthorized)
-  if (!resolved) return null
-  const localizations = await loadExactPublicLocalizations(env, db, resolved.organization.id, locale)
-  const localizedLocationPath = `/${locale}/locations/${locationSlug}`
-  const locationId = resolveLocalizedRouteResourceId(localizations, 'business_location', localizedLocationPath)
-  if (!locationId) return null
-  const sourceLocation = await queryFirst<{ slug: string }>(db, `
-    SELECT slug FROM business_locations
-     WHERE organization_id = ?  AND id = ? AND status = 'active' LIMIT 1
-  `, [resolved.organization.id, locationId])
+  const source = await getSourceLocale(db, organizationId)
+  const language = locale ?? source
+  const localizations = language === source ? undefined : await loadExactPublicLocalizations(env, db, organizationId, language)
+  const localizedLocationId = localizations && resolveLocalizedRouteResourceId(localizations, 'business_location', `/${language}/locations/${locationSlug}`)
+  if (localizations && !localizedLocationId) return null
+  const sourceLocation = localizedLocationId
+    ? await queryFirst<{ slug: string }>(db, "SELECT slug FROM business_locations WHERE organization_id = ? AND id = ? AND status = 'active'", [organizationId, localizedLocationId])
+    : { slug: locationSlug }
   if (!sourceLocation) return null
-  const collection = await loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, sourceLocation.slug, env, localizations)
+  const collection = await loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, sourceLocation.slug, env, localizations, { slug: productSlug })
   const location = collection?.locations[0]
-  if (!collection || !location) return null
-  // The Product is named by the same slug its English route names: a Product
-  // reaches the public through each location that offers it, so its localized
-  // route is that location's route under a locale prefix, not a stored path of
-  // its own.
-  const sourceProduct = collection.products.find(product => product.slug === productSlug)
-  const locationLocalization = localizations.find(item => item.resourceType === 'business_location' && item.resourceId === location.id)
-  const productLocalization = localizations.find(item => item.resourceType === 'product' && item.resourceId === sourceProduct?.id)
-  const organizationLocalization = localizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
-  if (!sourceProduct || !locationLocalization || !productLocalization) return null
-  const localizedProduct = projectExactLocalizedResource('product', sourceProduct, productLocalization)
-  const product = {
-    ...localizedProduct,
-    image: localizedProduct.image
-      ? projectLocalizedMediaAlt([localizedProduct.image], localizations)[0] ?? null
-      : null,
-    gallery: projectLocalizedMediaAlt(localizedProduct.gallery, localizations),
-  }
-  const localizedOrganization = organizationLocalization
-    ? projectExactLocalizedResource('organization', collection.organization, organizationLocalization)
-    : { ...collection.organization, name: '' }
-  const locale_representations = await listPublicLocaleRepresentations(env, db, {
-    organizationId: collection.organization.id,
-    
-    sourcePath: collection.presentation.productPath(sourceLocation.slug, sourceProduct.slug),
-    resource: { type: 'product', id: sourceProduct.id },
-  })
-  return {
-    ...collection,
-    organization: localizedOrganization,
-    products: projectExactLocalizedCollection('product', collection.products, localizations),
-    collections: projectExactLocalizedCollection('collection', collection.collections, localizations),
-    location,
-    product,
-    booking: sourceProduct.booking,
-    locale_representations,
-  }
+  const found = collection?.products.find(product => product.slug === productSlug)
+  if (!collection || !location || !found || !found.locations.some(entry => entry.location_id === location.id && (previewAuthorized || entry.published))) return null
+  const detail = await projectPublicOffering(env, db, collection, found, sourceLocation.slug, previewAuthorized, localizations, location.id)
+  return detail ? { ...detail, location } : null
 }
 
 /** One site-wide page, an experience's or a home's; a guest chooses among its actual booking scopes. */
@@ -334,11 +277,11 @@ export async function loadPublicSiteProductDetail(
   const sourceLocale = await getSourceLocale(db, organizationId)
   locale ??= sourceLocale
   const localizations = locale === sourceLocale ? undefined : await loadExactPublicLocalizations(env, db, organizationId, locale)
-  const collection = await loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, undefined, env, localizations)
+  const collection = await loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, undefined, env, localizations, { slug: productSlug })
   if (!collection) return null
   const found = collection.products.find(product => product.slug === productSlug && productSurfaceOf(null, product) === routeKind)
   if (!found) return null
-  return projectPublicOffering(env, db, collection, found, locale, requestedScope, collection.presentation.productPath('', found.slug), previewAuthorized, localizations)
+  return projectPublicOffering(env, db, collection, found, '', previewAuthorized, localizations, requestedScope)
 }
 
 /** An authored page binds its offer by product ID, independent of the theme. */
@@ -358,17 +301,16 @@ export async function loadPublicPageProductDetail(
       : resolvePublishedTenantPageIdentity(db, organizationId, pagePath, locale),
   ])
   locale ??= sourceLocale
-  if (page && !previewAuthorized && page.id !== page.page_id) await loadExactPublicLocalizations(env, db, organizationId, page.locale)
   if (!page?.product_id) return null
   // Only the kind selects the public surface; the canonical catalog below
   // hydrates and checks the offering once, including its publication/readiness.
   const product = await queryFirst<{ kind: string }>(db, 'SELECT kind FROM products WHERE organization_id = ? AND id = ?', [organizationId, page.product_id])
   if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
   const localizations = locale === sourceLocale ? undefined : await loadExactPublicLocalizations(env, db, organizationId, locale)
-  const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, { kind: assertProductKind(product.kind) }), previewAuthorized, undefined, env, localizations)
+  const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, { kind: assertProductKind(product.kind) }), previewAuthorized, undefined, env, localizations, { id: page.product_id })
   const found = collection?.products.find(product => product.id === page.product_id)
   if (!collection || !found) return null
-  return projectPublicOffering(env, db, collection, found, locale, requestedScope, found.page?.path ?? pagePath, previewAuthorized, localizations)
+  return projectPublicOffering(env, db, collection, found, '', previewAuthorized, localizations, requestedScope, found.page?.path ?? pagePath)
 }
 
 async function projectPublicOffering(
@@ -376,14 +318,14 @@ async function projectPublicOffering(
   db: DbClient,
   collection: PublicProductCollection,
   found: PublicProduct,
-  locale: string,
-  requestedScope: string | null | undefined,
-  sourcePath: string,
+  locationSlug: string,
   previewAuthorized: boolean,
   localizations?: readonly ExactPublicLocalization[],
+  requestedScope?: string | null,
+  sourcePath = collection.presentation.productPath(locationSlug, found.slug),
 ): Promise<PublicProductDetail | null> {
   const organizationId = collection.organization.id
-  const offeredAt = new Set(found.locations.filter(entry => previewAuthorized || (entry.published && entry.active)).map(entry => entry.location_id))
+  const offeredAt = new Set(found.locations.filter(entry => previewAuthorized || (entry.published && (entry.active || Boolean(locationSlug)))).map(entry => entry.location_id))
   const locations = collection.locations.filter(location => offeredAt.has(location.id))
   const online_available = Boolean(found.booking?.held_online)
   let location: PublicProductLocation | null = null
@@ -475,9 +417,9 @@ export async function loadPublicProductApiDetail(
   // The surface is the Product's own — an Experience answers here too, so its
   // reviews are read and written through the same location-scoped API as every
   // other Product's.
-  const product = await getProductBySlug(db, organization.id, productSlug)
+  const product = await queryFirst<{ kind: string }>(db, 'SELECT kind FROM products WHERE organization_id = ? AND slug = ?', [organizationId, productSlug])
   if (!product) return null
-  return loadPublicProductDetail(env, db, organizationId, productSurfaceOf(organization.vertical, product), previewAuthorized, locationSlug, productSlug, locale)
+  return loadPublicProductDetail(env, db, organizationId, productSurfaceOf(organization.vertical, { kind: assertProductKind(product.kind) }), previewAuthorized, locationSlug, productSlug, locale)
 }
 
 /** Put the first page of the same availability feed in the server-rendered product. */

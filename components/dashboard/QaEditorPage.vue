@@ -57,7 +57,8 @@ export const qaEditorKey = Symbol('qa-editor') as InjectionKey<QaEditor>
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import { getErrorMessage } from '~/utils/errors'
-import { isQaResponse, isQaCreated, isQaUpdated, qaCreateBlockers, type QaRow } from '~/utils/organization-qa'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
+import { isQaResponse, isQaCreated, isQaUpdated, qaCreateBlockers, qaIndexKey, qaRecordKey, type QaRow } from '~/utils/organization-qa'
 
 // The location the URL scopes this to with `?location_id=`, or none for the whole site.
 const locationScope = useLocationScope()
@@ -92,20 +93,19 @@ const form = useState(`qa-draft-${organizationId}-${locationScope.value ?? 'orga
 const saving = ref(false)
 const errorMessage = ref('')
 
-/**
- * A site record is read by id, not by scope: the page it is filed under is an
- * attribute it reports back, which the scoped PATCH needs. A location's list
- * is not scoped, so its record is found in the list.
- */
-const { data, error: loadError, refresh } = await useAsyncData(
-  () => `dashboard-qa-record-${organizationId}-${locationScope.value ?? 'organization'}-${qaId.value}`,
-  async () => isNew.value
-    ? null
-    : await dashboardApi<{ qa: QaRow[] }>(qaEndpoint.value, {
-      query: locationScope.value ? undefined : { id: qaId.value },
-      validate: isQaResponse,
-    }),
-)
+const realtime = useDashboardInvalidations()
+const indexKey = (path: string | null) => `website:${qaIndexKey(organizationId, locationScope.value, path)}`
+const recordKey = computed(() => qaRecordKey(organizationId, locationScope.value, qaId.value))
+const { data, error: loadError } = await useWebsiteIndexData(recordKey, async () => {
+  if (isNew.value) return { qa: [] as QaRow[] }
+  const path = typeof route.query.page_path === 'string' ? route.query.page_path : null
+  const held = realtime.held.get(indexKey(path))
+  const saved = isQaResponse(held) && held.qa.find(row => row.id === qaId.value)
+  return saved ? { qa: [saved] } : await dashboardApi(qaEndpoint.value, {
+    query: { id: qaId.value },
+    validate: isQaResponse,
+  })
+})
 
 const record = computed(() => data.value?.qa.find(row => row.id === qaId.value) ?? null)
 // A question that is not there is not a page, so it 404s rather than rendering an empty editor for it.
@@ -153,6 +153,17 @@ const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveOpenSecti
   commit,
 })
 
+function rememberRecord(saved: QaRow) {
+  const key = indexKey(saved.page_path)
+  const held = realtime.held.get(key)
+  if (isQaResponse(held)) {
+    const qa = [...held.qa.filter(row => row.id !== saved.id), saved].sort((a, b) => a.sort_order - b.sort_order)
+    realtime.held.hold(realtime.held.begin(key, businessChanged), { ...held, qa }, Date.now() + 30_000, 16)
+  }
+  const detail = `website:${qaRecordKey(organizationId, locationScope.value, saved.id)}`
+  realtime.held.hold(realtime.held.begin(detail, businessChanged), { qa: [saved] }, Date.now() + 30_000, 16)
+}
+
 async function commit() {
   // The PATCH sends the whole record, and the form holds the row it was loaded
   // from. With no row — a load that failed — it holds its own blank defaults,
@@ -180,14 +191,16 @@ async function commit() {
     }
     if (isNew.value) {
       const created = await dashboardApi(qaEndpoint.value, { method: 'POST', body, validate: isQaCreated })
+      rememberRecord(created)
       Object.assign(form, emptyDraft())
       // The record it became, not the `new` form it was, so Back from a saved
       // question goes to the list and never to an empty Add screen.
       await navigateTo({ path: `${qaPath.value}/${created.id}`, query: route.query }, { replace: true })
       return
     }
-    await dashboardApi(`${qaEndpoint.value}/${qaId.value}`, { method: 'PATCH', body, validate: isQaUpdated })
-    await refresh()
+    const { qa } = await dashboardApi(`${qaEndpoint.value}/${qaId.value}`, { method: 'PATCH', body, validate: isQaUpdated })
+    rememberRecord(qa)
+    data.value = { qa: [qa] }
     await level.close()
   } catch (error) {
     errorMessage.value = getErrorMessage(error, 'Failed to save question')

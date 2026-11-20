@@ -161,10 +161,9 @@ test.describe('dashboard pane hierarchy', () => {
       expect(catalogRead.status(), await catalogRead.text()).toBe(200)
       const officeProducts = (await catalogRead.json() as { products: Product[] }).products.filter(product => product.locations.some(location => location.location_id === office!.id))
       expect(officeProducts.some(product => product.id === productId)).toBe(true)
-      const overviewPath = `/api/dashboard/organizations/${seededTenant('legal').organizationId}/locations/${office!.id}/overview`
-      const officeOverview = page.waitForResponse(response => new URL(response.url()).pathname === overviewPath)
+      const overviewPath = '/api/dashboard/locations'
       await open(page, `${services}/locations/${office!.slug}`)
-      const overviewResponse = await officeOverview
+      const overviewResponse = await page.request.get(overviewPath, { params: { org: seededTenant('legal').slug, view: 'editor', location_slug: office!.slug } })
       expect(overviewResponse.status(), await overviewResponse.text()).toBe(200)
       expect((await overviewResponse.json() as { catalog: CatalogCounts }).catalog).toEqual(countCatalog(officeProducts))
       const officeIndex = page.locator('#dashboard-panel-location-index')

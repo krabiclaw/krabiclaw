@@ -2,13 +2,14 @@
   <!-- Zaraz holds the choice in its consent cookie. Until a visitor chooses,
        its Google Analytics purpose stays off and its events stay queued. -->
   <div
-    v-if="visible"
+    :hidden="!preview"
+    data-public-consent
     role="region"
     :aria-label="t('legal.analytics_notice_label')"
     class="consent-notice"
   >
     <div class="consent-banner">
-      <button type="button" class="consent-close" aria-label="Close and accept cookies" @click="choose(true)">
+      <button type="button" class="consent-close" aria-label="Close and accept cookies" data-consent-value="true">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
       </button>
       <p class="consent-copy">
@@ -16,45 +17,21 @@
         <a :href="privacyUrl">{{ t('legal.analytics_notice_link') }}</a>.
       </p>
       <div class="consent-actions">
-        <button type="button" class="consent-choice consent-accept" @click="choose(true)">{{ t('legal.accept') }}</button>
-        <button type="button" class="consent-choice consent-reject" @click="choose(false)">{{ t('legal.reject') }}</button>
+        <button type="button" class="consent-choice consent-accept" data-consent-value="true">{{ t('legal.accept') }}</button>
+        <button type="button" class="consent-choice consent-reject" data-consent-value="false">{{ t('legal.reject') }}</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME } from '~/utils/zaraz-consent'
-
 const { t } = useI18n()
 const privacyUrl = new URL('/policies/privacy', useRuntimeConfig().public.siteUrl).href
-// Local visual preview uses the real banner without a Cloudflare consent runtime.
-const visible = ref(import.meta.dev && useRoute().query.previewConsent === 'true')
-
-function showNotice() {
-  const consent = window.zaraz?.consent
-  if (!consent?.APIReady) return
-  const answered = document.cookie.split('; ').some(cookie => cookie.startsWith(`${ZARAZ_CONSENT_COOKIE_NAME}=`))
-  if (answered) return
-  visible.value = true
-}
-
-function choose(accepted: boolean) {
-  const consent = window.zaraz?.consent
-  if (!consent?.APIReady) return
-  consent.set({ [ZARAZ_ANALYTICS_PURPOSE_ID]: accepted })
-  if (accepted) consent.sendQueuedEvents()
-  visible.value = false
-}
-
-onMounted(() => {
-  document.addEventListener('zarazConsentAPIReady', showNotice)
-  showNotice()
-})
-onBeforeUnmount(() => document.removeEventListener('zarazConsentAPIReady', showNotice))
+const preview = import.meta.dev && useRoute().query.previewConsent === 'true'
 </script>
 
 <style scoped>
+.consent-notice[hidden] { display: none; }
 .consent-notice { position: fixed; inset: auto 0 0; z-index: 40; padding: 12px; display: flex; justify-content: center; }
 .consent-banner { position: relative; display: flex; align-items: center; gap: 16px; width: 100%; max-width: 1024px; padding: 16px 52px 16px 20px; border: 1px solid var(--ui-border); border-radius: 16px; background: var(--ui-bg-elevated); color: var(--ui-text); box-shadow: 0 8px 32px #0003; font-size: 14px; }
 .consent-copy { flex: 1; min-width: 0; margin: 0; line-height: 1.5; }

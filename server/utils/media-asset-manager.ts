@@ -485,6 +485,24 @@ export async function hydrateMediaAssetRefs(
     fieldName?: string
   },
 ): Promise<ResolvedMediaAsset[]> {
+  if (!input.refs.length) return []
+  const query = mediaAssetRefsQuery(input.organizationId, input.refs.map(ref => ref.asset_id?.trim()).filter(Boolean))
+  return resolveMediaAssetRefs(await queryAll<MediaAsset>(db, query.query, query.params), input)
+}
+
+export function mediaAssetRefsQuery(organization: string | { sql: string }, ids: string[] | { sql: string }) {
+  return { query: `SELECT * FROM media_assets WHERE organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+    AND status = 'active' AND generation_key IS NULL
+    AND id IN (${Array.isArray(ids) ? 'SELECT value FROM json_each(?)' : ids.sql})`,
+    params: [...typeof organization === 'string' ? [organization] : [], ...Array.isArray(ids) ? [d1JsonStringSet(ids)] : []],
+  }
+}
+
+export function resolveMediaAssetRefs(rows: MediaAsset[], input: {
+  refs: MediaAssetRefInput[]
+  allowedKinds?: Array<ResolvedMediaAsset['kind']>
+  fieldName?: string
+}): ResolvedMediaAsset[] {
   const fieldName = input.fieldName ?? 'media'
   const ids = input.refs.map(ref => ref.asset_id?.trim()).filter(Boolean)
   if (input.refs.length > MAX_ORDERED_MEDIA_ASSETS) {
@@ -496,16 +514,7 @@ export async function hydrateMediaAssetRefs(
   if (new Set(ids).size !== ids.length) {
     throw new HTTPError({ statusCode: 400, statusMessage: `${fieldName} cannot contain duplicate asset IDs` })
   }
-  if (ids.length === 0) return []
 
-  const rows = await queryAll<MediaAsset>(
-    db,
-    `SELECT * FROM media_assets
-      WHERE organization_id = ?  AND status = 'active'
-        AND generation_key IS NULL
-        AND id IN (SELECT value FROM json_each(?))`,
-    [input.organizationId, d1JsonStringSet(ids)],
-  )
   const byId = new Map((rows ?? []).map(row => [row.id, row]))
   const missing = ids.find(id => !byId.has(id))
   if (missing) {
@@ -603,13 +612,12 @@ export async function getMediaAsset(db: DbClient, id: string, organizationId: st
   ) ?? null
 }
 
-export async function listMediaAssets(
-  db: DbClient,
-  organizationId: string,
-  opts: { kind?: string; search?: string; ownerType?: string; ownerId?: string; slot?: string; limit?: number; offset?: number } = {}
-): Promise<MediaAsset[]> {
-  const conditions = [`ma.organization_id = ?`, `ma.status = 'active'`, `ma.generation_key IS NULL`]
-  const params: SqlBindValue[] = [organizationId]
+export function listMediaAssetsQuery(
+  organizationId: string | { sql: string },
+  opts: { kind?: string; search?: string; ownerType?: string; ownerId?: string | { sql: string }; slot?: string; limit?: number; offset?: number } = {}
+): BatchQuery {
+  const conditions = [`ma.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}`,  `ma.status = 'active'`, `ma.generation_key IS NULL`]
+  const params: SqlBindValue[] = typeof organizationId === 'string' ? [organizationId] : []
   // A photo sent in a conversation is the conversation's, not the website's.
   if (opts.ownerType !== 'message') {
     conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type = 'message')`)
@@ -617,14 +625,13 @@ export async function listMediaAssets(
   if (opts.kind) { conditions.push(`ma.kind = ?`); params.push(opts.kind) }
   if (opts.search) { conditions.push(`ma.file_name LIKE ? ESCAPE '\\'`); params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`) }
   if (opts.ownerType && opts.ownerId) {
-    conditions.push('mp.owner_type = ?', 'mp.owner_id = ?', `mp.status = 'active'`)
-    params.push(opts.ownerType, opts.ownerId)
+    conditions.push('mp.owner_type = ?', `mp.owner_id = ${typeof opts.ownerId === 'string' ? '?' : opts.ownerId.sql}`, `mp.status = 'active'`)
+    params.push(opts.ownerType)
+    if (typeof opts.ownerId === 'string') params.push(opts.ownerId)
     if (opts.slot) { conditions.push('mp.slot = ?'); params.push(opts.slot) }
   }
   params.push(opts.limit ?? 50, opts.offset ?? 0)
-  const results = await queryAll<MediaAsset>(
-    db,
-    `SELECT ma.id, ma.organization_id, ma.kind, ma.provider, ma.source,
+  return { query: `SELECT ma.id, ma.organization_id, ma.kind, ma.provider, ma.source,
             ma.cloudflare_image_id, ma.r2_key,
             ma.public_url, ma.thumbnail_url, ma.mime_type, ma.file_name, ma.file_size,
             ma.width, ma.height, ma.duration, ma.alt_text, ma.category, ma.status, ma.created_by_user_id, ma.created_at, ma.updated_at
@@ -632,9 +639,12 @@ export async function listMediaAssets(
      FROM media_assets ma
      ${opts.ownerType && opts.ownerId ? 'JOIN media_placements mp ON mp.asset_id = ma.id AND mp.organization_id = ma.organization_id' : ''}
      WHERE ${conditions.join(' AND ')} ORDER BY ${opts.ownerType && opts.ownerId ? 'mp.sort_order' : 'ma.created_at DESC'} LIMIT ? OFFSET ?`
-    , params,
-  )
-  return results
+    , params }
+}
+
+export async function listMediaAssets(db: DbClient, organizationId: string, opts: Parameters<typeof listMediaAssetsQuery>[1] = {}): Promise<MediaAsset[]> {
+  const query = listMediaAssetsQuery(organizationId, opts)
+  return await queryAll<MediaAsset>(db, query.query, query.params)
 }
 
 export async function activateMediaAsset(

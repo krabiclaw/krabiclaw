@@ -5,11 +5,12 @@ import { dirname, resolve } from 'node:path'
 import { getIcons } from '@iconify/utils'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { DOCS_CATEGORY_ART } from './utils/docs-category-art'
-import { LEGACY_PLATFORM_THEME_STORAGE_KEY, PLATFORM_THEME_STORAGE_KEY } from './shared/platform-theme'
+import { LEGACY_PLATFORM_THEME_STORAGE_KEY, PLATFORM_THEME_STORAGE_KEY, readPlatformThemePreference } from './shared/platform-theme'
 import { ROBOTS_DISABLED_DIRECTIVE, ROBOTS_ENABLED_DIRECTIVE } from './shared/robots-directive'
-import { localizedPublicRouteAliases } from './build/localized-public-routes'
+import { localizedPublicRouteAliases, publicDocumentRouteRules } from './build/localized-public-routes'
 import { mountBookingRoutes, nodeAt } from './build/booking-routes'
 import { mountFormQuestionRoutes } from './build/form-question-routes'
+import { isDashboardPath } from './utils/dashboard-path'
 // One source for the entry -> public path map; patch.cjs rewrites the built
 // manifest from the same file, so a surface cannot be registered in one place
 // and missed in the other.
@@ -108,7 +109,7 @@ export default defineNuxtConfig({
       script: [
         {
           key: 'platform-theme-init',
-          innerHTML: `if(document.documentElement.dataset.theme!=='dark'){const p=localStorage.getItem('${PLATFORM_THEME_STORAGE_KEY}')??localStorage.getItem('${LEGACY_PLATFORM_THEME_STORAGE_KEY}')??'system';const d=p==='dark'||(p==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}`,
+          innerHTML: `if(document.documentElement.dataset.theme!=='dark'){const p=(${readPlatformThemePreference.toString()})(localStorage,'${PLATFORM_THEME_STORAGE_KEY}','${LEGACY_PLATFORM_THEME_STORAGE_KEY}')??'system';const d=p==='dark'||(p==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}`,
         },
       ],
       link: [
@@ -238,6 +239,40 @@ export default defineNuxtConfig({
         chunk.assets = assets
       }
       if (!removed) throw new Error('Japanese font slices are no longer chunk assets; remove this build:manifest hook')
+    },
+    'app:templates'(app) {
+      app.templates.push({
+        filename: 'public-document-script.mjs',
+        write: true,
+        getContents: async () => {
+          const { build } = await import('vite')
+          const [result] = [await build({
+            configFile: false,
+            logLevel: 'error',
+            build: {
+              write: false,
+              lib: {
+                entry: resolve(import.meta.dirname, 'utils/public-document-entry.ts'),
+                formats: ['iife'],
+                name: 'PublicDocument',
+              },
+            },
+          })].flat()
+          if (!result || !('output' in result)) throw new Error('Expected one public document script')
+          const script = result.output.find(chunk => chunk.type === 'chunk')
+          if (!script || script.type !== 'chunk') throw new Error('Public document script was not built')
+          return `export default ${JSON.stringify(script.code.replace(/<\/script/gi, '<\\/script'))}\n`
+        },
+      })
+      const routes = app.templates.find(template => template.filename === 'routes.mjs')
+      if (!routes?.getContents) throw new Error('Nuxt route template is unavailable')
+      const render = routes.getContents
+      const forSurface = (dashboard: boolean): typeof render => context => render({
+        ...context,
+        app: { ...context.app, pages: context.app.pages?.filter(page => isDashboardPath(page.path) === dashboard) },
+      })
+      app.templates.push({ ...routes, filename: 'dashboard-routes.mjs', dst: undefined, write: true, getContents: forSurface(true) })
+      routes.getContents = forSurface(false)
     },
     'pages:extend'(pages) {
       pages.push(...localizedPublicRouteAliases(pages))
@@ -429,6 +464,7 @@ export default defineNuxtConfig({
         `/platform/docs/categories/${file.replace(/^blawby-/, 'krabiclaw-')}${suffix}.png`,
         { redirect: { to: `/platform/docs/categories/${file}${suffix}.png`, status: 301 } },
       ]))),
+    ...publicDocumentRouteRules,
     // Versioned static assets — immutable forever
     '/assets/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
     '/_nuxt/**':  { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
@@ -449,7 +485,7 @@ export default defineNuxtConfig({
     '/api/**':       { headers: { 'cache-control': 'no-store' } },
     // Native client-only components own the CMS rendering boundary; Nuxt still
     // renders the app shell and transports the host's public identity normally.
-    '/dashboard/**': { headers: { 'cache-control': 'no-store' } },
+    '/dashboard/**': { headers: { 'cache-control': 'no-store' }, appMiddleware: 'dashboard-context' },
     '/auth/**':      { headers: { 'cache-control': 'no-store' } },
     '/signup':       { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },
     '/login':        { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },

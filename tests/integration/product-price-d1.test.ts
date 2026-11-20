@@ -12,6 +12,7 @@ import {
   listLocationProducts,
   listOrganizationProducts,
   productBookingReadiness,
+  preparePublicExperiences,
   reconcileProducts,
   reorderCollections,
   resolveVariantPrice,
@@ -22,10 +23,11 @@ import {
   updateProduct,
   updateMenu,
 } from '../../server/utils/product-management.ts'
+import { executeBatch } from '../../server/db/index.ts'
 import { AmbiguousPriceError } from '../../shared/prices.ts'
 import { groupProductsByCollection } from '../../utils/product-presentation.ts'
 import { CapacityUnavailableError, claimSessionCapacity, getScheduleSession, sessionMoveQuery, setProductBookingConfig } from '../../server/utils/availability.ts'
-import { loadPublicSiteProductDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
+import { loadPublicSiteProductDetail, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
 import { readPublicProductAvailability } from '../../server/utils/public-session-booking.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { applySchema } from './support/schema.ts'
@@ -77,7 +79,10 @@ test('public experiences require a configured booking flow and retain full or te
     await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, created_by, updated_by) VALUES (?, ?, 'slot', 60, 8, 'business', 'actor-member', ?, ?)`)
       .bind(legacy.id, ORG, ACTOR.actorId, ACTOR.actorId).run()
     await db.prepare('UPDATE product_publications SET published = 1 WHERE organization_id = ? AND product_id = ?').bind(ORG, legacy.id).run()
-    const visible = async () => (await loadPublicProductCollection(db, ORG, 'experiences', false, undefined, env))!.products.map(product => product.id)
+    const visible = async () => {
+      const plan = preparePublicExperiences(ORG)
+      return (await plan.read(await executeBatch(db, plan.queries), db, env, ORG, 'THB')).map(product => product.id)
+    }
     assert.deepEqual(await productBookingReadiness(db, ORG, await getProduct(db, ORG, legacy.id), { env }), { ready: false, missing: ['booking.schedule'] })
     assert.deepEqual(await visible(), [])
     assert.deepEqual(await listOrganizationProducts(db, { organizationId: ORG, publishedOnly: true, kind: 'experience', window: { limit: 1, offset: 0 }, env }), [])

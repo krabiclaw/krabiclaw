@@ -1,3 +1,4 @@
+import { postPublicInteraction } from '~/utils/browser-pageview'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
 import { automatedBrowser, pageEventIdFor, whenLeaving } from '~/utils/pageview-tracking-runtime.client'
 import type { ConversionValue, OrganizationConversionEventName } from '~/utils/organization-conversion-events'
@@ -15,22 +16,6 @@ interface ConversionPayload {
   tier_label?: string | null
   tier_amount?: number | null
   phone?: string | null
-}
-
-// The native record is the primary one and does not depend on Google Analytics, consent, or a GA
-// client. Each interaction carries its own identity (the same one delivered twice is one event) and
-// the pageview it happened on, which the collector believes only when it recorded that pageview
-// for this visitor. A collection that fails is reported through the application's error hook,
-// never silently dropped and never allowed to break the page.
-async function postNativeInteraction(payload: ConversionPayload & { event_id: string; occurred_at: string; page_event_id: string | null; variant_id?: string | null }) {
-  const response = await fetch(`/api/public/conversion-events`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-    keepalive: true,
-  })
-  if (!response.ok) throw new Error(`Native analytics collection was rejected (${response.status})`)
-  return await response.json() as { ignored?: boolean }
 }
 
 /** A submission's measurement as the server reports it beside the committed result. */
@@ -75,7 +60,7 @@ export function useOrganizationConversionTracking() {
     const captured = { ...payload, event_id: crypto.randomUUID(), occurred_at: new Date().toISOString(), ...(variantId ? { variant_id: variantId } : {}) }
     const path = window.location.pathname
     return Promise.race([pageEventIdFor(path), whenLeaving()])
-      .then(pageEventId => postNativeInteraction({ ...captured, page_event_id: pageEventId }))
+      .then(pageEventId => postPublicInteraction({ ...captured, page_event_id: pageEventId }))
       .then(result => result.ignored ? null : captured.event_id)
       .catch(async (error) => {
         await nuxtApp.callHook('vue:error', error, null, 'analytics-interaction')

@@ -1,5 +1,6 @@
 import type { FormQuestion } from '~/shared/form-questions'
-import { isRecord, publicApiRequest } from '~/utils/api-clients'
+import { isRecord } from '~/utils/api-clients'
+import { loadPublicResourcePayload } from '~/composables/loadPublicResourcePayload'
 
 export interface PublicInquiryForm {
   success: true
@@ -24,19 +25,11 @@ export async function useInquiryForm() {
   const { locale } = useI18n()
   const requestEvent = useRequestEvent()
   const key = computed(() => `inquiry-form-${organizationId}-${locale.value}`)
-  const { data, error, refresh } = await useAsyncData(key, async () => {
-    if (import.meta.server) {
-      if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
-      const [{ cloudflareEnv }, { readPublicInquiryForm }] = await Promise.all([
-        import('~/server/utils/api-response'),
-        import('~/server/domain/form-questions'),
-      ])
-      const db = cloudflareEnv(requestEvent).db
-      if (!db) throw createError({ statusCode: 503, statusMessage: 'Database not available' })
-      return { success: true as const, ...await readPublicInquiryForm(db, organizationId, locale.value) }
-    }
-    return publicApiRequest<PublicInquiryForm>('/api/public/inquiry-form', { query: { locale: locale.value }, validate: isInquiryForm, coalesceKey: key.value })
-  }, { server: true, lazy: false })
+  const { data, error, refresh } = await useAsyncData(key, (_nuxtApp, { signal }) =>
+    loadPublicResourcePayload({
+      organizationId, resourceKind: 'inquiry', url: `/api/public/inquiry-form?locale=${encodeURIComponent(locale.value)}`,
+      key: key.value, query: { locale: locale.value }, validate: isInquiryForm, failureMessage: 'Inquiry form failed', signal, requestEvent,
+    }), { dedupe: 'defer' })
   if (error.value) throw error.value
   return { form: data, refresh }
 }

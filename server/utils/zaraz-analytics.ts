@@ -1,7 +1,18 @@
 import { execute, queryAll, queryFirst } from '~/server/db'
 import { isPlatformSite } from '~/utils/site-routing'
 import { customHostnameZone, type DomainEnv } from '~/server/utils/domains'
-import { LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT, NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME, zarazConsentModalIntroHtml } from '~/utils/zaraz-consent'
+import { LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT, NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME } from '~/utils/zaraz-consent'
+import english from '~/i18n/locales/en'
+
+const ZARAZ_ANALYTICS_PURPOSE = {
+  name: 'Google Analytics',
+  description: `${english.legal.analytics_notice} ${english.legal.analytics_notice_link}.`,
+}
+
+function zarazConsentModalIntroHtml(platformOrigin: string) {
+  const privacyUrl = new URL('/policies/privacy', platformOrigin)
+  return `${english.legal.analytics_notice} <a href="${privacyUrl.href}">${english.legal.analytics_notice_link}</a>.`
+}
 
 export interface ZarazEnv extends DomainEnv {
   CLOUDFLARE_API_TOKEN?: string

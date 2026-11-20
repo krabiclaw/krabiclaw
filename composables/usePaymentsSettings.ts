@@ -49,13 +49,12 @@ const isHomesQuote = (value: unknown): value is HomesQuote =>
  * check also answers by: `adding` is how many are about to go live, 0 for the
  * cost of the live homes now. Read only while `enabled`.
  */
-export function useHomesQuote(organizationId: string, adding: MaybeRefOrGetter<number>, enabled: MaybeRefOrGetter<boolean> = true) {
+export function useHomesQuote(organizationId: string, adding: MaybeRefOrGetter<number>, enabled: MaybeRefOrGetter<boolean> = true, options: { document?: boolean } = {}) {
   const dashboardApi = useDashboardApi()
-  const { data, error, status, refresh } = useAsyncData(
-    () => `homes-quote:${organizationId}:${toValue(adding)}:${toValue(enabled)}`,
-    () => dashboardApi(`/api/organizations/${encodeURIComponent(organizationId)}/billing/homes`, { query: { adding: String(toValue(adding)) }, validate: isHomesQuote }),
-    { server: false, lazy: true, enabled },
-  )
+  const key = () => `homes-quote:${organizationId}:${toValue(adding)}:${toValue(enabled)}`
+  const read = () => dashboardApi(`/api/organizations/${encodeURIComponent(organizationId)}/billing/homes`, { query: { adding: String(toValue(adding)) }, validate: isHomesQuote })
+  const settings = { server: options.document === true, lazy: true, enabled }
+  const { data, error, status, refresh } = options.document ? useWebsiteIndexData(key, read, settings) : useAsyncData(key, read, settings)
   const pending = computed(() => toValue(enabled) && (status.value === 'idle' || status.value === 'pending'))
   return { quote: data, quoteError: error, quotePending: pending, refreshQuote: refresh }
 }

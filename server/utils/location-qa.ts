@@ -7,6 +7,7 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
 import { d1JsonStringSet, d1JsonValue } from '../db/d1-limits.ts'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import type { AuthUserIdentity } from '~/server/utils/auth'
+import { BATCH_VIEWER, locationAccessSql } from '~/server/utils/member-access'
 
 export interface QaScope {
   organizationId: string
@@ -108,37 +109,77 @@ function normalizeQaInput(input: UpdateQaInput, creating = false) {
   return normalized
 }
 
+export function qaPageScopesQuery(organization: string | { sql: string }): BatchQuery {
+  return { query: `
+    SELECT DISTINCT scope_path AS page_path FROM content_documents
+    WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+      AND location_id IS NULL AND scope_path IS NOT NULL ORDER BY page_path ASC
+  `, params: typeof organization === 'string' ? [organization] : [] }
+}
+
 export function listQaPageScopes(db: DbClient, organizationId: string) {
-  return queryAll<{ page_path: string }>(db, `
-    SELECT DISTINCT scope_path AS page_path
-    FROM content_documents
-    WHERE kind = 'qa' AND row_role = 'root' AND organization_id = ? AND location_id IS NULL AND scope_path IS NOT NULL
-    ORDER BY page_path ASC
-  `, [organizationId])
+  const { query, params } = qaPageScopesQuery(organizationId)
+  return queryAll<{ page_path: string }>(db, query, params)
 }
 
 /**
  * `qaId` addresses one record whatever its scope. A dashboard record has a URL
  * of its own — `/qa/<id>` — and cannot know the page it was filed under before
  * it has read it, so an id lookup replaces the scope clause rather than
- * narrowing it. Without an id this behaves exactly as before.
+ * narrowing it. The location, or whole-site scope, still applies.
  */
 export async function listQa(db: DbClient, organizationId: string, locationId: string | null, publishedOnly = false, pagePath?: string | null, locale?: string, qaId?: string | null) {
   locale ??= (await getPersistedSourceLocale(db, organizationId)).locale
+  const { query, params } = qaListQuery(organizationId, locationId, locale, publishedOnly, pagePath, qaId)
+  return queryAll<QaDocument>(db, query, params)
+}
+
+export function qaListQuery(organizationId: string | { sql: string }, locationId: string | null, locale: string | { sql: string }, publishedOnly = false, pagePath?: string | { sql: string } | null, qaId?: string | null): BatchQuery {
   const scope = qaId
-    ? { clause: 'root.id = ?', params: [qaId] as unknown[] }
-    : scopeSql(locationId, pagePath)
-  return queryAll<QaDocument>(db, `
+    ? { clause: locationId ? 'root.id = ? AND location_id = ?' : 'root.id = ? AND location_id IS NULL',
+      params: locationId ? [qaId, locationId] : [qaId] }
+    : pagePath && typeof pagePath === 'object'
+      ? { clause: `root.location_id IS NULL AND root.scope_path = ${pagePath.sql}`, params: [] }
+      : scopeSql(locationId, pagePath)
+  const filter = pagePath && typeof pagePath === 'object' ? scope.clause
+    : scope.clause.replace(/\b(location_id|scope_path)\b/g, 'root.$1')
+  return { query: `
     SELECT p.id, p.organization_id, root.location_id, root.scope_path AS page_path,
       p.title AS question, p.summary AS answer, (root.metadata_json ->> '$.question_author') AS question_author,
       (root.metadata_json ->> '$.question_date') AS question_date, (root.metadata_json ->> '$.answer_author') AS answer_author,
       (root.metadata_json ->> '$.answer_date') AS answer_date, (root.metadata_json ->> '$.is_owner_answer') AS is_owner_answer,
       (root.metadata_json ->> '$.upvote_count') AS upvote_count, root.source, root.status, root.sort_order, p.created_at, p.updated_at
-    FROM content_documents root JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
-    WHERE root.row_role = 'root' AND root.kind = 'qa' AND root.organization_id = ?
-      AND ${scope.clause.replace(/\b(location_id|scope_path)\b/g, 'root.$1')}${publishedOnly ? " AND root.status = 'published'" : ''}
+    FROM content_documents root JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ${typeof locale === 'string' ? '?' : locale.sql}
+    WHERE root.row_role = 'root' AND root.kind = 'qa' AND root.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}
+      AND ${filter}${publishedOnly ? " AND root.status = 'published'" : ''}
     ORDER BY root.sort_order, is_owner_answer DESC, upvote_count DESC, p.created_at
-  `, [locale, organizationId, ...scope.params])
+  `, params: [...(typeof locale === 'string' ? [locale] : []), ...(typeof organizationId === 'string' ? [organizationId] : []), ...scope.params] }
+}
+
+export function prepareDashboardQa(locationId: string | null, query: Record<string, unknown>) {
+  const organization = { sql: BATCH_VIEWER.organization }
+  const qaId = typeof query.id === 'string' ? query.id : null
+  const path = locationId === null && typeof query.page_path === 'string' ? query.page_path : null
+  const includeScopes = locationId === null && query.scopes === '1'
+  const queries = [
+    ...(locationId === null ? [] : [{
+      query: `SELECT bl.id FROM business_locations bl
+        WHERE bl.organization_id = ${organization.sql} AND bl.id = ? AND ${locationAccessSql(BATCH_VIEWER, 'bl')}`,
+      params: [locationId],
+    }]),
+    qaListQuery(organization, locationId, { sql: 'root.locale' }, false, path, qaId),
+    ...(includeScopes ? [qaPageScopesQuery(organization)] : []),
+  ]
+  return {
+    queries,
+    read(results: D1Result[]) {
+      if (locationId !== null && !results[0]!.results.length) {
+        throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found or access denied' })
+      }
+      const [list, scopes] = locationId === null ? results : results.slice(1)
+      return { qa: list!.results, ...(includeScopes ? { page_scopes: scopes!.results } : {}) }
+    },
+  }
 }
 
 export function faqBlockSource(block: { type: string; data: Record<string, unknown> }): FaqBlockSource | null {
@@ -225,49 +266,44 @@ export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInpu
       params: [scope.organizationId, ...scoped.params, id, id],
     }] : [])],
   })
-  await executeBatch(db, [...prepared.queries,
+  const saved = await executeBatch(db, [...prepared.queries,
     organizationEventQuery({ organizationId: scope.organizationId, locationId: scope.locationId, actorId,
       eventType: 'content.updated', entityType: 'qa', entityId: id,
       afterState: { updated_at: prepared.document.updated_at, status },
       metadata: { operation: 'created', changed_fields: ['question', ...(answer ? ['answer'] : []), 'status'], evidence_basis: 'persisted_change', page_path: pagePath } }),
-    publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-create')])
-  const inserted = await queryFirst<{ sort_order: number }>(db, 'SELECT sort_order FROM content_documents WHERE id = ?', [id])
-  if (!inserted) throw new Error('Created Q&A document was not found')
-  const sortOrder = inserted.sort_order
+    publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-create'),
+    qaListQuery(scope.organizationId, scope.locationId, { sql: 'root.locale' }, false, null, id)])
+  const document = saved.at(-1)?.results[0] as QaDocument | undefined
+  if (!document) throw new Error('Created Q&A document was not found')
+  return { status: 201, data: { ...document, created: true } }
+}
 
+type QaEditRow = { id: string; organization_id: string; location_id: string | null; scope_path: string | null;
+  title: string; summary: string | null; status: string; sort_order: number; metadata_json: string; updated_at: string }
+
+export function qaEditQuery(organization: string | { sql: string }, qaId: string, locationId: string | null, pagePath?: string | null): BatchQuery {
+  const scoped = scopeSql(locationId, pagePath)
   return {
-    status: 201,
-    data: {
-      id,
-      question,
-      answer,
-      location_id: scope.locationId,
-      page_path: pagePath,
-      status,
-      sort_order: sortOrder,
-      // A newly created question has no votes yet, and it is the tenant's own.
-      // Both are stated rather than omitted: this is the same row shape the
-      // list returns and the CMS validates it as one, so a missing `source`
-      // failed that check and no question could be created at all.
-      upvote_count: 0,
-      source: 'manual',
-      created: true,
-    },
+    query: `SELECT id, organization_id, location_id, scope_path, title, summary, status, sort_order, metadata_json, updated_at
+      FROM content_documents WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual'
+        AND id = ? AND organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND ${scoped.clause}`,
+    params: [qaId, ...(typeof organization === 'string' ? [organization] : []), ...scoped.params],
   }
 }
 
-export async function updateQa(db: DbClient, scope: QaScope, qaId: string, input: UpdateQaInput, actor: AuthUserIdentity | null) {
-  await assertQaScope(db, scope)
+export async function updateQa(db: DbClient, scope: QaScope, qaId: string, input: UpdateQaInput, actor: AuthUserIdentity | null, snapshot?: QaEditRow) {
+  if (!snapshot) await assertQaScope(db, scope)
   const updates = normalizeQaInput(input)
   if (actor !== null && (!actor || typeof actor.id !== 'string' || !actor.id.trim() || typeof actor.name !== 'string')) badQaInput('actor must be the authenticated identity or explicitly null')
   const actorId = actor?.id ?? null
   const actorName = actor?.name ?? null
   const scoped = scopeSql(scope.locationId, scope.pagePath)
-  const current = await queryFirst<{ title: string; summary: string | null; status: string; sort_order: number; metadata_json: string; updated_at: string }>(db,
-    `SELECT title, summary, status, sort_order, metadata_json, updated_at FROM content_documents
-      WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND id = ? AND organization_id = ? AND ${scoped.clause}`,
-    [qaId, scope.organizationId, ...scoped.params])
-  if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Q&A not found' })
+  const read = qaEditQuery(scope.organizationId, qaId, scope.locationId, scope.pagePath)
+  const current = snapshot ?? await queryFirst<QaEditRow>(db, read.query, read.params)
+  if (!current || current.id !== qaId || current.organization_id !== scope.organizationId
+    || current.location_id !== scope.locationId || current.scope_path !== (scope.locationId ? null : normalizePagePath(scope.pagePath))) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Q&A not found' })
+  }
   const fields = ['question', 'answer', 'question_author', 'is_owner_answer', 'status', 'sort_order'] as const
   if (!fields.some(field => updates[field] !== undefined)) badQaInput('No update fields provided')
   const metadata = JSON.parse(current.metadata_json) as Record<string, unknown>
@@ -293,7 +329,7 @@ export async function updateQa(db: DbClient, scope: QaScope, qaId: string, input
     sets.push('metadata_json = ?')
     params.push(JSON.stringify(metadata))
   }
-  const [result] = await executeBatch(db, [{
+  const [result, , , saved] = await executeBatch(db, [{
     query: `UPDATE content_documents SET ${sets.join(', ')}
       WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND id = ? AND organization_id = ? AND ${scoped.clause} AND updated_at = ?`,
     params: [...params, qaId, scope.organizationId, ...scoped.params, current.updated_at],
@@ -301,9 +337,12 @@ export async function updateQa(db: DbClient, scope: QaScope, qaId: string, input
     eventType: 'content.updated', entityType: 'qa', entityId: qaId,
     beforeState: { updated_at: current.updated_at, status: current.status }, afterState: { updated_at: now, status: updates.status ?? current.status },
     metadata: { changed_fields: changedFields, evidence_basis: 'persisted_change', page_path: normalizePagePath(scope.pagePath) }, onlyIfPreviousChangedOneRow: true }),
-  publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-update')])
+  publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-update', { query: 'changes() = 1', params: [] }),
+  qaListQuery(scope.organizationId, scope.locationId, { sql: 'root.locale' }, false, null, qaId)])
   if (Number(result?.meta.changes ?? 0) !== 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Q&A changed concurrently. Reload and try again.' })
-  return { updated: true, qa_id: qaId }
+  const document = saved!.results[0] as QaDocument | undefined
+  if (!document) throw new Error('Saved Q&A document was not found')
+  return { updated: true, qa_id: qaId, qa: document }
 }
 
 export async function deleteQa(db: DbClient, scope: QaScope, qaId: string) {
