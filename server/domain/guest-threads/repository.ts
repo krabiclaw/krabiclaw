@@ -216,7 +216,8 @@ function conversationListQuery(organizationId: string | null, opts: ListGuestThr
     )
     SELECT listed.*, e.author_kind AS latest_author_kind, e.author_user_id AS latest_author_user_id,
       -- A host message typed on Airbnb names its sender in the provider's meta.
-      COALESCE(u.name, CASE WHEN e.event_name = '${MIRRORED_EVENT}' THEN json_extract(e.payload_json, '$.meta.name') END) AS latest_actor_name,
+      COALESCE(u.name, CASE WHEN e.event_name = '${MIRRORED_EVENT}' AND json_type(e.payload_json, '$.meta.name') = 'text'
+        THEN NULLIF(trim(json_extract(e.payload_json, '$.meta.name')), '') END) AS latest_actor_name,
       e.event_name AS latest_event_name, e.body AS latest_body,
       json_extract(e.payload_json, '$.provider_inserted_at') AS latest_provider_inserted_at, e.occurred_at AS latest_occurred_at,
       (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS latest_photos,
@@ -297,7 +298,7 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
     return firstName(message.actorName)
   }
   // Typed on Airbnb by whoever hosts there; older mirrors carry no sender name.
-  if (message.authorKind === 'member' && message.eventName === MIRRORED_EVENT) return message.actorName ? firstName(message.actorName) : context.business
+  if (message.authorKind === 'member' && message.eventName === MIRRORED_EVENT) return message.actorName ?? context.business
   return isPlatformMessageAuthor(message.authorKind) ? 'Blawby' : 'Deleted account'
 }
 
