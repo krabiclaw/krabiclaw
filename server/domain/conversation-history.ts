@@ -164,6 +164,9 @@ function presentEntries(
     const projected = presentMessage(message, history, { author, viewerRole: role, guestName, authorUserId, side, sentAt, body,
       automatic, showAlerts: conversation.kind === 'team', unshownFiles })
     projected.job = isPlatformMessageAuthor(message.author_kind) && typeof payload.key === 'string' && payload.key.startsWith('job:')
+    if (projected.job) {
+      projected.job_status = message.job_status ?? null
+    }
     if (side === 'business') {
       if (newestBusiness && newestBusiness.receipt !== 'Not delivered') newestBusiness.receipt = null
       newestBusiness = projected
