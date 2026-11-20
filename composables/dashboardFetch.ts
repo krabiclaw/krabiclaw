@@ -1,4 +1,4 @@
-import { dashboardProductId, rendersProductArrival, rendersProductCreation, rendersCatalogEditor, rendersWebsiteDocument, websiteBlogPost, websiteSocialPost } from '~/utils/dashboard-document'
+import { dashboardProductId, rendersProductArrival, rendersProductCreation, rendersStayHomeSetup, rendersCatalogEditor, rendersWebsiteDocument, websiteBlogPost, websiteSocialPost } from '~/utils/dashboard-document'
 import type { FetchOptions } from 'ofetch'
 import type { MaybeRefOrGetter } from 'vue'
 import { $fetch } from 'ofetch'
@@ -92,7 +92,10 @@ export async function dashboardFetch<T>(
     const panel = url.pathname.replace(/^\/dashboard\/[^/]+/, '')
     return websiteSocialPost(panel) && rendersWebsiteDocument(panel, Object.fromEntries(url.searchParams))
   })()
-  if (import.meta.server && (!options.method || options.method === 'GET') && (
+  const homeSetupDocument = import.meta.server && request === '/api/dashboard/stay-homes/setup' && options.method === 'POST'
+    && options.body !== null && typeof options.body === 'object' && Object.keys(options.body).length === 0
+    && rendersStayHomeSetup(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''), Object.fromEntries(useRequestURL().searchParams))
+  if (import.meta.server && (homeSetupDocument || (!options.method || options.method === 'GET') && (
     (/^\/api\/editor\/organizations\/[^/]+\/(?:locations\/[^/]+\/)?products\/[^/]+(?:\/availability)?$/.test(request)
       && Boolean(dashboardProductId(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
     || (/^\/api\/editor\/organizations\/[^/]+\/products$/.test(request) && options.query?.include === 'collections' && rendersCatalogEditor(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, '')))
@@ -113,7 +116,7 @@ export async function dashboardFetch<T>(
     || (postDocument && (request === '/api/integrations/social-connections' || request === '/api/dashboard/locations' && options.query?.organization === 'true'
       || /^\/api\/editor\/organizations\/[^/]+\/posts\/[^/]+$/.test(request)))
     || request === '/api/dashboard/integrations/google-calendar'
-  )) {
+  ))) {
     const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
       read: (orgSlug: string, resource: string, query: Record<string, unknown>) => Promise<unknown>
     } | undefined

@@ -33,6 +33,14 @@ export default defineHandler(event => {
         }
 
         switch (resource) {
+          case '/api/dashboard/stay-homes/setup': {
+            const { env, organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
+            const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
+            if (!access.manage) throw new HTTPError({ statusCode: 403, message: 'Only managers can add a home' })
+            const setup = event.context.dashboardHomeSetup as { organization_id: string; read: () => unknown } | undefined
+            if (setup?.organization_id !== organization.id) throw new HTTPError({ statusCode: 404, message: 'Home setup was not read for this document' })
+            return setup.read()
+          }
           case '/api/dashboard/agenda':
             return readDashboardAgenda(event, query, orgSlug)
           case '/api/dashboard/bookings/calendar':

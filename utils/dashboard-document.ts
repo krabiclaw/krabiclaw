@@ -37,8 +37,8 @@ export function dashboardProductId(panel: string) {
   return segment && !['new', 'menu', 'first-menu', 'first-experience'].includes(segment) ? decodeURIComponent(segment) : null
 }
 
-export function rendersProductCreation(panel: string, query: Record<string, unknown>) {
-  return /^\/products\/new(?:\/|$)/.test(panel) && !(query.kind === 'stay' && query.setup === 'guided')
+export function rendersProductCreation(panel: string, _query: Record<string, unknown>) {
+  return /^\/products\/new(?:\/|$)/.test(panel)
 }
 
 export function rendersCatalogEditor(panel: string) {
@@ -57,4 +57,8 @@ export function rendersProductArrival(panel: string, query: Record<string, unkno
 /** Independent record editors own their reads; the hidden Website index does not. */
 export function needsWebsiteSettings(panel: string) {
   return !/^\/website\/(?:(?:posts|reviews)\/[^/]+|blog\/categories)(?:\/|$)/.test(panel)
+}
+
+export function rendersStayHomeSetup(panel: string, query: Record<string, unknown>) {
+  return rendersProductCreation(panel, query) && query.kind === 'stay' && query.setup === 'guided'
 }

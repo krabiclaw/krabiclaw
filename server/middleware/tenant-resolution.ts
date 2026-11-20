@@ -1,3 +1,4 @@
+import { prepareStayHomeSetup } from '~/server/utils/stay-home-setup-draft'
 import { prepareEditorCatalog } from '~/server/utils/product-management'
 import { prepareHomesQuote } from '~/server/utils/billing'
 import { prepareStayHomeDocument } from '~/server/domain/stays'
@@ -57,7 +58,7 @@ import { prepareSocialConnections, presentSocialConnections } from '~/server/uti
 import { preparePost, preparePostList } from '~/server/utils/post-management'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { prepareDashboardQa } from '~/server/utils/location-qa'
-import { dashboardLocationSlug, dashboardProductId, rendersProductArrival, rendersProductCreation, rendersCatalogEditor, needsWebsiteSettings, rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteQuestion, websiteSocialPost } from '~/utils/dashboard-document'
+import { dashboardLocationSlug, dashboardProductId, rendersProductArrival, rendersProductCreation, rendersStayHomeSetup, rendersCatalogEditor, needsWebsiteSettings, rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteQuestion, websiteSocialPost } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -445,7 +446,8 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   const locationSlug = dashboardLocationSlug(panel)
   const location = locationSlug ? prepareDashboardLocationOverview({ slug: locationSlug }, /^\/locations\/[^/]+\/photos\/?$/.test(panel)) : null
   const productCreation = rendersProductCreation(panel, query)
-  const locationList = menuDocument || productCreation || /^\/locations(?:\/[^/]+)?\/?$/.test(panel) ? prepareOrganizationLocations(BATCH_VIEWER, productCreation || menuDocument) : null
+  const homeSetup = rendersStayHomeSetup(panel, query) ? prepareStayHomeSetup(BATCH_VIEWER) : null
+  const locationList = menuDocument || productCreation && !homeSetup || /^\/locations(?:\/[^/]+)?\/?$/.test(panel) ? prepareOrganizationLocations(BATCH_VIEWER, productCreation || menuDocument) : null
   const bookingId = /^\/bookings\/([^/]+)$/.exec(panel)?.[1]
   const booking = bookingId && bookingId !== 'new' ? prepareDashboardBookingRead(membership, bookingId) : null
   const calendar = /^\/calendar(?:\/|$)/.test(panel)
@@ -480,6 +482,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(product?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(arrival?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(homeQuote?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(homeSetup?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(booking?.queries ?? []),
     ...(calendar ? [calendar, ...agenda?.queries ?? []] : []),
     ...(earnings?.queries ?? []),
@@ -540,6 +543,7 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
         organization_id: organization.id, product_id: productId, read: () => arrival.read(panelRows.slice(product.queries.length, product.queries.length + arrival.queries.length)),
       }
     }
+    if (homeSetup) event.context.dashboardHomeSetup = { organization_id: organization.id, read: () => homeSetup.read(panelRows.slice(0, homeSetup.queries.length)) }
     if (booking && bookingId) await readDashboardBookingDocument(event, { orgSlug: slug, bookingId }, [viewerResult!, ...panelRows])
     if (calendar) {
       event.context.dashboardCalendarPresence = { slug, has_places: (panelRows[0]!.results[0] as { has_places: number }).has_places === 1 }

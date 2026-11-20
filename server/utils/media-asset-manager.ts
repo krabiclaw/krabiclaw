@@ -485,6 +485,24 @@ export async function hydrateMediaAssetRefs(
     fieldName?: string
   },
 ): Promise<ResolvedMediaAsset[]> {
+  if (!input.refs.length) return []
+  const query = mediaAssetRefsQuery(input.organizationId, input.refs.map(ref => ref.asset_id?.trim()).filter(Boolean))
+  return resolveMediaAssetRefs(await queryAll<MediaAsset>(db, query.query, query.params), input)
+}
+
+export function mediaAssetRefsQuery(organization: string | { sql: string }, ids: string[] | { sql: string }) {
+  return { query: `SELECT * FROM media_assets WHERE organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+    AND status = 'active' AND generation_key IS NULL
+    AND id IN (${Array.isArray(ids) ? 'SELECT value FROM json_each(?)' : ids.sql})`,
+    params: [...typeof organization === 'string' ? [organization] : [], ...Array.isArray(ids) ? [d1JsonStringSet(ids)] : []],
+  }
+}
+
+export function resolveMediaAssetRefs(rows: MediaAsset[], input: {
+  refs: MediaAssetRefInput[]
+  allowedKinds?: Array<ResolvedMediaAsset['kind']>
+  fieldName?: string
+}): ResolvedMediaAsset[] {
   const fieldName = input.fieldName ?? 'media'
   const ids = input.refs.map(ref => ref.asset_id?.trim()).filter(Boolean)
   if (input.refs.length > MAX_ORDERED_MEDIA_ASSETS) {
@@ -496,16 +514,7 @@ export async function hydrateMediaAssetRefs(
   if (new Set(ids).size !== ids.length) {
     throw new HTTPError({ statusCode: 400, statusMessage: `${fieldName} cannot contain duplicate asset IDs` })
   }
-  if (ids.length === 0) return []
 
-  const rows = await queryAll<MediaAsset>(
-    db,
-    `SELECT * FROM media_assets
-      WHERE organization_id = ?  AND status = 'active'
-        AND generation_key IS NULL
-        AND id IN (SELECT value FROM json_each(?))`,
-    [input.organizationId, d1JsonStringSet(ids)],
-  )
   const byId = new Map((rows ?? []).map(row => [row.id, row]))
   const missing = ids.find(id => !byId.has(id))
   if (missing) {

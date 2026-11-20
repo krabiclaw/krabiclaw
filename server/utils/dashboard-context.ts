@@ -227,7 +227,7 @@ async function dashboardSessionContext(event: H3Event) {
   return { env, db, session, userId: session.user.id }
 }
 
-function dashboardOrganizationRequired() {
+export function dashboardOrganizationRequired() {
   return new HTTPError({ statusCode: 400, message: 'Organization context is required. Use /dashboard/{orgSlug} routes.',
     data: { code: 'ORGANIZATION_REQUIRED', field: 'org' } })
 }
