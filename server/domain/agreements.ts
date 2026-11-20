@@ -164,9 +164,12 @@ function payload(record: Pick<MessageRow, 'payload_json'>): unknown {
   return JSON.parse(record.payload_json)
 }
 
-function viewerSigns(signer: { key: string }, viewer: AgreementViewer | null): boolean {
+function viewerSigns(signer: { key: string }, viewer: AgreementViewer | null, signers?: SignerRow[] | null): boolean {
   if (!viewer) return false
-  return signer.key === `user:${viewer.userId}` || (viewer.verifiedEmail !== null && signer.key === `email:${viewer.verifiedEmail.toLowerCase()}`)
+  if (signer.key === `user:${viewer.userId}`) return true
+  if (viewer.verifiedEmail !== null && signer.key === `email:${viewer.verifiedEmail.toLowerCase()}`) return true
+  if (signer.key.startsWith('email:') && signers?.some(row => row.user_id === viewer.userId && row.booked_email && signer.key === `email:${row.booked_email.trim().toLowerCase()}`)) return true
+  return false
 }
 
 /** What the agreement is now: the current request and its signatures, or the listing's agreement and the booker's. */
@@ -204,10 +207,10 @@ function agreementState(records: AgreementRecord[], listing: ListingDocument | n
   return { request: null, listing, listingSignature: null, fields: [], signers: [{ key: `user:${booking.bookingUserId}`, name: booking.guestName, role: 'guest', signature: null }] }
 }
 
-function presentAgreement(state: AgreementState, booking: AgreementBooking, viewer: AgreementViewer | null): BookingAgreement {
+function presentAgreement(state: AgreementState, booking: AgreementBooking, viewer: AgreementViewer | null, signersRows?: SignerRow[] | null): BookingAgreement {
   const signers: AgreementSigner[] = state.signers.map(signer => ({ key: signer.key, name: signer.name, role: signer.role, signed_at: signer.signature?.occurred_at ?? null }))
   const complete = signers.length > 0 && signers.every(signer => signer.signed_at !== null)
-  const own = state.signers.find(signer => viewerSigns(signer, viewer)) ?? null
+  const own = state.signers.find(signer => viewerSigns(signer, viewer, signersRows)) ?? null
   const guestsSigned = signers.every(signer => signer.role === 'host' || signer.signed_at !== null)
   const document = state.request ?? state.listingSignature
   const base = { label: agreementLabel(booking.productKind), fields: state.fields, viewer_signer_key: own?.key ?? null, can_manage: viewer?.canManage === true }
@@ -234,9 +237,9 @@ function presentAgreement(state: AgreementState, booking: AgreementBooking, view
 }
 
 /** The booking's agreement as this viewer reads it, from `agreementFromResults`, or null when it has none. */
-export function presentBookingAgreement(read: Pick<ReturnType<typeof agreementFromResults>, 'booking' | 'records' | 'listing'>, viewer: AgreementViewer | null): BookingAgreement | null {
+export function presentBookingAgreement(read: Pick<ReturnType<typeof agreementFromResults>, 'booking' | 'records' | 'listing' | 'signerRows'>, viewer: AgreementViewer | null): BookingAgreement | null {
   const state = agreementState(read.records, read.listing, read.booking, new Date().toISOString())
-  return state ? presentAgreement(state, read.booking, viewer) : null
+  return state ? presentAgreement(state, read.booking, viewer, read.signerRows) : null
 }
 
 /** The agreement as a booking read presents it, from the rows its batch read with `agreementQueries`. */
@@ -400,9 +403,9 @@ export async function signAgreement(env: CloudflareEnv, conversation: Conversati
   if (!input.consent) throw new HTTPError({ statusCode: 422, message: 'Agree to sign electronically', data: { code: 'CONSENT_REQUIRED', field: 'consent' } })
   const typedName = input.typedName.trim()
   if (typedName.length < 2 || typedName.length > 120) throw new HTTPError({ statusCode: 422, message: 'Type your full name', data: { code: 'NAME_REQUIRED', field: 'typed_name' } })
-  const { booking, records, listing } = await readAgreement(env.DB, conversation)
+  const { booking, records, listing, signerRows } = await readAgreement(env.DB, conversation, true)
   const state = agreementState(records, listing, booking, new Date().toISOString())
-  const agreement = state ? presentAgreement(state, booking, viewer) : null
+  const agreement = state ? presentAgreement(state, booking, viewer, signerRows) : null
   if (!state || !agreement?.can_sign || !agreement.viewer_signer_key) throw new HTTPError({ statusCode: 409, message: 'There is nothing for you to sign on this booking', data: { code: 'NOTHING_TO_SIGN', field: 'conversation_id' } })
   const document = state.request ?? state.listing!
   const label = agreement.label.toLowerCase()
@@ -497,9 +500,9 @@ async function pickNotoFontKey(env: CloudflareEnv, text: string): Promise<NotoFo
 
 /** The document with every signature where it was placed and a closing page that records who signed, when and how. */
 export async function signedAgreementDocument(env: CloudflareEnv, conversation: ConversationRow, messageId: string, viewer: AgreementViewer): Promise<{ bytes: Uint8Array<ArrayBuffer>; fileName: string }> {
-  const { booking, records, listing } = await readAgreement(env.DB, conversation)
+  const { booking, records, listing, signerRows } = await readAgreement(env.DB, conversation, true)
   const state = agreementState(records, listing, booking, new Date().toISOString())
-  const agreement = state ? presentAgreement(state, booking, viewer) : null
+  const agreement = state ? presentAgreement(state, booking, viewer, signerRows) : null
   const document = state?.request ?? state?.listingSignature
   if (!state || !agreement || !document || document.id !== messageId || agreement.status !== 'signed') {
     throw new HTTPError({ statusCode: 404, message: 'This document is not signed by everyone yet', data: { code: 'NOT_SIGNED', field: 'message_id' } })

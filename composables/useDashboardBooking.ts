@@ -116,7 +116,11 @@ function useDashboardReservationReads(scope: DashboardRequestScope) {
     if (saved && reader()) realtime.held.take(key(saved.booking_id))
   }, { flush: 'sync' })
 
-  return { get, read, canPrefetch: () => Boolean(reader()) && realtime.status.value === 'open' }
+  function drop(bookingId: string) {
+    if (reader()) realtime.held.take(key(bookingId))
+  }
+
+  return { get, read, drop, canPrefetch: () => Boolean(reader()) && realtime.status.value === 'open' }
 }
 
 export function useDashboardReservationPrefetch() {
@@ -136,7 +140,7 @@ export function useDashboardReservationPrefetch() {
 
 export function useDashboardReservation(scope: DashboardRequestScope, bookingId: string) {
   const reads = import.meta.client ? useDashboardReservationReads(scope) : undefined
-  return useAsyncData(dashboardBookingKey(scope.orgSlug, bookingId), async (_app, { signal }) => {
+  const request = useAsyncData(dashboardBookingKey(scope.orgSlug, bookingId), async (_app, { signal }) => {
     if (import.meta.server) {
       const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
         booking: (orgSlug: string, bookingId: string) => Promise<unknown>
@@ -156,5 +160,8 @@ export function useDashboardReservation(scope: DashboardRequestScope, bookingId:
       const held = reads?.get(bookingId, true)
       return isDashboardBooking(held) ? held : undefined
     },
+  })
+  return Object.assign(request, {
+    drop: () => { reads?.drop(bookingId) },
   })
 }

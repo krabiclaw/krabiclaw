@@ -2486,7 +2486,7 @@ export async function readGuestStay(db: DbClient, viewer: { userId: string; veri
   }, ...agreementQueries({
     booking: { sql: `(SELECT id FROM (${ownedStay}))`, params: [activityId, buyerUserId] },
     organization: { sql: `(SELECT organization_id FROM (${ownedStay}))`, params: [activityId, buyerUserId] },
-  })], { operation: 'Read the guest stay' })
+  }, true)], { operation: 'Read the guest stay' })
   const owned = ownedRows!.results[0] as { id: string; conversation_id: string; organization_id: string; product_id: string; paid_online: number; payment_processing: number } | undefined
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
   await ownedBuyerRequest(db, buyerUserId, owned.conversation_id)

@@ -369,7 +369,7 @@ async function composeBookingDetails(
 
   const resourceId = row.product_kind === 'table' ? row.location_id : row.product_id
   // The guest's own read carries the booking's agreement in the same round trip; the team's read carries it in its own batch.
-  const agreement = !facts && reader.buyerUserId ? agreementQueries({ booking: { sql: '?', params: [row.booking_id] }, organization: { sql: '?', params: [row.organization_id] } }) : []
+  const agreement = !facts && reader.buyerUserId ? agreementQueries({ booking: { sql: '?', params: [row.booking_id] }, organization: { sql: '?', params: [row.organization_id] } }, true) : []
   const read = facts ?? await executeBatch(db, [...bookingDetailFacts({
       query: 'SELECT ? AS organization_id, ? AS booking_id, ? AS conversation_id, ? AS product_kind, ? AS product_id, ? AS location_id, 1 AS can_read_payments',
       params: [row.organization_id, row.booking_id, row.conversation_id, row.product_kind, row.product_id, row.location_id],
