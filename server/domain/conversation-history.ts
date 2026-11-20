@@ -202,10 +202,13 @@ export async function loadConversationPage(
           WHERE cfg.organization_id = b.organization_id AND cfg.product_id = b.product_id AND ${assignedMemberSql('cfg')}))` : '0'} AS booking_assigned,
         ${head ? `(SELECT json_group_array(json_object('id', p.id, 'name', p.name, 'image', p.image, 'role', p.role, 'title', p.title, 'invitation_id', p.invitation_id))
           FROM (${conversationParticipantsSql('c', 'c.viewer_role')}) p)` : 'NULL'} AS roster,
-        -- What a team conversation about a booking is titled by: the home or offering, as its row in the list is.
-        ${head ? `CASE WHEN c.kind = 'team' THEN (SELECT COALESCE(sc.internal_name, p.name) FROM bookings about JOIN products p ON p.organization_id = about.organization_id AND p.id = about.product_id
+        -- What a conversation about a listing is titled by, as Airbnb heads it and its row in the list reads:
+        -- the host's name for the home, the guest the listing's own.
+        ${head ? `(SELECT CASE WHEN c.viewer_role = 'guest' THEN p.name ELSE COALESCE(sc.internal_name, p.name) END FROM products p
           LEFT JOIN product_stay_configs sc ON sc.organization_id = p.organization_id AND sc.product_id = p.id
-          WHERE about.organization_id = c.organization_id AND about.id = c.booking_id) END` : 'NULL'} AS record_title,
+          WHERE p.organization_id = c.organization_id AND p.id = COALESCE(
+            (SELECT about.product_id FROM bookings about WHERE about.organization_id = c.organization_id AND about.id = c.booking_id),
+            (SELECT ct.product_id FROM channel_threads ct WHERE ct.organization_id = c.organization_id AND ct.conversation_id = c.id)))` : 'NULL'} AS record_title,
         -- A job action belongs to its latest assignment post in the current team's conversation.
         ${head ? `CASE WHEN c.viewer_role = 'member' AND (c.booking_id IS NOT NULL OR (c.kind = 'team' AND c.location_id IS NOT NULL)) THEN (
           SELECT json_group_array(json_object('task_id', job.task_id, 'version', job.version, 'message_id', job.message_id))
@@ -277,7 +280,9 @@ export async function loadConversationPage(
     membership && conversation.kind !== 'team' ? roleAllows({ ...membership, permissions: { task: ['create'] } }) : false,
   ])
   const canReadBooking = activityPath !== null || bookingScope === 'manage' || (bookingScope === 'assigned' && context.booking_assigned === 1)
-  const title = role === 'guest' ? context.organization_name : conversation.name || (conversation.kind === 'team' ? context.record_title : guestName)
+  // A team chat keeps the name it was given; a guest conversation is headed by its listing, as Airbnb's are.
+  const title = (conversation.kind === 'team' ? conversation.name || context.record_title : context.record_title || conversation.name)
+    || (role === 'guest' ? context.organization_name : conversation.kind === 'team' ? null : guestName)
     || roster.filter(person => person.id !== userId).map(person => person.name).join(', ') || 'You'
   return {
     conversation: {

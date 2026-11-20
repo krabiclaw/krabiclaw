@@ -194,7 +194,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.deepEqual(entries.map(entry => [entry.body, entry.author_kind, JSON.parse(entry.payload_json).provider_inserted_at]), [['Hello', 'guest', RAW], [null, PLATFORM_MESSAGE_AUTHOR_KIND, RAW]])
     const detail = await hostConversation(db, env, rows[0]!.id)
     assert(detail.conversation.kind === 'guest')
-    assert.deepEqual([detail.conversation.booking_id, detail.conversation.composer, detail.conversation.title], [null, { channel: 'airbnb' }, 'Conversation supplied by Airbnb'])
+    assert.deepEqual([detail.conversation.booking_id, detail.conversation.composer, detail.conversation.title], [null, { channel: 'airbnb' }, 'Cabin'])
     const visible = detail.entries.filter(entry => entry.type === 'message')
     // Airbnb's photo is read once when the message lands and kept as the business's own media, placed on that message.
     assert.deepEqual(provider.fileReads, ['/attachment/file'])
