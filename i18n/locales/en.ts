@@ -1,4 +1,12 @@
 export default {
+  "agreement": {
+    "sign_step": "Sign the {document}",
+    "full_name": "Type your full name",
+    "your_signature": "Your signature",
+    "consent": "I agree to sign electronically, and that this is my signature on the {document}.",
+    "read": "Read",
+    "sign_failed": "Your booking was made, but your signature was not saved. Sign the {document} from your booking."
+  },
   "email": {
     "reason": {
       "reservation": "You received this email because you made a reservation with {organization}.",

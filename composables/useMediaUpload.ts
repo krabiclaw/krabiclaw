@@ -4,6 +4,7 @@ import { getErrorMessage } from '~/utils/errors'
 // meant the dashboard refused images MCP accepted.
 export const IMAGE_MAX_SIZE_BYTES = 20 * 1024 * 1024
 export const VIDEO_MAX_SIZE_BYTES = 50 * 1024 * 1024
+export const DOCUMENT_MAX_SIZE_BYTES = 20 * 1024 * 1024
 
 export interface MediaUploadOptions {
   category?: string | null
@@ -11,7 +12,7 @@ export interface MediaUploadOptions {
 
 export interface MediaUploadResult {
   asset_id: string
-  kind: 'image' | 'video'
+  kind: 'image' | 'video' | 'file'
   public_url?: string | null
   thumbnail_url?: string
 }
@@ -29,10 +30,15 @@ export function useMediaUpload(organizationApiBase: string) {
 
     const isImage = file.type.startsWith('image/')
     const isVideo = file.type.startsWith('video/')
+    const isDocument = file.type === 'application/pdf'
 
     try {
-      if (!isImage && !isVideo) {
-        error.value = 'Only images and videos are supported.'
+      if (!isImage && !isVideo && !isDocument) {
+        error.value = 'Only images, videos and PDFs are supported.'
+        return null
+      }
+      if (isDocument && file.size > DOCUMENT_MAX_SIZE_BYTES) {
+        error.value = `PDFs must be under ${formatBytes(DOCUMENT_MAX_SIZE_BYTES)}.`
         return null
       }
 
@@ -48,6 +54,7 @@ export function useMediaUpload(organizationApiBase: string) {
 
       const form = new FormData()
       if (isImage) form.append('image', file)
+      else if (isDocument) form.append('file', file)
       else {
         form.append('video', file)
         form.append('thumbnail', await generateVideoThumbnail(file))
@@ -57,7 +64,7 @@ export function useMediaUpload(organizationApiBase: string) {
       // goes to R2 and answers with a null thumbnail. A video always has one.
       const response = await dashboardApi<{
         asset_id: string
-        kind: 'image' | 'video'
+        kind: 'image' | 'video' | 'file'
         public_url: string
         thumbnail_url: string | null
         status: 'active'
@@ -70,16 +77,16 @@ export function useMediaUpload(organizationApiBase: string) {
         },
         validate: (value): value is {
           asset_id: string
-          kind: 'image' | 'video'
+          kind: 'image' | 'video' | 'file'
           public_url: string
           thumbnail_url: string | null
           status: 'active'
         } => isRecord(value)
           && typeof value.asset_id === 'string'
-          && (value.kind === 'image' || value.kind === 'video')
+          && (value.kind === 'image' || value.kind === 'video' || value.kind === 'file')
           && typeof value.public_url === 'string'
           && (typeof value.thumbnail_url === 'string' || value.thumbnail_url === null)
-          && (value.kind === 'image' || typeof value.thumbnail_url === 'string')
+          && (value.kind !== 'video' || typeof value.thumbnail_url === 'string')
           && value.status === 'active',
       })
 

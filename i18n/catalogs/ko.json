@@ -1,4 +1,10 @@
 {
+  "agreement.consent": "전자 서명에 동의하며 이것이 {document}에 대한 본인의 서명임을 확인합니다.",
+  "agreement.full_name": "성명을 입력하세요",
+  "agreement.read": "읽기",
+  "agreement.sign_failed": "예약은 완료되었지만 서명이 저장되지 않았습니다. 예약에서 {document}에 서명하세요.",
+  "agreement.sign_step": "{document}에 서명하기",
+  "agreement.your_signature": "서명",
   "booking.book_appointment": "예약하기",
   "booking.change_accept": "변경 수락",
   "booking.change_accepted": "변경 수락됨",

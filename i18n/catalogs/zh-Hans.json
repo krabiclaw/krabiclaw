@@ -1,4 +1,10 @@
 {
+  "agreement.consent": "我同意以电子方式签署，并确认这是我在{document}上的签名。",
+  "agreement.full_name": "输入您的全名",
+  "agreement.read": "阅读",
+  "agreement.sign_failed": "您的预订已完成，但签名未保存。请在预订中签署{document}。",
+  "agreement.sign_step": "签署{document}",
+  "agreement.your_signature": "您的签名",
   "booking.book_appointment": "预约咨询",
   "booking.change_accept": "接受变更",
   "booking.change_accepted": "变更已接受",

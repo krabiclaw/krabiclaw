@@ -8,6 +8,7 @@ import { assertLocationAccess, assertOrganizationWideAccess, assertProductAccess
 import { createCollection, createProduct, deleteCollection, getProduct, hydrateProductMedia, listCollectionProducts, listCollections, listOrganizationProducts, reorderCollections, setCollectionProducts, setProductLocation, setProductPublication, updateCollection, updateProduct } from '~/server/utils/product-management'
 import { createSession, deleteProductBookingConfig, getScheduleSession, listAvailabilityRules, listScheduleSessions, replaceWeeklySchedule, setProductBookingConfig, updateSession } from '~/server/utils/availability'
 import { attachMediaPlacement, removeMediaPlacement, reorderMediaPlacements, setSingleMediaPlacement } from '~/server/utils/media-placement'
+import { agreementLabel } from '~/shared/agreements'
 import { getMediaAsset, hydrateMediaAssetRefs, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { memberSchedulingList, readMemberScheduling, requireSchedulingAccess, writeMemberScheduling } from '~/server/domain/member-scheduling'
@@ -2226,7 +2227,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await updateProduct(db, { ...target, patch: { updated_at: product.updated_at, ...changes }, actor, env })
   }
-  if (product.kind === 'stay' && !['questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-rules', 'stay-property', 'stay-arrival-time', 'stay-map-sharing', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
+  if (product.kind === 'stay' && !['agreement', 'questions', 'question', 'question-order', 'stay-details', 'stay-field', 'stay-safety', 'stay-rules', 'stay-property', 'stay-arrival-time', 'stay-map-sharing', 'stay-accessibility', 'stay-accessibility-feature', ...STAY_ROOM_VIEWS].includes(view)) return missing('Offering not found')
   const setBooking = async (changes: Parameters<typeof setProductBookingConfig>[1]['patch']) => {
     await assertProductAccess(db, { ...principal, productId, patch: changes as Record<string, unknown> })
     await setProductBookingConfig(db, { ...target, patch: changes, actorId: userId, env })
@@ -2501,6 +2502,7 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
       ...(!dish && (!service || booking) ? [
         ...(booking ? [leaf('assignment', copy.assigneeLabel, assigned ?? 'Unassigned', { web: 'booking/assignment', readonly: !manages })] : []),
         leaf('booking', bookingLabel, booking ? `${booking.duration_minutes} minutes` : 'No booking calendar'),
+        ...(booking ? [leaf('agreement', agreementLabel(product.kind), product.agreement?.file_name ?? 'None')] : []),
       ] : []),
       ...(service && !booking && manages ? [{ ...leaf('booking', 'Set up consultations', 'No booking calendar'), optional_detail: true }] : []),
       ...(service && !booking && !product.locations.length && wide ? [{ ...leaf('locations', placeLabel), optional_detail: true }] : []),
@@ -2641,6 +2643,16 @@ export async function dashboardOffering(event: H3Event, answer?: CatalogAnswer):
         await setCollectionProducts(db, { organizationId: organization.id, collectionId: section.id, expectedProductIds: expected, productIds: included ? [...expected, productId] : expected.filter(id => id !== productId), actor })
       })
     }
+  } else if (view === 'agreement') {
+    // The PDF every guest signs when they book it: they read it and sign with their typed name.
+    const label = agreementLabel(product.kind)
+    const placement = { owner_type: 'product' as const, owner_id: productId, slot: 'agreement' as const }
+    form(label, [field('asset', label, 'photo', product.agreement?.asset_id, {
+      optional: true, display_url: product.agreement?.public_url ?? null, media_kind: 'document',
+      hint: `${service ? 'Clients' : 'Guests'} read and sign this when they book. Bookings already made keep the version they signed.`,
+    })], async values => {
+      await setSingleMediaPlacement(db, { env, organizationId: organization.id, principal, placement, assetId: values('asset') || null })
+    })
   } else if (view === 'booking') {
     screen = { title: bookingLabel, fields: [], rows: booking ? [
       ...(product.kind === 'table'

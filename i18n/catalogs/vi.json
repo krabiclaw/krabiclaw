@@ -739,5 +739,11 @@
   "payment.non_refundable": "Đặt chỗ này không được hoàn tiền.",
   "site.experience_cancel.retry_refund": "Thử hoàn tiền lại",
   "site.experience_cancel.toast_refund_failed": "Không thể thử hoàn tiền lại. Vui lòng thử lại.",
-  "booking_policy.cancel_closed": "Đã hết hạn hủy trực tuyến từ {window} trước giờ bắt đầu. Vui lòng liên hệ doanh nghiệp để hủy."
+  "booking_policy.cancel_closed": "Đã hết hạn hủy trực tuyến từ {window} trước giờ bắt đầu. Vui lòng liên hệ doanh nghiệp để hủy.",
+  "agreement.sign_step": "Ký {document}",
+  "agreement.full_name": "Nhập họ và tên đầy đủ",
+  "agreement.your_signature": "Chữ ký của bạn",
+  "agreement.consent": "Tôi đồng ý ký điện tử và đây là chữ ký của tôi trên {document}.",
+  "agreement.read": "Đọc",
+  "agreement.sign_failed": "Đặt chỗ của bạn đã được thực hiện nhưng chữ ký chưa được lưu. Hãy ký {document} từ đặt chỗ của bạn."
 }

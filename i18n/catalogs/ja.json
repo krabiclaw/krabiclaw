@@ -739,5 +739,11 @@
   "payment.non_refundable": "このご予約は返金できません。",
   "site.experience_cancel.retry_refund": "返金を再試行",
   "site.experience_cancel.toast_refund_failed": "返金を再試行できませんでした。もう一度お試しください。",
-  "booking_policy.cancel_closed": "オンラインでのキャンセルは開始時刻の{window}前に締め切られました。キャンセルするには事業者にご連絡ください。"
+  "booking_policy.cancel_closed": "オンラインでのキャンセルは開始時刻の{window}前に締め切られました。キャンセルするには事業者にご連絡ください。",
+  "agreement.sign_step": "{document}に署名する",
+  "agreement.full_name": "氏名をフルネームで入力してください",
+  "agreement.your_signature": "あなたの署名",
+  "agreement.consent": "電子的に署名することに同意し、これが{document}への私の署名であることを確認します。",
+  "agreement.read": "読む",
+  "agreement.sign_failed": "予約は完了しましたが、署名は保存されませんでした。予約から{document}に署名してください。"
 }

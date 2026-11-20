@@ -182,6 +182,8 @@
     "mp4box": "2.4.1",
     "nanostores": "^1.5.4",
     "nuxt-schema-org": "^6.4.3",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.4.299",
     "postal-mime": "4.2.0",
     "resend": "6.32.1",
     "satori": "^0.32.0",

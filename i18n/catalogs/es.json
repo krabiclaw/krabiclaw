@@ -1,4 +1,10 @@
 {
+  "agreement.consent": "Acepto firmar electrónicamente y que esta es mi firma en el documento: {document}.",
+  "agreement.full_name": "Escribe tu nombre completo",
+  "agreement.read": "Leer",
+  "agreement.sign_failed": "Tu reserva se ha realizado, pero tu firma no se guardó. Firma el documento ({document}) desde tu reserva.",
+  "agreement.sign_step": "Firma el documento: {document}",
+  "agreement.your_signature": "Tu firma",
   "booking.book_appointment": "Reservar cita",
   "booking.change_accept": "Aceptar cambios",
   "booking.change_accepted": "Cambios aceptados",

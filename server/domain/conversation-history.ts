@@ -113,6 +113,12 @@ function eventText(message: Pick<MessageRow, 'event_name' | 'body' | 'id'>, acto
   if (action === 'reject') return `${actor} declined the ${noun}`
   if (action === 'no_show') return `${actor} marked the ${noun} as a no-show`
   if (name === 'review.requested') return 'Review invitation sent'
+  // An agreement's record reads as its actor's own act: "Eva signed the rental agreement".
+  if (name.startsWith('agreement.')) {
+    const act = entryText(message.body)
+    if (!act) throw new HTTPError({ statusCode: 500, message: `The agreement activity ${name} has nothing to say`, data: { code: 'INVALID_CONVERSATION_EVENT', field: 'body', entry_id: message.id } })
+    return `${actor} ${act.charAt(0).toLowerCase()}${act.slice(1)}`
+  }
   const firstLine = entryText(message.body)?.split('\n')[0]?.trim()
   if (firstLine) return firstLine
   throw new HTTPError({ statusCode: 500, message: `The conversation activity ${name} has nothing to say`, data: { code: 'INVALID_CONVERSATION_EVENT', field: 'event_name', entry_id: message.id } })
@@ -136,7 +142,9 @@ function presentEntries(
     const name = message.author_user_id === null ? null : history.actors.get(message.author_user_id) ?? null
     const mine = message.author_user_id === userId
     if (isEventMessage(message)) {
-      const actor = authorKind === 'guest' ? guestViewer ? 'You' : guestName
+      // Every party to an agreement signs as themselves, so its record names each one.
+      const actor = message.event_name?.startsWith('agreement.') ? mine ? 'You' : name ? firstName(name) : authorKind === 'guest' ? guestName : context.organization_name
+        : authorKind === 'guest' ? guestViewer ? 'You' : guestName
         : mine ? 'You' : !guestViewer && name ? firstName(name) : context.organization_name
       items.push({ type: 'event', id: message.id, sequence: message.sequence, sent_at: message.occurred_at,
         text: eventText(message, actor, guestName, guestViewer, Boolean(airbnb)) })

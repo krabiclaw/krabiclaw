@@ -172,6 +172,7 @@
             </p>
           </div>
 
+          <BookingAgreement v-if="conversationId && !purchase" :class="sectionClass" :conversation-id="conversationId" :editor-path="personalScope ? null : editorPath" :revision="agreementRevision" />
           <div v-if="panel.location || panel.address || panel.pin || panel.guide?.directions" id="getting-there" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Getting there</h2>
             <StaySetupMap v-if="panel.pin" :key="`${panel.pin.latitude},${panel.pin.longitude}`" :pin="panel.pin" :marker-icon="stay ? 'i-lucide-house' : 'i-lucide-map-pin'" :interactive="false" compact class="mt-4" />
@@ -401,6 +402,8 @@ export interface BookingEditor {
   savePrivateNote: (input: { id: string; version: number; text: string }) => Promise<void>
   /** A stay's offline payment step: its currency, today at the home, and the write. */
   stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
+  /** The booking's conversation, where its agreement is sent and signed. */
+  conversationId: ComputedRef<string | null>
   /** A stay's Change reservation step: what it is now, and the write. */
   stayChange: { stay: ComputedRef<{ check_in_date: string; check_out_date: string; adults: number; children: number } | null>; save: (input: { check_in_date: string; check_out_date: string; adults: number; children: number }) => Promise<void> }
 }
@@ -434,6 +437,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatPostalAddress } from '~/utils/postal-address'
 import StaySetupMap from './StaySetupMap.client.vue'
+import BookingAgreement from '~/components/booking/BookingAgreement.vue'
 import { ApiClientError } from '~/utils/api-clients'
 
 const props = defineProps<{
@@ -549,6 +553,7 @@ function manageBookingParty() { guestManagement?.open(bookingParty.value) }
 const otherGuestLabel = computed(() => `${partySize.value - 1} other ${partySize.value === 2 ? recordCopy.value?.guestLabel ?? 'guest' : recordCopy.value?.guestsLabelPlural ?? 'guests'}`)
 const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text)
 const conversationId = computed(() => booking.value?.conversation_id ?? detail.value?.conversation_id ?? null)
+const agreementRevision = ref(0)
 const messageTo = computed(() => {
   if (!conversationId.value || (stay.value && !props.personalScope && !managedStay.value?.can_message_guest)) return null
   return `/dashboard/${encodeURIComponent(orgSlug.value)}/messages/${encodeURIComponent(conversationId.value)}`
@@ -642,8 +647,10 @@ watch(realtime.event, (event) => {
     void refreshDetails()
   } else if (event.type === 'stay.changed' && stay.value && (event.booking_id === stay.value.booking_id || (event.booking_id === null && event.product_id === stay.value.product_id))) {
     void refreshDetails()
-  } else if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled && event.conversation_id === conversationId.value && (booking.value || detail.value?.channel === 'airbnb')) {
-    void refreshDetails()
+  } else if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled && event.conversation_id === conversationId.value) {
+    // An agreement is signed or sent in the conversation; its panel reads it again.
+    agreementRevision.value++
+    if (booking.value || detail.value?.channel === 'airbnb') void refreshDetails()
   }
 })
 watch(realtime.reconnectEpoch, epoch => {
@@ -1163,6 +1170,7 @@ provide(bookingEditorKey, {
   note,
   savePrivateNote,
   stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
+  conversationId,
   stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },
 })
 </script>

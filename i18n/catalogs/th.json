@@ -739,5 +739,11 @@
   "payment.non_refundable": "การจองนี้ไม่สามารถขอคืนเงินได้",
   "site.experience_cancel.retry_refund": "ลองขอคืนเงินอีกครั้ง",
   "site.experience_cancel.toast_refund_failed": "ไม่สามารถขอคืนเงินได้ โปรดลองอีกครั้ง",
-  "booking_policy.cancel_closed": "การยกเลิกออนไลน์ปิดแล้วตั้งแต่ {window} ก่อนเวลาเริ่ม โปรดติดต่อธุรกิจเพื่อยกเลิก"
+  "booking_policy.cancel_closed": "การยกเลิกออนไลน์ปิดแล้วตั้งแต่ {window} ก่อนเวลาเริ่ม โปรดติดต่อธุรกิจเพื่อยกเลิก",
+  "agreement.sign_step": "ลงนามใน{document}",
+  "agreement.full_name": "พิมพ์ชื่อ-นามสกุลของคุณ",
+  "agreement.your_signature": "ลายเซ็นของคุณ",
+  "agreement.consent": "ฉันยินยอมลงนามทางอิเล็กทรอนิกส์ และนี่คือลายเซ็นของฉันใน{document}",
+  "agreement.read": "อ่าน",
+  "agreement.sign_failed": "การจองของคุณเสร็จสมบูรณ์ แต่ลายเซ็นของคุณไม่ได้ถูกบันทึก โปรดลงนามใน{document}จากการจองของคุณ"
 }

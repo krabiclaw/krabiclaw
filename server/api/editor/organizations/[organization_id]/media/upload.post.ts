@@ -8,6 +8,7 @@ import { isRecord } from '~/utils/api-clients'
 
 const VALID_CATEGORIES = new Set(['exterior', 'interior', 'food', 'menu', 'team', 'other'])
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024
+const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 type MediaCategory = 'exterior' | 'interior' | 'food' | 'menu' | 'team' | 'other'
 
 function queryValue(value: unknown): string | null {
@@ -73,8 +74,21 @@ export default defineHandler(async (event) => {
       })
     }
 
+    // A PDF: a listing's agreement or a firm's compliance document, placed by its own editor.
+    const documentPart = formData.get('file')
+    if (documentPart instanceof File) {
+      if (documentPart.size > MAX_DOCUMENT_BYTES) return jsonResponse({ error: 'File too large (max 20 MB)', code: 'UPLOAD_TOO_LARGE' }, { status: 413 })
+      const documentData = new Uint8Array(await documentPart.arrayBuffer())
+      if (sniffMediaMimeType(documentData) !== 'application/pdf') return jsonResponse({ error: 'Upload a PDF', code: 'UNSUPPORTED_MEDIA_TYPE' }, { status: 415 })
+      const uploaded = await uploadResolvedMediaToAssetStore({
+        db, env, organizationId, userId: session.user.id, buffer: documentData, contentType: 'application/pdf',
+        filename: sanitizeFilename(documentPart.name || queryValue(query.filename) || undefined), kind: 'file', source: 'uploaded', fileSize: documentData.byteLength,
+      })
+      return jsonResponse({ asset_id: uploaded.assetId, public_url: uploaded.publicUrl, thumbnail_url: null, kind: 'file', status: 'active' })
+    }
+
     if (!(videoPart instanceof File) || !(thumbnailPart instanceof File)) {
-      return jsonResponse({ error: 'an image field, or video and thumbnail fields, are required' }, { status: 400 })
+      return jsonResponse({ error: 'an image field, a file field, or video and thumbnail fields, are required' }, { status: 400 })
     }
     if (videoPart.size > MAX_VIDEO_BYTES) return jsonResponse({ error: 'File too large (max 50 MB)' }, { status: 413 })
     if (thumbnailPart.size > MAX_POSTER_BYTES) return jsonResponse({ error: 'Thumbnail too large (max 10 MB)' }, { status: 413 })

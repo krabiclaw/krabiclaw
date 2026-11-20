@@ -614,6 +614,8 @@ export async function listMediaAssets(
   if (opts.ownerType !== 'message') {
     conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type = 'message')`)
   }
+  // A booking's private document belongs to that booking, never the media library.
+  conditions.push(`(ma.r2_key IS NULL OR ma.r2_key NOT LIKE 'private/%')`)
   if (opts.kind) { conditions.push(`ma.kind = ?`); params.push(opts.kind) }
   if (opts.search) { conditions.push(`ma.file_name LIKE ? ESCAPE '\\'`); params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`) }
   if (opts.ownerType && opts.ownerId) {

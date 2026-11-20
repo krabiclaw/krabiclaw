@@ -92,7 +92,16 @@ export function getR2KeyFromPublicUrl(env: ApiRecord, value: string): string | n
 }
 
 /** Generate a namespaced R2 key for a media asset. */
-export function buildR2Key(organizationId: string, assetId: string, filename: string): string {
+/** Keys under this prefix are never served by the public media host; their owner's own route reads them after checking access. */
+export const PRIVATE_R2_PREFIX = 'private/'
+
+/** Read a stored object's bytes, or null when the key holds nothing. */
+export async function readR2Object(env: ApiRecord, key: string): Promise<Uint8Array<ArrayBuffer> | null> {
+  const object = await bucket(env).get(normalizeR2Key(key))
+  return object ? new Uint8Array(await object.arrayBuffer()) : null
+}
+
+export function buildR2Key(organizationId: string, assetId: string, filename: string, visibility: 'public' | 'private' = 'public'): string {
   const sanitizeSegment = (value: string, label: string): string => {
     const trimmed = String(value).trim().replace(/^\/+|\/+$/g, '')
     if (!trimmed) throw new Error(`Invalid ${label}`)
@@ -107,5 +116,5 @@ export function buildR2Key(organizationId: string, assetId: string, filename: st
   const safeFilename = sanitizeSegment(filename, 'filename')
   const dotIndex = safeFilename.lastIndexOf('.')
   const ext = dotIndex > 0 ? safeFilename.slice(dotIndex + 1) : ''
-  return `organizations/${safeOrganizationId}/media/${safeAssetId}${ext ? '.' + ext : ''}`
+  return `${visibility === 'private' ? PRIVATE_R2_PREFIX : ''}organizations/${safeOrganizationId}/media/${safeAssetId}${ext ? '.' + ext : ''}`
 }

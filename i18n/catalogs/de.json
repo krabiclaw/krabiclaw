@@ -1,4 +1,10 @@
 {
+  "agreement.consent": "Ich stimme der elektronischen Unterzeichnung zu und bestätige, dass dies meine Unterschrift unter {document} ist.",
+  "agreement.full_name": "Geben Sie Ihren vollständigen Namen ein",
+  "agreement.read": "Lesen",
+  "agreement.sign_failed": "Ihre Buchung wurde vorgenommen, aber Ihre Unterschrift wurde nicht gespeichert. Unterschreiben Sie {document} in Ihrer Buchung.",
+  "agreement.sign_step": "{document} unterschreiben",
+  "agreement.your_signature": "Ihre Unterschrift",
   "booking.book_appointment": "Termin buchen",
   "booking.change_accept": "Änderungen akzeptieren",
   "booking.change_accepted": "Änderungen akzeptiert",

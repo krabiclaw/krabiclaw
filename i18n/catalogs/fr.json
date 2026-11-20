@@ -1,4 +1,10 @@
 {
+  "agreement.consent": "J’accepte de signer électroniquement et que ceci est ma signature sur le document : {document}.",
+  "agreement.full_name": "Saisissez votre nom complet",
+  "agreement.read": "Lire",
+  "agreement.sign_failed": "Votre réservation a été effectuée, mais votre signature n’a pas été enregistrée. Signez le document ({document}) depuis votre réservation.",
+  "agreement.sign_step": "Signer le document : {document}",
+  "agreement.your_signature": "Votre signature",
   "booking.book_appointment": "Réserver un rendez-vous",
   "booking.change_accept": "Accepter les modifications",
   "booking.change_accepted": "Modifications acceptées",

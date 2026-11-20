@@ -95,7 +95,8 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 function allowedKindsFor(placement: MediaPlacementKey): Array<'image' | 'video' | 'file'> {
-  return placement.owner_type === 'organization' && placement.slot === 'compliance_document' ? ['file'] : ['image', 'video']
+  // A document slot holds a PDF: a firm's compliance document, or the agreement a listing's guests sign.
+  return (placement.owner_type === 'organization' && placement.slot === 'compliance_document') || (placement.owner_type === 'product' && placement.slot === 'agreement') ? ['file'] : ['image', 'video']
 }
 
 /**
