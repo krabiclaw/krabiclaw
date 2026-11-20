@@ -1,7 +1,6 @@
 // Site-wide chrome is a stable SSR resource keyed only by tenant and locale.
 // Route-specific content is loaded separately so client navigation cannot
 // replace the persistent header/footer state with another route's request.
-import { buildPublicPageUrl, usePublicResourceKey, type PublicPageRequest } from "~/composables/usePublicPageRequest";
 import {
   isPublicShellPayload,
   type PublicShellPayload as OrganizationShellPayload,
@@ -11,26 +10,17 @@ export const useOrganizationShellState = () => {
   const { id: organizationId } = useTenantOrganization().organization
   const { locale } = useI18n()
 
-  const params = computed<PublicPageRequest>(() => ({
-    page: null,
-    location: null,
-    datasets: [],
-    blogSlug: null,
-    locale: locale.value,
-  }));
-
-  const key = computed(() => usePublicResourceKey('shell', organizationId, params.value));
-  const url = computed(() => buildPublicPageUrl(params.value, 'shell'));
+  const key = computed(() => `shell:${organizationId}:${locale.value}`)
 
   const asyncData = useAsyncData<OrganizationShellPayload>(
     key,
     (_nuxtApp, { signal }) => loadPublicResourcePayload<OrganizationShellPayload>({
       organizationId,
       resourceKind: 'shell',
-      url: url.value,
+      url: `/api/public/shell?locale=${encodeURIComponent(locale.value)}`,
       key: key.value,
       query: {
-        locale: params.value.locale ?? undefined,
+        locale: locale.value,
       },
       validate: isPublicShellPayload,
       failureMessage: 'Public shell failed',

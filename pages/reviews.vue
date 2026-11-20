@@ -36,7 +36,7 @@
       </div>
     </header>
 
-    <section class="tenant-container pb-16">
+    <section id="reviews" class="tenant-container pb-16">
       <div v-if="visibleReviews.length" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <TenantReviewCard
           v-for="review in visibleReviews"
@@ -53,12 +53,13 @@
 
     <!-- Load more -->
     <div v-if="hasMore" class="tenant-container pb-20 text-center">
-      <button
+      <NuxtLink
+        :to="{ path: route.path, query: { ...route.query, show: visibleCount + PAGE_SIZE }, hash: '#reviews' }"
+        :prefetch="false"
         class="inline-flex items-center gap-2 rounded-full border border-default px-8 py-3 text-[11px] font-medium uppercase tracking-widest text-default transition hover:bg-muted"
-        @click="loadMore"
       >
         {{ t('site.posts.show_more') }} <span class="opacity-50">({{ remaining }} {{ t('site.posts.remaining') }})</span>
-      </button>
+      </NuxtLink>
     </div>
   </div>
 </template>
@@ -88,11 +89,14 @@ const googleReviewSummary = computed(() => {
 
 // Progressive reveal — 8 at a time
 const PAGE_SIZE = 8
-const visibleCount = ref(PAGE_SIZE)
+const route = useRoute()
+const visibleCount = computed(() => {
+  const count = typeof route.query.show === 'string' ? Number(route.query.show) : PAGE_SIZE
+  return Number.isSafeInteger(count) && count > 0 ? Math.min(count, allReviews.value.length) : PAGE_SIZE
+})
 const visibleReviews = computed(() => allReviews.value.slice(0, visibleCount.value))
 const hasMore = computed(() => visibleCount.value < allReviews.value.length)
 const remaining = computed(() => allReviews.value.length - visibleCount.value)
-function loadMore() { visibleCount.value += PAGE_SIZE }
 
 const organizationName = organization.name
 

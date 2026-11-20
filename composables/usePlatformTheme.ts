@@ -1,4 +1,4 @@
-import { PLATFORM_THEME_STORAGE_KEY } from '~/shared/platform-theme'
+import { PLATFORM_THEME_STORAGE_KEY, readPlatformThemePreference } from '~/shared/platform-theme'
 
 export type PlatformThemePreference = 'system' | 'light' | 'dark'
 export type PlatformThemeValue = 'light' | 'dark'
@@ -33,14 +33,11 @@ export function usePlatformTheme() {
 
   const restore = () => {
     if (import.meta.server) return
-    let stored: string | null = null
     try {
-      stored = localStorage.getItem(PLATFORM_THEME_STORAGE_KEY)
+      const stored = readPlatformThemePreference(localStorage, PLATFORM_THEME_STORAGE_KEY)
+      if (stored) preference.value = stored
     } catch {
       // System preference remains authoritative when browser storage is unavailable.
-    }
-    if (stored === 'system' || stored === 'light' || stored === 'dark') {
-      preference.value = stored
     }
     sync()
   }

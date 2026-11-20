@@ -89,7 +89,7 @@ import DashboardMediaThumb from '~/components/dashboard/DashboardMediaThumb.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { catalogProductItem } from '~/components/dashboard/CatalogProductList.vue'
 import CollectionMoveDialog from '~/components/dashboard/CollectionMoveDialog.vue'
-import type { Product } from '~/server/types/products'
+import type { CatalogProduct } from '~/server/types/products'
 import { getErrorMessage } from '~/utils/errors'
 import { groupProductsByCollection } from '~/utils/product-presentation'
 
@@ -115,10 +115,10 @@ const loadError = computed(() => {
 const catalogPath = computed(() => '/dashboard/' + String(route.params.org_slug) + '/products')
 const scoped = (path: string, query: Record<string, string | undefined> = {}) => router.resolve({ path, query: { location_id: locationId.value ?? undefined, kind: route.query.kind === 'dish' ? 'dish' : undefined, ...query } }).fullPath
 
-function membersFor(id: string): Product[] {
+function membersFor(id: string): CatalogProduct[] {
   return groupProductsByCollection(catalog.products.value, collections.value).find(group => group.id === id)?.products ?? []
 }
-const localOrder = ref<Product[] | null>(null)
+const localOrder = ref<CatalogProduct[] | null>(null)
 const products = computed(() => localOrder.value ?? membersFor(collectionId.value))
 // Menu names its own dish scope. Empty or mixed membership never changes it.
 const menuSection = computed(() => route.query.kind === 'dish')
@@ -134,7 +134,7 @@ const removing = ref(false)
 const adding = ref(false)
 const busy = computed(() => committing.value || moving.value || removing.value || adding.value)
 
-function itemStatus(product: Product): string {
+function itemStatus(product: CatalogProduct): string {
   const listed = product.publications.some(publication => publication.organization_id === organizationId && publication.published)
   const context = catalogProductItem(product, { collections: collections.value, locations: locations.value, priceLabel, to: '' }).summary
   return [!product.active && (product.kind !== 'service' || product.booking) ? 'Unavailable' : null, listed ? 'Listed' : 'Not listed', context].filter(Boolean).join(' · ')
@@ -158,7 +158,7 @@ function resetEditing() {
   moveDialogOpen.value = false
   orderError.value = null
 }
-function moveProduct(item: { row: Product }, direction: -1 | 1) {
+function moveProduct(item: { row: CatalogProduct }, direction: -1 | 1) {
   const index = products.value.findIndex(row => row.id === item.row.id)
   const target = index + direction
   if (busy.value || index < 0 || target < 0 || target >= products.value.length) return

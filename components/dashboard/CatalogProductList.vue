@@ -11,14 +11,14 @@
 
 <script lang="ts">
 import type { OrganizationLocationSelectorItem } from '~/components/dashboard/OrganizationLocationSelector.vue'
-import type { Collection, Product } from '~/server/types/products'
+import type { Collection, CatalogProduct } from '~/server/types/products'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 
 /** One product as a catalog tile: its sections and price, then where it is offered. */
-export function catalogProductItem(product: Product, context: {
+export function catalogProductItem(product: CatalogProduct, context: {
   collections: Collection[]
   locations: ReadonlyArray<{ id: string; title: string; status: string }>
-  priceLabel: (product: Product) => string
+  priceLabel: (product: CatalogProduct) => string
   to: string
 }): OrganizationLocationSelectorItem {
   return {
@@ -45,11 +45,11 @@ export function catalogProductItem(product: Product, context: {
 import OrganizationLocationSelector from '~/components/dashboard/OrganizationLocationSelector.vue'
 
 defineProps<{
-  products: Product[]
+  products: CatalogProduct[]
   collections: Collection[]
   locations: ReadonlyArray<{ id: string; title: string; status: string }>
   /** What one product costs in this scope. */
-  priceLabel: (product: Product) => string
+  priceLabel: (product: CatalogProduct) => string
   activeItem?: string | null
   itemHeadingLevel?: 2 | 3
 }>()

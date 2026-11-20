@@ -17,7 +17,8 @@
 import ProductDetailPage from '~/components/products/ProductDetailPage.vue'
 import { presentationForProduct } from '~/utils/product-presentation'
 import { blockTextOrNull, isInternalRoute } from '~/utils/tenant-page-block-data'
-import { publicApiRequest, isRecord } from '~/utils/api-clients'
+import { isRecord } from '~/utils/api-clients'
+import { loadPublicResourcePayload } from '~/composables/loadPublicResourcePayload'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { normalizeTenantPagePath } from '~/utils/tenant-page-blocks'
@@ -55,33 +56,13 @@ const isPageResponse = (value: unknown): value is { success: true; page: PublicT
 
 const requestEvent = useRequestEvent()
 const { consultation } = useOrganizationShellState()
-const { data, error, status, execute } = await useAsyncData(key, async () => {
-  if (import.meta.server) {
-    if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
-    const [{ cloudflareEnv }, { getPublicTenantPageForPath }] = await Promise.all([
-      import('~/server/utils/api-response'),
-      import('~/server/utils/public-tenant-pages'),
-    ])
-    const env = cloudflareEnv(requestEvent)
-    const db = env.db
-    if (!db) throw createError({ statusCode: 503, statusMessage: 'Database not available' })
-    const page = await getPublicTenantPageForPath(env, db, organizationId, pagePath.value, { locale: activeLocale.value, preview })
-    if (!page) throw createError({ statusCode: 404, statusMessage: 'Tenant page not found' })
-    return { success: true as const, page }
-  }
-  const query: Record<string, string> = activeLocale.value === 'en' ? { path: pagePath.value } : { path: pagePath.value, locale: activeLocale.value }
-  return await publicApiRequest<{ success: true; page: PublicTenantPage }>('/api/public/pages', {
-    query,
-    validate: isPageResponse,
-    coalesceKey: key.value,
+const { data, error, status, execute } = await useAsyncData(key, (_nuxtApp, { signal }) => {
+  const query = { path: pagePath.value, locale: activeLocale.value }
+  return loadPublicResourcePayload({
+    organizationId, resourceKind: 'document', url: `/api/public/pages?${new URLSearchParams(query)}`,
+    key: key.value, query, validate: isPageResponse, failureMessage: 'Public page failed', signal, requestEvent,
   })
-}, {
-  server: true,
-  lazy: false,
-  getCachedData(cacheKey) {
-    return useNuxtApp().payload.data[cacheKey] as { success: true; page: PublicTenantPage } | undefined
-  },
-})
+}, { dedupe: 'defer' })
 
 // Nuxt can defer a child request until mount while the previous route is
 // still hydrating. Await that same request before requiring its document.
@@ -103,6 +84,7 @@ if (!data.value?.page && status.value === 'success') {
 }
 
 const page = computed(() => data.value?.page ?? null)
+useHead(() => ({ htmlAttrs: { lang: page.value?.locale ?? activeLocale.value } }))
 // A service document owns content and SEO; its explicit root binding owns the
 // Product supplying Price, Session and Booking. Never derive it from a slug.
 const linkedOffer = await usePublicPageProduct(pagePath, activeLocale, computed(() => page.value?.product_id ?? null))
@@ -124,26 +106,6 @@ function serviceContent(canBook: boolean): PublicTenantPage {
   }) }
 }
 
-// The locale representations of the page this instance is showing, written the
-// way every other public route writes them (pages/blog/[slug].vue,
-// pages/posts/[slug].vue, layouts/blawby.vue): once, in setup.
-//
-// Not a watcher, and above all not a `watchEffect`: calling `useState` inside
-// the effect read the payload entry the effect then wrote, so the effect was
-// its own dependency and re-triggered forever. Vue's own guidance is the
-// reason -- "watchEffect ... automatically tracks every reactive property
-// accessed during its synchronous execution", while `watch` "won't track
-// anything accessed inside the callback"
-// (https://vuejs.org/guide/essentials/watchers, "watch vs. watchEffect").
-// In the production build that warning is compiled out, so the only symptom
-// was a pegged tab with an empty console.
-//
-// Setup is enough because Nuxt keys <NuxtPage> by the matched route path with
-// its params interpolated (nuxt/dist/pages/runtime/utils.js:9), so a hop
-// between two paths this catch-all serves mounts a new instance.
-//
-// Guarded by the same abandoned-instance condition as the check above: a page
-// nobody is looking at any more has nothing to announce.
 if (data.value?.page) {
   if (!data.value.page.locale_representations) {
     throw createError({ statusCode: 500, statusMessage: 'Tenant page locale representations were not returned' })

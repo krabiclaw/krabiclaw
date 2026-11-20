@@ -73,7 +73,11 @@ const isPlatform = computed(() => route.params.org_slug === 'platform')
 const collectionTabs = ARTICLE_COLLECTION_SLUGS.map(slug => ({ value: slug, label: ARTICLE_COLLECTIONS[slug].label }))
 if (route.query.collection !== undefined && !isArticleCollection(route.query.collection)) throw createError({ statusCode: 400, statusMessage: 'Choose an article collection' })
 const collection = ref<ArticleCollection>(isArticleCollection(route.query.collection) ? route.query.collection : 'blog')
-const { data, error, refresh } = await useArticleCategories(organizationId, collection)
+const { data, error, refresh } = await useArticleCategories(organizationId, collection, true, () => typeof route.params.category_id === 'string' ? route.params.category_id : null)
+watch(data, rows => {
+  const selected = rows?.find(row => row.id === route.params.category_id)
+  if (selected) collection.value = selected.collection
+}, { immediate: true })
 
 const editing = ref(false)
 const removingId = ref<string | null>(null)

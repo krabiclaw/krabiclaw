@@ -8,7 +8,7 @@
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <MediaPicker v-model="editor.form.announcementAssetId" :organization-id="editor.organizationId" accept="image" title="Select announcement image" />
+    <MediaPicker v-model="editor.form.announcementAssetId" :selected-summary="editor.mediaSummary(editor.form.announcementAssetId)" :organization-id="editor.organizationId" accept="image" title="Select announcement image" />
   </DashboardLeafPanel>
 </template>
 

@@ -1,10 +1,9 @@
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
-import { queryAll, type DbClient } from '~/server/db'
+import type { BatchQuery } from '~/server/db'
 import {
   articleCategoryEditorPath, blogEditorPath, brandEditorPath, collectionEditorPath,
   locationEditorPath, pageEditorPath, postEditorPath, productEditorPath, qaEditorPath,
 } from '~/server/utils/dashboard-links'
-import { getPersistedSourceLocale } from '~/server/utils/localization'
 
 interface LocalizableRow {
   id: string
@@ -90,76 +89,77 @@ function opportunity(
   return { id, label, completed: result.completed, total: result.total, path: `${path(result.first)}?${query}` }
 }
 
-export async function getOrganizationLocalizationProgress(
-  db: DbClient,
-  input: { organizationId: string; organizationSlug: string; locale: string },
-): Promise<OrganizationLocalizationProgress> {
-  const source = await getPersistedSourceLocale(db, input.organizationId)
-  if (input.locale === source.locale) throw new Error('Localization progress requires an additional language')
-  const params = [input.locale, input.organizationId]
-  const [organization, locations, catalog, collections, posts, blog, categories, qa, pages] = await Promise.all([
-    queryAll<LocalizableRow>(db, `SELECT s.id, s.name, s.vertical, s.brand_description, rl.values_json
-      FROM organization s LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'organization' AND rl.resource_id = s.id AND rl.locale = ?
+/** All saved additional languages use the same nine scoped content reads. */
+export function prepareOrganizationLocalizationProgress(organizationId: string | { sql: string }) {
+  const scope = `WITH localization_organization AS (SELECT ${typeof organizationId === 'string' ? '?' : organizationId.sql} AS id),
+    localization_languages AS (SELECT locale FROM organization_locales WHERE organization_id = (SELECT id FROM localization_organization) AND is_source = 0)`
+  const queries: BatchQuery[] = [
+    `SELECT localization_language.locale AS language_locale, s.id, s.name, s.vertical, s.brand_description, rl.values_json
+      FROM organization s CROSS JOIN localization_languages localization_language LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'organization' AND rl.resource_id = s.id AND rl.locale = localization_language.locale
         AND rl.organization_id = s.id
-      WHERE s.id = ?`, params),
-    queryAll<LocalizableRow>(db, `SELECT l.id, l.slug AS location_slug, l.title, l.address, l.description, l.short_description, rl.values_json
-      FROM business_locations l LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'business_location' AND rl.resource_id = l.id AND rl.locale = ?
+      WHERE s.id = (SELECT id FROM localization_organization)`,
+    `SELECT localization_language.locale AS language_locale, l.id, l.slug AS location_slug, l.title, l.address, l.description, l.short_description, rl.values_json
+      FROM business_locations l CROSS JOIN localization_languages localization_language LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'business_location' AND rl.resource_id = l.id AND rl.locale = localization_language.locale
         AND rl.organization_id = l.organization_id
-      WHERE l.organization_id = ? AND l.status = 'active' ORDER BY l.id`, params),
-    // One catalog, one row per product. There is no separate experience query
-    // and no category query: an experience is a product, and a collection is a
-    // site merchandising record localized in its own group below.
-    queryAll<LocalizableRow>(db, `
-      SELECT p.id, p.name, p.description, p.marketing_features, p.unit_label,
+      WHERE l.organization_id = (SELECT id FROM localization_organization) AND l.status = 'active' ORDER BY l.id`,
+    `
+      SELECT localization_language.locale AS language_locale, p.id, p.name, p.description, p.marketing_features, p.unit_label,
              p.details_json AS details,
              rl.values_json
-        FROM products p
+        FROM products p CROSS JOIN localization_languages localization_language
         JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'product' AND rl.resource_id = p.id AND rl.locale = ?
+        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'product' AND rl.resource_id = p.id AND rl.locale = localization_language.locale
           AND rl.organization_id = p.organization_id AND rl.organization_id = pub.organization_id
-       WHERE p.organization_id = ? AND p.active = 1
-       ORDER BY p.name, p.id`, params),
-    queryAll<LocalizableRow>(db, `
-      SELECT c.id, c.name, c.description, rl.values_json
-        FROM collections c
-        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'collection' AND rl.resource_id = c.id AND rl.locale = ?
+       WHERE p.organization_id = (SELECT id FROM localization_organization) AND p.active = 1
+       ORDER BY p.name, p.id`,
+    `
+      SELECT localization_language.locale AS language_locale, c.id, c.name, c.description, rl.values_json
+        FROM collections c CROSS JOIN localization_languages localization_language
+        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'collection' AND rl.resource_id = c.id AND rl.locale = localization_language.locale
           AND rl.organization_id = c.organization_id AND rl.organization_id = c.organization_id
-       WHERE c.organization_id = ?
-       ORDER BY c.sort_order, c.id`, params),
-    // Every published post and Q&A, the site's own and each location's: one
-    // list holds both, so neither is left out of what is left to translate.
-    queryAll<LocalizableRow>(db, `SELECT p.id, p.summary, p.metadata_json AS metadata,
+       WHERE c.organization_id = (SELECT id FROM localization_organization)
+       ORDER BY c.sort_order, c.id`,
+    `SELECT localization_language.locale AS language_locale, p.id, p.summary, p.metadata_json AS metadata,
         CASE WHEN t.id IS NULL THEN NULL ELSE json_object('summary',t.summary,'metadata',json(t.metadata_json)) END AS values_json
-      FROM content_documents p
-      LEFT JOIN content_documents t ON t.root_id = p.id AND t.row_role = 'representation' AND t.locale = ?
-      WHERE p.organization_id = ? AND p.kind = 'social_post' AND p.row_role = 'root' AND p.status = 'published' ORDER BY p.id`, params),
-    queryAll<LocalizableRow>(db, `SELECT p.id, p.title, p.summary, p.metadata_json AS metadata,
+      FROM content_documents p CROSS JOIN localization_languages localization_language
+      LEFT JOIN content_documents t ON t.root_id = p.id AND t.row_role = 'representation' AND t.locale = localization_language.locale
+      WHERE p.organization_id = (SELECT id FROM localization_organization) AND p.kind = 'social_post' AND p.row_role = 'root' AND p.status = 'published' ORDER BY p.id`,
+    `SELECT localization_language.locale AS language_locale, p.id, p.title, p.summary, p.metadata_json AS metadata,
         CASE WHEN t.id IS NULL THEN NULL ELSE json_object('title',t.title,'summary',t.summary,'metadata',json(t.metadata_json)) END AS values_json
-      FROM content_documents p LEFT JOIN content_documents t ON t.root_id = p.id AND t.row_role = 'representation' AND t.locale = ?
-      WHERE p.organization_id = ? AND p.kind = 'article' AND p.row_role = 'root' AND p.status = 'published' ORDER BY p.id`, params),
-    queryAll<LocalizableRow>(db, `
-      SELECT c.id, c.name, c.description, rl.values_json
-        FROM article_categories c
-        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'article_category' AND rl.resource_id = c.id AND rl.locale = ?
+      FROM content_documents p CROSS JOIN localization_languages localization_language LEFT JOIN content_documents t ON t.root_id = p.id AND t.row_role = 'representation' AND t.locale = localization_language.locale
+      WHERE p.organization_id = (SELECT id FROM localization_organization) AND p.kind = 'article' AND p.row_role = 'root' AND p.status = 'published' ORDER BY p.id`,
+    `
+      SELECT localization_language.locale AS language_locale, c.id, c.name, c.description, rl.values_json
+        FROM article_categories c CROSS JOIN localization_languages localization_language
+        LEFT JOIN ${RESOURCE_LOCALIZATIONS_SQL} rl ON rl.resource_type = 'article_category' AND rl.resource_id = c.id AND rl.locale = localization_language.locale
           AND rl.organization_id = c.organization_id
-       WHERE c.organization_id = ?
-       ORDER BY c.collection, c.sort_order, c.id`, params),
-    queryAll<LocalizableRow>(db, `SELECT q.id, q.title, q.summary,
+       WHERE c.organization_id = (SELECT id FROM localization_organization)
+       ORDER BY c.collection, c.sort_order, c.id`,
+    `SELECT localization_language.locale AS language_locale, q.id, q.title, q.summary,
         CASE WHEN t.id IS NULL THEN NULL ELSE json_object('title',t.title,'summary',t.summary) END AS values_json
-      FROM content_documents q
-      LEFT JOIN content_documents t ON t.root_id = q.id AND t.row_role = 'representation' AND t.locale = ?
-      WHERE q.organization_id = ? AND q.kind = 'qa' AND q.row_role = 'root' AND q.status = 'published' ORDER BY q.id`, params),
-    queryAll<LocalizableRow>(db, `SELECT source.id, source.product_id, source.title, source.summary,
+      FROM content_documents q CROSS JOIN localization_languages localization_language
+      LEFT JOIN content_documents t ON t.root_id = q.id AND t.row_role = 'representation' AND t.locale = localization_language.locale
+      WHERE q.organization_id = (SELECT id FROM localization_organization) AND q.kind = 'qa' AND q.row_role = 'root' AND q.status = 'published' ORDER BY q.id`,
+    `SELECT localization_language.locale AS language_locale, source.id, source.product_id, source.title, source.summary,
         CASE WHEN translated.id IS NULL THEN NULL ELSE json_object(
           'title', translated.title, 'summary', translated.summary,
           'content', (SELECT json_group_array(json(block.data_json)) FROM content_blocks block WHERE block.document_id = translated.id)
         ) END AS values_json,
         (SELECT json_group_array(json(block.data_json)) FROM content_blocks block WHERE block.document_id = source.id) AS content
-      FROM content_documents source
-      LEFT JOIN content_documents translated ON translated.root_id = source.id AND translated.row_role = 'representation' AND translated.locale = ?
-      WHERE source.organization_id = ? AND source.row_role = 'root' AND source.kind = 'page' ORDER BY source.id`, params),
-  ])
+      FROM content_documents source CROSS JOIN localization_languages localization_language
+      LEFT JOIN content_documents translated ON translated.root_id = source.id AND translated.row_role = 'representation' AND translated.locale = localization_language.locale
+      WHERE source.organization_id = (SELECT id FROM localization_organization) AND source.row_role = 'root' AND source.kind = 'page' ORDER BY source.id`,
+  ].map(query => ({ query: `${scope} ${query}`, params: typeof organizationId === 'string' ? [organizationId] : [] }))
+  return { queries, read(rows: D1Result[], organizationSlug: string, locales: string[]) {
+    return locales.map(locale => localizationProgressFromRows(rows.map(row => (row.results as LocalizableRow[]).filter(record => record.language_locale === locale) as LocalizableRow[]) as Parameters<typeof localizationProgressFromRows>[0], { organizationSlug, locale }))
+  } }
+}
 
+function localizationProgressFromRows(
+  [organization, locations, catalog, collections, posts, blog, categories, qa, pages]: [LocalizableRow[], LocalizableRow[], LocalizableRow[], LocalizableRow[], LocalizableRow[], LocalizableRow[], LocalizableRow[], LocalizableRow[], LocalizableRow[]],
+  input: { organizationSlug: string; locale: string },
+): OrganizationLocalizationProgress {
+  if (!organization?.length) throw new Error('Localization organization was not read')
   const slug = input.organizationSlug
   const groups = [
     { id: 'brand', label: 'Brand', result: progress(organization, ['name', 'brand_description']), path: () => brandEditorPath(slug) },

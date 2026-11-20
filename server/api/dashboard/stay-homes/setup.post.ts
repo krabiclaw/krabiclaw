@@ -3,120 +3,43 @@ import { queryFirst } from '~/server/db'
 import { createStayHome, placeStayHomePhotosFirst, readStayHome, stayAccessFor, stayHomeInput, stayHomeSetupAddress, updateStayHome } from '~/server/domain/stays'
 import { jsonResponse, readRequiredBody } from '~/server/utils/api-response'
 import { requireStays } from '~/server/utils/cms-capabilities'
-import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { dashboardOrganizationRequired, dashboardOrgQueryParam, getDashboardMemberContext, readDashboardMemberResources } from '~/server/utils/dashboard-context'
 import { firstHomeSetupPath } from '~/server/utils/dashboard-links'
-import { memberAccessPrincipal } from '~/server/utils/member-access'
+import { BATCH_VIEWER, memberAccessPrincipal } from '~/server/utils/member-access'
 import { planStayListing } from '~/server/utils/product-management'
 import { isRecord } from '~/server/utils/type-guards'
-import { STAY_SETUP_DESCRIPTION_LIMIT, STAY_SETUP_TITLE_LIMIT, STAY_WEEKEND_ADJUSTMENT_MIN, STAY_WEEKEND_ADJUSTMENT_MAX, stayHomeDraftInput, staySetupNightlyRates, type StayHomeSetupResponse } from '~/shared/stay-home-setup'
-import { isStayAmenityCodes, parseStayMapSharing, STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_LISTING_TYPES, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
-import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
+import { STAY_SETUP_DESCRIPTION_LIMIT, STAY_SETUP_TITLE_LIMIT, stayHomeDraftInput, staySetupNightlyRates } from '~/shared/stay-home-setup'
+import { isStayAmenityCodes, parseStayMapSharing, STAY_LISTING_TYPES } from '~/shared/stay-listing'
 import { coordinatesFailure } from '~/utils/location-map'
-import { parsePostalAddress } from '~/utils/postal-address'
-import { MAX_STAY_NIGHTS, STAY_DIRECT_DISCOUNTS } from '~/shared/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
-import { STAY_SAFETY_FIELDS, STAY_SAFETY_DETAILS_LIMIT } from '~/shared/stay-safety'
-import { clearStayHomeSetupDraft, readStayHomeSetupDraft, reopenUncommittedStayHomeSetupDraft, stayHomeDraftChanged, stayHomeDraftPhotos, writeStayHomeSetupDraft } from '~/server/utils/stay-home-setup-draft'
+import { STAY_SAFETY_DETAILS_LIMIT } from '~/shared/stay-safety'
+import { prepareStayHomeSetup, stayHomeSetupAddressDefaults, type StayHomeSetupLocation, stayHomeSetupSteps as steps, highlightChoices, disclosures, suggestedDiscounts, propertyGroups, clearStayHomeSetupDraft, readStayHomeSetupDraft, reopenUncommittedStayHomeSetupDraft, stayHomeDraftChanged, stayHomeDraftPhotos, writeStayHomeSetupDraft } from '~/server/utils/stay-home-setup-draft'
 import { creationDedupeKey, readCreationRecord } from '~/server/utils/organization-events'
 
-type SetupDraft = Extract<StayHomeSetupResponse, { steps: unknown }>['draft']
-
-const propertyChoices = Object.entries(STAY_PROPERTY_TYPES).map(([value, { label, icon }]) => ({
-  value,
-  label: value === 'house' ? 'House' : value === 'apartment' ? 'Apartment' : label,
-  icon,
-}))
-const prominentTypes = ['house', 'apartment']
-const typesByName = propertyChoices.filter(choice => !prominentTypes.includes(choice.value)).sort((a, b) => a.label.localeCompare(b.label, 'en'))
-const propertyGroups = Object.entries(STAY_PROPERTY_TYPE_GROUPS)
-
-const highlightChoices = [
-  { value: 'peaceful', label: 'Peaceful', icon: 'i-lucide-leaf', line: 'Slow down and unwind in a peaceful setting.' },
-  { value: 'unique', label: 'Unique', icon: 'i-lucide-sparkles', line: 'Make yourself at home somewhere a little different.' },
-  { value: 'family_friendly', label: 'Family-friendly', icon: 'i-lucide-users', line: 'Bring the whole family and enjoy time together.' },
-  { value: 'stylish', label: 'Stylish', icon: 'i-lucide-armchair', line: 'Enjoy a thoughtfully styled place to stay.' },
-  { value: 'central', label: 'Central', icon: 'i-lucide-map-pin', line: 'Stay in a central spot with easy access to the area.' },
-  { value: 'spacious', label: 'Spacious', icon: 'i-lucide-expand', line: 'Settle in with plenty of room to spread out.' },
-]
-const disclosures = (['exterior_security_cameras', 'noise_decibel_monitors', 'weapons_on_property'] as const).map(key => ({
-  key, label: STAY_SAFETY_FIELDS[key].name, required: false, detail_key: STAY_SAFETY_FIELDS[key].detailsKey,
-}))
-const priceFields = [
-  { key: 'base_price', label: 'Base price', required: true },
-  { key: 'weekend_adjustment', label: 'Weekend adjustment', detail: 'Friday and Saturday nights', required: false },
-]
-const weekendCount = { key: 'weekend_adjustment', label: 'Weekend adjustment', min: STAY_WEEKEND_ADJUSTMENT_MIN, max: STAY_WEEKEND_ADJUSTMENT_MAX, step: 1 }
-const suggestedDiscounts = { last_minute_percent: 7, weekly_percent: 10, monthly_percent: 20 } satisfies Record<keyof typeof STAY_DIRECT_DISCOUNTS, number>
-const steps = [
-  { id: 'address-search', title: 'Enter your address', action: 'Next', search_placeholder: 'Search for an address', manual_label: 'Enter address manually' },
-  { id: 'address', title: 'Confirm your address', action: 'Next', fields: [
-    { key: 'country', label: 'Country or region', required: true },
-    { key: 'address', label: 'Street address', required: true },
-    { key: 'city', label: 'City or town', required: true },
-    { key: 'state', label: 'State or region', required: false },
-    { key: 'zip_code', label: 'Postal code', required: false },
-    { key: 'timezone', label: 'Time zone', required: true },
-  ] },
-  { id: 'property', title: 'Which of these best describes your place?', action: 'Next',
-    choices: [...prominentTypes.map(type => propertyChoices.find(choice => choice.value === type)!), ...typesByName] },
-  { id: 'access', title: 'What space will guests have?', action: 'Next', choices: Object.entries(STAY_LISTING_TYPES).map(([value, type]) => ({
-    value, label: value === 'private_room' ? 'Private room' : type.label, detail: type.description,
-    icon: value === 'entire_place' ? 'i-lucide-house' : value === 'private_room' ? 'i-lucide-door-closed' : 'i-lucide-bed-double',
-  })) },
-  { id: 'pin', title: 'Is the pin in the right spot?', action: 'Next' },
-  { id: 'visibility', title: 'Choose how guests see your location', action: 'Next' },
-  { id: 'rooms', title: 'Share some basics about your place', action: 'Next', counts: [
-    { key: 'max_guests', label: 'Guests', min: 1, max: 99, step: 1 },
-    { key: 'bedrooms', label: 'Bedrooms', min: 0, max: 50, step: 1 },
-    { key: 'beds', label: 'Beds', min: 0, max: Number.MAX_SAFE_INTEGER, step: 1 },
-    { key: 'bathrooms', label: 'Bathrooms', min: 0, max: 50, step: 0.5 },
-  ] },
-  { id: 'amenities', title: 'Tell guests what your place offers', action: 'Next',
-    groups: Object.values(STAY_AMENITY_GROUPS).map(group => ({
-      label: group.label, choices: group.amenities.map(value => ({ value, label: STAY_AMENITIES[value].label, icon: STAY_AMENITIES[value].icon, symbol: STAY_AMENITIES[value].symbol })),
-    })) },
-  { id: 'photos', title: 'Add photos of your place', action: 'Next', max_photos: MAX_ORDERED_MEDIA_ASSETS },
-  { id: 'title', title: 'Give your listing a title', action: 'Next', name_label: 'Listing title', max_length: STAY_SETUP_TITLE_LIMIT },
-  { id: 'highlights', title: 'What stands out about your place?', detail: 'Choose up to two highlights to start your description.', action: 'Next',
-    choices: highlightChoices.map(({ value, label, icon }) => ({ value, label, icon })), max_selections: 2 },
-  { id: 'description', title: 'Write your listing description', action: 'Next', name_label: 'Listing description', max_length: STAY_SETUP_DESCRIPTION_LIMIT },
-  { id: 'booking', title: 'Set a minimum stay', detail: 'Applies to this listing.', action: 'Next',
-    counts: [{ key: 'min_nights', label: 'Minimum nights', min: 1, max: MAX_STAY_NIGHTS, step: 1 }] },
-  { id: 'pricing', title: 'Now, set your prices', action: 'Next', fields: priceFields, counts: [weekendCount] },
-  { id: 'discounts', title: 'Add discounts', detail: 'Optional. The largest eligible discount applies on your website.', action: 'Next',
-    choices: Object.entries(STAY_DIRECT_DISCOUNTS).map(([value, { label, detail }]) => ({ value, label, detail, icon: 'i-lucide-percent', suggested_percent: suggestedDiscounts[value as keyof typeof suggestedDiscounts] })),
-    counts: Object.keys(STAY_DIRECT_DISCOUNTS).map(key => ({ key, label: '%', min: 1, max: 99, step: 1 })) },
-  { id: 'disclosures', title: 'Share safety details', detail: 'Guests see these details before they book.', action: 'Finish',
-    fields: disclosures, max_length: STAY_SAFETY_DETAILS_LIMIT },
-] satisfies (Exclude<Extract<StayHomeSetupResponse, { steps: unknown }>['steps'][number], { id: 'pricing' }> | { id: 'pricing'; title: string; action: string; fields: typeof priceFields; counts: typeof weekendCount[] })[] // Currency is resolved per workspace.
 const roomStep = steps.find(step => step.id === 'rooms')!
 const highlightStep = steps.find(step => step.id === 'highlights')!
 const bookingStep = steps.find(step => step.id === 'booking')!
 const discountStep = steps.find(step => step.id === 'discounts')!
 
 export default defineHandler(async (event) => {
-  const { env, db, organization } = await getDashboardMemberContext(event, {})
+  const body = await readRequiredBody<Record<string, unknown>>(event)
+  const plan = body.step === undefined ? prepareStayHomeSetup(BATCH_VIEWER) : null
+  const initial = plan
+    ? await readDashboardMemberResources(event, { slug: dashboardOrgQueryParam(event) ?? (() => { throw dashboardOrganizationRequired() })() }, plan.queries)
+    : null
+  const { env, db, organization } = initial ?? await getDashboardMemberContext(event, {})
   const principal = memberAccessPrincipal(organization, { env, event })
   const access = await stayAccessFor(principal)
   if (!access.manage) throw new HTTPError({ statusCode: 403, message: 'Only managers can add a home' })
+  if (plan && initial) return jsonResponse(plan.read(initial.rows))
   await requireStays(db, organization.id)
-  const body = await readRequiredBody<Record<string, unknown>>(event)
   const defaults = async (locationId?: string) => {
-    // The onboarding location is the address the owner has already supplied for their first home.
-    const main = await queryFirst<{ id: string; address: string | null; timezone: string | null; latitude: number | null; longitude: number | null; stay_map_sharing: string }>(db, `
+    const main = await queryFirst<StayHomeSetupLocation>(db, `
       SELECT id, address, timezone, latitude, longitude, stay_map_sharing FROM business_locations
       WHERE organization_id = ? AND slug = 'main' AND status = 'active'
         AND ${locationId ? 'id = ?' : 'NOT EXISTS (SELECT 1 FROM product_stay_configs WHERE organization_id = ?)'}
     `, [organization.id, locationId ?? organization.id])
-    const postal = parsePostalAddress(main?.address)
-    const address = {
-      address: postal?.addressLines.join(', ') ?? '',
-      city: postal?.locality ?? '',
-      state: postal?.administrativeArea ?? '',
-      country: postal?.regionCode ?? '',
-      zip_code: postal?.postalCode ?? '',
-      timezone: main?.timezone ?? '',
-    }
+    const address = stayHomeSetupAddressDefaults(main)
     return { main, address }
   }
 
@@ -124,15 +47,6 @@ export default defineHandler(async (event) => {
   if (!isCurrencyCode(workspace?.default_currency)) throw new Error('Workspace is missing its pricing currency')
   const currency = workspace.default_currency
   const current = await readStayHomeSetupDraft(db, organization)
-  if (body.step === undefined) {
-    const { main, address } = await defaults()
-    let draft: SetupDraft = null
-    if (current) {
-      const { photo_ids, finishHash, ...saved } = current
-      draft = { ...saved, photos: await stayHomeDraftPhotos(db, organization.id, photo_ids), ...(finishHash ? { finishing: true } : {}) }
-    }
-    return jsonResponse({ steps: steps.map(step => step.id === 'pricing' ? { ...step, currency, currency_symbol: new Intl.NumberFormat('en', { style: 'currency', currency, currencyDisplay: 'narrowSymbol' }).formatToParts(0).find(part => part.type === 'currency')!.value } : step), defaults: { ...address, ...(main ? { location_id: main.id } : {}), ...(main?.latitude != null && main.longitude != null ? { latitude: main.latitude, longitude: main.longitude } : {}), stay_map_sharing: main?.stay_map_sharing ?? 'general', timezone: address.timezone || workspace?.timezone || '', min_nights: 1, max_guests: 1, bedrooms: 0, beds: 0, bathrooms: 0 }, exit_label: 'Save & exit', back_label: 'Back', draft })
-  }
 
   const index = steps.findIndex(step => step.id === body.step)
   if (index === -1 || !isRecord(body.answers)) throw new HTTPError({ statusCode: 400, message: 'Choose a home setup step and supply its answers' })

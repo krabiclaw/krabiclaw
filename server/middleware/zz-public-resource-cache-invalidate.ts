@@ -2,10 +2,9 @@
 // the write's HTTP result before it can report success. The search index follows
 // from the committed invalidation event.
 import { onResponse } from 'nitro/h3'
-import type { DbClient } from '~/server/db'
-import type { TenantHostEnv } from '~/server/utils/tenant-hosts'
+import { cloudflareEnv } from '~/server/utils/api-response'
 import { purgeOrganizationCaches } from '~/server/utils/public-resource-cache'
-import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
 const EDITOR_ORGANIZATIONS_PREFIX = '/api/editor/organizations/'
 
@@ -20,14 +19,10 @@ export default onResponse(async (response, event) => {
   const organizationId = params && typeof params.organization_id === 'string' ? params.organization_id : undefined
   if (!organizationId) throw new Error('Organization ID is required to invalidate a successful dashboard write')
 
-  const runtimeEnv = request.runtime?.cloudflare?.env as GuestInboxPublicationEnv & TenantHostEnv & {
-    DB?: DbClient
-    ORGANIZATION_CACHE?: KVNamespace
-  } | undefined
-  const kv = runtimeEnv?.ORGANIZATION_CACHE
-  if (!kv || !runtimeEnv?.DB) throw new Error('ORGANIZATION_CACHE and DB bindings are required to purge site caches after a dashboard write')
+  const env = cloudflareEnv(event)
+  if (!env.ORGANIZATION_CACHE || !env.DB) throw new Error('ORGANIZATION_CACHE and DB bindings are required to purge site caches after a dashboard write')
 
-  await purgeOrganizationCaches(runtimeEnv.DB, kv, organizationId, runtimeEnv)
-  await publishBusinessInvalidation(runtimeEnv, organizationId)
+  await purgeOrganizationCaches(env.DB, env.ORGANIZATION_CACHE, organizationId, env)
+  await publishBusinessInvalidation(env, organizationId)
   return response
 })

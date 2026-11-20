@@ -37,7 +37,7 @@ import { deleteBuyerCustomers } from '~/server/utils/billing-customer'
 import { anonymousLinkQueries, linkGuestIdentitiesByVerifiedEmail } from '~/server/utils/guest-accounts'
 import { isTracingTranscript, recordRequestExternalCall, timeTranscriptPhase, unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
-import { notifyOrganizationInvited } from '~/server/utils/notifications'
+import { notifyOrganizationInvited, notifyOrganizationInvitationAccepted } from '~/server/utils/notifications'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
 import { APPLE_AUTHORIZATION_CODE_HEADER, APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS, appleClientSecret, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
@@ -381,6 +381,11 @@ export interface DashboardAuthRead {
   results?: D1Result[]
 }
 
+/** Membership statements can join the same live session before Better Auth decodes it. */
+export function dashboardSessionUserQuery(token: string): BatchQuery {
+  return { query: '(SELECT "userId" FROM session WHERE token = ? AND "expiresAt" >= unixepoch())', params: [token] }
+}
+
 const dashboardAuthRead = new AsyncLocalStorage<DashboardAuthRead>()
 
 /** Drizzle's session/user join normally executes through raw(). Include it in the
@@ -492,11 +497,23 @@ function buildAuth(env: CloudflareEnv) {
         }
       },
       afterAddMember: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
-      afterAcceptInvitation: async ({ invitation, member }: { invitation: { id: string; listing_access?: string | null }; member: { organizationId: string } }) =>
-        recordMemberChange(member.organizationId, invitation.listing_access ? reconcileGuestListingParticipants(member.organizationId, {
+      afterAcceptInvitation: async ({ invitation, member, user, organization }: { invitation: { id: string; inviterId?: string | null; email: string; listing_access?: string | null }; member: { organizationId: string }; user?: { email?: string | null } | null; organization?: { id: string; name: string; slug: string } | null }) => {
+        await recordMemberChange(member.organizationId, invitation.listing_access ? reconcileGuestListingParticipants(member.organizationId, {
           query: `${conversationProductSql('c')} IN (SELECT json_extract(value, '$.listing_id') FROM json_each(?))`,
           params: [invitation.listing_access],
-        }) : []),
+        }) : [])
+        const org = organization ?? await queryFirst<{ id: string; name: string; slug: string }>(db, 'SELECT id, name, slug FROM organization WHERE id = ?', [member.organizationId])
+        if (org && invitation.inviterId) {
+          await notifyOrganizationInvitationAccepted(env, db, {
+            organizationId: org.id,
+            organizationName: org.name,
+            organizationSlug: org.slug,
+            inviterUserId: invitation.inviterId,
+            invitationId: invitation.id,
+            inviteeEmail: user?.email || invitation.email,
+          })
+        }
+      },
       afterRemoveMember: async ({ member }: { member: { id: string; organizationId: string; userId: string } }) => {
         // The hook's user is the affected member. The endpoint context holds
         // the person Better Auth actually authorized to remove them.

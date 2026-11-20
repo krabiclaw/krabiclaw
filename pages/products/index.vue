@@ -1,12 +1,12 @@
 <template>
   <NuxtLayout :name="isPlatform ? 'platform' : 'tenant'">
     <TenantPublicPage v-if="isPlatform" path="/products" />
-    <TenantProductCatalog v-else />
+    <TenantCatalog v-else surface="products" />
   </NuxtLayout>
 </template>
 
 <script setup lang="ts">
-import TenantProductCatalog from '~/components/products/TenantProductCatalog.vue'
+import TenantCatalog from '~/components/products/TenantCatalog.vue'
 definePageMeta({ layout: false })
 const { site } = useTenantOrganization().organization
 const isPlatform = site.slug === 'platform'

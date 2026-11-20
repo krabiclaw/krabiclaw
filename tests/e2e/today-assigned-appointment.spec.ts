@@ -7,7 +7,8 @@ import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
 import type { Product } from '../../server/types/products'
 import type { BusinessToday } from '../../shared/dashboard-today'
-import type { TaskSection } from '../../server/domain/tasks'
+import type { TaskSection, TaskView } from '../../server/domain/tasks'
+import type { ConversationPage } from '../../shared/messages-contract'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 const SLUG = 'harbor-legal-aid'
@@ -149,17 +150,15 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect(descriptionReadback.product).toMatchObject({ id: product.id, name: product.name, description, booking: { assigned_member_id: actor.id, held_online: true } })
     expect(descriptionReadback.product.image, 'The independently read Product still has no authored photo').toBeNull()
     await expect(legalCards.getByTestId('editor-card-description')).toContainText(description)
-    const forbiddenPreview = await memberContext.request.get(new URL(`${EDITOR}/context`, baseURL!).toString())
-    expect(forbiddenPreview.status(), await forbiddenPreview.text()).toBe(404)
-    expect(await forbiddenPreview.json()).not.toHaveProperty('context.preview_token')
     expect(product.page, 'the assigned Product has a real bound Page').toBeTruthy()
-    const ownerPage = await body<{ page: { product_id: string } }>(await page.request.get(`${EDITOR}/pages/${product.page!.id}`), 200)
+    const ownerPage = await body<{ page: { product_id: string }; preview_token: string }>(await page.request.get(`${EDITOR}/pages/${product.page!.id}`), 200)
     expect(ownerPage.page.product_id).toBe(product.id)
+    expect(ownerPage.preview_token).toBeTruthy()
     const forbiddenPage = await memberContext.request.get(new URL(`${EDITOR}/pages/${product.page!.id}`, baseURL!).toString())
     expect(forbiddenPage.status(), await forbiddenPage.text()).toBe(404)
-    // Dashboard documents serve the client-only shell; the real boundary is
-    // the protected API and the hydrated screen, rather than that shell's 200.
-    expect((await memberPage.goto(new URL(`${productPath}/page`, baseURL!).toString()))?.status()).toBe(200)
+    expect(await forbiddenPage.json()).not.toHaveProperty('preview_token')
+    // Server-rendered editors return the access decision in the document response.
+    expect((await memberPage.goto(new URL(`${productPath}/page`, baseURL!).toString()))?.status()).toBe(404)
     await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
     await expect(memberPage.getByRole('link', { name: 'Edit page content', exact: true })).toHaveCount(0)
     expect((await memberPage.goto(new URL(`${productPath}/description?editMode=preview&previewViewport=desktop`, baseURL!).toString()))?.status()).toBe(200)
@@ -302,6 +301,60 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     expect(await followUps(owner.id)).toMatchObject([{
       id: followUp!.id, status: 'open', version: followUp!.version + 1, due_at: followUp!.due_at, assignee: { id: owner.id },
     }])
+
+    // A client writes to the office that its door sticks. The owner makes a maintenance job of that message, prefilled with the office,
+    // for this member, who now does maintenance; their Today has the job, and Done with a note closes it in the job's conversation.
+    // A booking's opening, which Blawby writes for the client, offers no such job.
+    await body(await page.request.post('/api/auth/organization/update-member-role', {
+      headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'maintenance' },
+    }), 200)
+    const office = seededTenant('legal').locations.raleigh!
+    const repairTitle = `Lobby door sticks ${Date.now()}`
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto(new URL(conversationPath, baseURL!).toString())
+    await waitForNuxtHydration(page)
+    await expect(page.locator('[data-message]').first()).toBeVisible()
+    await expect(page.getByTestId('conversation-create-maintenance')).toHaveCount(0)
+    const report = await body<{ conversation_id: string }>(await clientContext.request.post('/api/public/contact', {
+      headers: seededSiteHeaders('legal'),
+      data: { name: guestName, email: `today-repair-${Date.now()}@playwright.example`, subject: 'general', message: 'The lobby door at your office sticks and is hard to open.', location_id: office.id, consent: true },
+    }), 201)
+    await page.goto(new URL(`${DASHBOARD}/messages/${report.conversation_id}`, baseURL!).toString())
+    await waitForNuxtHydration(page)
+    await page.getByTestId('conversation-create-maintenance').first().click()
+    const sheet = page.getByRole('dialog', { name: 'New maintenance job', exact: true })
+    await sheet.getByLabel(/^What needs fixing/).fill(repairTitle)
+    await expect(sheet.getByRole('combobox', { name: /^Where/ })).toContainText(office.title)
+    const eligible = await body<{ assignees: Array<{ id: string; name: string }> }>(await page.request.get(`/api/organizations/${ORGANIZATION}/tasks/maintenance-options`), 200)
+    const fixer = eligible.assignees.find(person => person.id === actor.id)
+    if (!fixer) throw new Error('The maintenance member is not offered for repair work')
+    await sheet.getByRole('combobox', { name: /^Assigned/ }).click()
+    await page.getByRole('option', { name: fixer.name, exact: true }).click()
+    const creating = page.waitForResponse(response => new URL(response.url()).pathname === `/api/organizations/${ORGANIZATION}/tasks` && response.request().method() === 'POST')
+    await sheet.getByRole('button', { name: 'Create', exact: true }).click()
+    const { task: repair } = await body<{ task: TaskView }>(await creating, 201)
+    expect(repair).toMatchObject({ kind: 'maintenance', status: 'open', title: repairTitle, place: office.title, assignee: { id: actor.id } })
+    await expect(sheet).toBeHidden()
+    // The job is posted in the office's conversation; the member's Today card opens it and closes from its strip.
+    const repairCard = async () => (await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)).cards.find(card => card.id === `task:${repair.id}`)
+    await expect.poll(async () => (await repairCard())?.to ?? null).toMatch(new RegExp(`^${DASHBOARD}/messages/`))
+    const card = (await repairCard())!
+    expect(card).toMatchObject({ when: 'Maintenance', headline: repairTitle, line: office.title, done: { path: `/api/organizations/${ORGANIZATION}/tasks/${repair.id}/complete` } })
+    await memberPage.setViewportSize({ width: 1280, height: 900 })
+    await memberPage.goto(new URL(card.to!, baseURL!).toString())
+    await waitForNuxtHydration(memberPage)
+    const jobCard = memberPage.getByTestId('conversation-job-card').filter({ hasText: repairTitle })
+    await expect(jobCard).toBeVisible()
+    await expect(jobCard.getByTestId('conversation-job-done')).toBeVisible()
+    const note = 'Planed the door; it closes now.'
+    const fixed = await body<{ task: TaskView }>(await memberContext.request.post(card.done!.path, { data: { note } }), 200)
+    expect(fixed.task).toMatchObject({ status: 'done', outcome: { note } })
+    // Read back through the owner's task read, not the completion's answer.
+    expect((await body<{ task: TaskView }>(await page.request.get(`/api/organizations/${ORGANIZATION}/tasks/${repair.id}`), 200)).task).toMatchObject({ status: 'done', outcome: { note } })
+    // The owner reads the note in the job's conversation.
+    const repairThread = card.to!.split('/').pop()!
+    const ownerRead = await body<ConversationPage>(await page.request.get(`/api/messages/${repairThread}`), 200)
+    expect(ownerRead.entries.some(entry => entry.type === 'message' && entry.body === note && entry.author_user_id === ACTOR)).toBe(true)
   } finally {
     try {
       if (requestId) {

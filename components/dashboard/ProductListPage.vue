@@ -81,8 +81,9 @@ const kind = computed({
   set: (value: string) => void navigateTo({ path: level.path.value, query: { ...route.query, kind: value === 'all' ? undefined : value } }),
 })
 const { data: catalog, error: catalogError } = await useAsyncData(
-  () => `dashboard-catalog:${organizationId}:${kind.value}`,
+  () => `dashboard-catalog:${organizationId}:${kind.value}${level.mode.value === 'yield' ? ':hidden' : ''}`,
   async () => {
+    if (level.mode.value === 'yield') return null
     if (import.meta.server) {
       const scope = useDashboardRouteScope().value
       if (!scope) throw createError({ statusCode: 400, statusMessage: 'Catalog organization is required' })
@@ -114,7 +115,7 @@ function isHomeSetupAction(value: unknown): value is HomeSetupAction {
 
 const showFirstHomeSetup = computed(() => canCreate.value && organization.value?.vertical === 'lodging' && catalog.value?.has_stays === false
   && (kind.value === 'stay' || (kind.value === 'all' && items.value.length === 0)))
-const loadsHomeSetup = computed(() => canCreate.value && organization.value?.vertical === 'lodging' && (kind.value === 'stay' || showFirstHomeSetup.value))
+const loadsHomeSetup = computed(() => level.mode.value !== 'yield' && canCreate.value && organization.value?.vertical === 'lodging' && (kind.value === 'stay' || showFirstHomeSetup.value))
 const { data: setup, error: setupError, pending: setupPending } = await useAsyncData(
   () => `first-home-setup:${organizationId}`,
   () => loadsHomeSetup.value
@@ -129,7 +130,7 @@ const { data: setup, error: setupError, pending: setupPending } = await useAsync
         },
       })
     : Promise.resolve({ first_home_setup: null, resume_home_setup: null }),
-  { server: false, watch: [kind, showFirstHomeSetup] },
+  { server: false, watch: [loadsHomeSetup] },
 )
 const firstHomeSetup = computed(() => setup.value?.first_home_setup)
 const firstHomeChoices = computed(() => firstHomeSetup.value ? [

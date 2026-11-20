@@ -35,7 +35,6 @@
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import ResponsibilityPicker from '~/components/dashboard/ResponsibilityPicker.vue'
-import { isTeamMembersResponse } from '~/lib/components/workspace/messages/team-thread-client'
 import { getErrorMessage } from '~/utils/errors'
 import { isOrganizationRole, listingAccessLevels, organizationRoleCards, type StoredListingAccess } from '~/utils/organization-access'
 
@@ -43,26 +42,26 @@ definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
 const dashboard = useDashboardOrganization()
-const api = useDashboardApi()
 const listingId = computed(() => p.product.value?.id)
 const canManageAccess = computed(() => Boolean(p.product.value && ['stay', 'table', 'service', 'experience'].includes(p.product.value.kind)) && (dashboard.organization.value?.role ?? '').split(',').includes('owner'))
 const grantPath = computed(() => `/api/messages/listings/${encodeURIComponent(listingId.value ?? '')}/participants`)
 const grantQuery = computed(() => ({ organization_id: dashboard.organizationId.value }))
+const { data: people, error: peopleError } = await useMemberSchedulingList(() => p.organizationId)
 
 function isGrantList(value: unknown): value is { staff_access_writes: boolean; grants: Array<{ member_id: string; access: StoredListingAccess }> } {
   return isRecord(value) && typeof value.staff_access_writes === 'boolean' && Array.isArray(value.grants) && value.grants.every(grant => isRecord(grant) && typeof grant.member_id === 'string'
     && typeof grant.access === 'string' && (grant.access === 'messaging' || Object.hasOwn(listingAccessLevels, grant.access)))
 }
 
-const { data: access, pending: accessPending, error: accessError } = await useAsyncData(
+const { data: access, pending: accessPending, error: accessError } = await useWebsiteIndexData(
   () => `listing-messaging-access:${grantQuery.value.organization_id}:${listingId.value}`,
-  async (_app, { signal }) => {
+  async (signal) => {
     if (!canManageAccess.value || !listingId.value) return null
-    const [grants, roster] = await Promise.all([
-      applicationFetch(grantPath.value, { query: grantQuery.value, signal, validate: isGrantList }),
-      api('/api/dashboard/team/members', { signal, validate: isTeamMembersResponse }),
-    ])
-    return { ...grants, members: roster.members }
+    const grants = await applicationFetch(grantPath.value, { query: grantQuery.value, signal, validate: isGrantList })
+    if (peopleError.value) throw peopleError.value
+    if (!people.value) throw new Error('Listing access members could not be read')
+    return { ...grants, members: people.value.members.map(member => ({ member_id: member.id, id: member.user_id,
+      name: member.user_name, email: member.email, image: member.image, role: member.role })) }
   },
 )
 const cohosts = computed(() => access.value?.members.filter(member => accessChoices(member).length > 1) ?? [])
@@ -88,7 +87,7 @@ async function setAccess(memberId: string, value: string) {
       validate: isGrantList,
     })
     if ((saved.grants.find(grant => grant.member_id === memberId)?.access ?? 'none') !== value) throw new Error('The server did not confirm the access change')
-    access.value = { ...access.value, ...saved }
+    Object.assign(access.value, saved)
   } catch (cause) {
     saveAccessError.value = getErrorMessage(cause, 'Listing access could not be saved')
   } finally {

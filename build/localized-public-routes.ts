@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs'
 
-import { isLocalizedPublicAliasPath } from '../shared/public-locale-routes'
+import { isLocalizedPublicAliasPath, DOCUMENT_ONLY_PUBLIC_PATHS } from '../shared/public-locale-routes'
 
 const localizedCatalogLocales = readdirSync(new URL('../i18n/catalogs/', import.meta.url))
   .flatMap(file => /^([a-z]{2}(?:-[A-Z]{2})?)\.json$/.exec(file)?.[1] ?? [])
@@ -21,3 +21,7 @@ export function localizedPublicRouteAliases<T extends { name?: string; path: str
     }]
   })
 }
+
+export const publicDocumentRouteRules = Object.fromEntries(DOCUMENT_ONLY_PUBLIC_PATHS.flatMap(path =>
+  [path, ...localizedCatalogLocales.map(locale => `/${locale}${path}`)].flatMap(path => [[path, { noScripts: true }], [`${path}/`, { noScripts: true }]]),
+))

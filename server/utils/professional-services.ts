@@ -57,10 +57,14 @@ export async function getOptionalPublicConsultationSettings(db: DbClient, organi
      LIMIT 1
   `, [organizationId])
 
-  if (!row) return null
+  return publicConsultationFromJson(row?.consultation_settings_json ?? null)
+}
+
+export function publicConsultationFromJson(json: string | null): PublicConsultationSettings | null {
+  if (json === null) return null
   let settings: z.output<typeof consultationSettingsSchema>
   try {
-    settings = consultationSettingsSchema.parse(JSON.parse(row.consultation_settings_json) as unknown)
+    settings = consultationSettingsSchema.parse(JSON.parse(json) as unknown)
   } catch (error) {
     throw new HTTPError({ statusCode: 500, statusMessage: 'Stored professional-service consultation settings are invalid', data: { code: 'INVALID_STORED_CONTENT' }, cause: error })
   }

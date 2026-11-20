@@ -166,7 +166,7 @@
       </UFormField>
     </fieldset>
     <UAlert v-if="error" color="error" variant="soft" class="mt-5" :description="error" />
-    <UButton v-if="error && (!step || draftChanged)" type="button" color="neutral" variant="outline" class="mt-4" @click="load">{{ draftChanged ? 'Reload saved answers' : 'Try again' }}</UButton>
+    <UButton v-if="error && (!step || draftChanged)" type="button" color="neutral" variant="outline" class="mt-4" @click="load()">{{ draftChanged ? 'Reload saved answers' : 'Try again' }}</UButton>
   </GuidedSetupShell>
 </template>
 
@@ -304,11 +304,11 @@ async function request(body: object) {
   })
 }
 
-async function load() {
+async function load(initial?: Flow) {
   pending.value = true
   error.value = ''
   try {
-    const response = await request({})
+    const response = initial ?? await request({})
     if (!('steps' in response)) throw new Error('Home setup returned no steps.')
     draftChanged.value = false
     const draft = response.draft
@@ -383,5 +383,13 @@ async function advance(addressSelected = false) {
   }
 }
 
-onMounted(load)
+const initial = await useAsyncData(`stay-home-setup:${organizationId}`, async () => {
+  const response = await request({})
+  if (!('steps' in response)) throw new Error('Home setup returned no steps.')
+  return response
+})
+if (initial.error.value) {
+  error.value = getErrorMessage(initial.error.value, 'Could not open home setup.')
+  pending.value = false
+} else if (initial.data.value) await load(initial.data.value)
 </script>

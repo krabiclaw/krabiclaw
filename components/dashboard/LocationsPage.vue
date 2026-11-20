@@ -54,7 +54,8 @@ const { organizationPaths } = dashboard
 const organization = computed(() => dashboard.organization.value)
 
 const orgSlug = computed(() => String(route.params.org_slug || ''))
-const { locations, error: locationsError, pending: locationsPending } = await useOrganizationLocations()
+const level = useRouteLevel()
+const { locations, error: locationsError, pending: locationsPending } = await useOrganizationLocations({ enabled: () => level.mode.value !== 'yield' })
 
 // A Legal Services site calls these offices. The vocabulary comes from
 // the same capabilities the rest of the dashboard reads; it depends on the

@@ -425,12 +425,19 @@ export async function listAvailabilityRules(
   productId: string,
   locationId?: string,
 ): Promise<ProductAvailabilityRule[]> {
-  return queryAll<ProductAvailabilityRule>(db, `
+  const query = availabilityRulesQuery(organizationId, productId, locationId)
+  return queryAll<ProductAvailabilityRule>(db, query.query, query.params)
+}
+
+export function availabilityRulesQuery(organizationId: string | { sql: string }, productId: string, locationId?: string) {
+  return {
+    query: `
     SELECT id, organization_id, product_id, location_id, timezone, weekday, start_time, capacity
     FROM product_availability_rules
-    WHERE organization_id = ? AND product_id = ? ${locationId ? 'AND location_id=?' : ''}
+    WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND product_id = ? ${locationId ? 'AND location_id=?' : ''}
     ORDER BY weekday, start_time, id
-  `, locationId ? [organizationId, productId, locationId] : [organizationId, productId])
+  `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), productId, ...(locationId ? [locationId] : [])],
+  }
 }
 
 function resolvedDuration(config: ProductBookingConfigRecord): number {

@@ -1,10 +1,11 @@
+import { prepareOrganizationLocalizationProgress } from '~/server/utils/organization-localization-opportunities'
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { PLATFORM_LOCALES, platformLocale } from '~/shared/platform-locales'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
-import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { assertOrganizationLanguage, canonicalizeLocale, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertOrganizationLanguage, canonicalizeLocale, getPersistedSourceLocale, sourceLocaleFromRows } from '~/server/utils/localization'
 import { localizationError } from '~/server/utils/localization-errors'
 import { validateLocalizedValues } from '~/server/utils/localization-registry'
 import { isLegalPracticeSite } from '~/utils/site-routing'
@@ -112,23 +113,21 @@ export async function deleteDisabledOrganizationLanguageContent(
 }
 
 
-export async function getOrganizationLanguageSettings(
-  db: DbClient, _env: CloudflareEnv,
-  input: { organizationId: string },
-) {
-  const [languageRows, source] = await Promise.all([
-    queryAll<{ locale: string; is_source: number; status: 'published' | 'disabled' }>(db, `
-      SELECT locale, is_source, status FROM organization_locales
-       WHERE organization_id = ? 
-    `, [input.organizationId]),
-    getPersistedSourceLocale(db, input.organizationId),
-  ])
-  const languages = languageRows.map(language => {
-    const catalog = platformLocale(language.locale)
-    if (!catalog) localizationError(500, 'PLATFORM_LOCALE_UNAVAILABLE', 'The saved organization language has no platform catalog', { locale: language.locale })
-    return { ...language, label: catalog.label }
-  })
-  const availableCatalogs = PLATFORM_LOCALES.filter(catalog => catalog.locale !== source.locale)
-    .map(({ locale, label, direction }) => ({ locale, label, direction }))
-  return { languages, available_catalogs: availableCatalogs }
+export function prepareOrganizationLanguageSettings(organizationId: string | { sql: string }, includeProgress = false) {
+  const languageQuery: BatchQuery = { query: `SELECT id, organization_id, locale, label, is_source, status FROM organization_locales
+    WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}`, params: typeof organizationId === 'string' ? [organizationId] : [] }
+  const progress = includeProgress ? prepareOrganizationLocalizationProgress(organizationId) : null
+  return { queries: [languageQuery, ...(progress?.queries ?? [])], read([languagesResult, ...rows]: D1Result[], resolvedId: string, slug: string) {
+    const languageRows = languagesResult!.results as { locale: string; is_source: number; status: 'published' | 'disabled' }[]
+    const source = sourceLocaleFromRows(resolvedId, languageRows.filter(language => language.is_source === 1))
+    const languages = languageRows.map(language => {
+      const catalog = platformLocale(language.locale)
+      if (!catalog) localizationError(500, 'PLATFORM_LOCALE_UNAVAILABLE', 'The saved organization language has no platform catalog', { locale: language.locale })
+      return { locale: language.locale, is_source: language.is_source, status: language.status, label: catalog.label }
+    })
+    const availableCatalogs = PLATFORM_LOCALES.filter(catalog => catalog.locale !== source.locale)
+      .map(({ locale, label, direction }) => ({ locale, label, direction }))
+    return { languages, available_catalogs: availableCatalogs,
+      ...(progress ? { progress: progress.read(rows, slug, languages.filter(language => !language.is_source).map(language => language.locale)) } : {}) }
+  } }
 }

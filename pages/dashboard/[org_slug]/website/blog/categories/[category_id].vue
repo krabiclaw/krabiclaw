@@ -36,6 +36,7 @@
 <script setup lang="ts">
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import { isCategoryResponse, type DashboardArticleCategory } from '~/composables/useArticleCategories'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard' })
@@ -43,25 +44,25 @@ definePageMeta({ layout: 'dashboard' })
 const route = useRoute()
 const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
+const realtime = useDashboardInvalidations()
 const organizationId = useDashboardOrganizationId()
 const categoryId = computed(() => String(route.params.category_id))
 
-const { data, error, refresh } = await useAsyncData(
-  () => `article-category:${organizationId}:${categoryId.value}`,
-  async () => (await dashboardApi(`/api/editor/organizations/${organizationId}/blog/categories/${categoryId.value}`, { validate: isCategoryResponse })).category,
-)
+const { data: siblings, error, refresh } = await useArticleCategories(organizationId, 'blog', true, categoryId)
+const category = computed<DashboardArticleCategory | null>(() => siblings.value?.find(row => row.id === categoryId.value) ?? null)
+watchEffect(() => {
+  if (siblings.value && !category.value && level.mode.value !== 'yield') showError(createError({ statusCode: 404, statusMessage: 'Category not found' }))
+})
 // A category the site does not have is not a page: it 404s rather than drawing an editor for it.
 watchEffect(() => {
   if (level.mode.value !== 'yield' && error.value && isNotFoundError(error.value)) showError(createError({ statusCode: 404, statusMessage: 'Category not found' }))
 })
 const loadFailure = computed(() => error.value && !isNotFoundError(error.value) ? getErrorMessage(error.value, 'The category could not be loaded') : '')
 
-const category = computed<DashboardArticleCategory | null>(() => data.value ?? null)
 const localizationFields = computed(() => [
   { key: 'name', label: 'Name', source: category.value?.name },
   { key: 'description', label: 'Description', source: category.value?.description, multiline: true },
 ])
-const { data: siblings } = await useArticleCategories(organizationId, () => category.value?.collection ?? 'blog')
 // A category without a parent is top-level; it cannot sit under itself or anything under it.
 const parentOptions = computed(() => {
   const all = siblings.value ?? []
@@ -91,10 +92,14 @@ async function save() {
   saving.value = true
   actionError.value = ''
   try {
-    await dashboardApi(`/api/editor/organizations/${organizationId}/blog/categories/${categoryId.value}`, {
+    const saved = await dashboardApi(`/api/editor/organizations/${organizationId}/blog/categories/${categoryId.value}`, {
       method: 'PATCH', body: { name: name.value.trim(), description: description.value.trim() || null, parent_id: parent.value }, validate: isCategoryResponse,
     })
-    await Promise.all([refresh(), refreshNuxtData(`article-categories:${organizationId}:${category.value?.collection}`)])
+    if (siblings.value) siblings.value = siblings.value.map(row => row.id === saved.category.id ? saved.category : row)
+    const held = realtime.held.begin(`website:article-categories:${organizationId}:category:${categoryId.value}`, businessChanged)
+    realtime.held.hold(held, siblings.value, Date.now() + 30_000, 16)
+    void refresh()
+    void refreshNuxtData(`article-categories:${organizationId}:${saved.category.collection}`)
   } catch (cause) {
     actionError.value = getErrorMessage(cause, 'The category could not be saved')
   } finally {
