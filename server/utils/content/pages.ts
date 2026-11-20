@@ -544,11 +544,12 @@ function prepareTenantPageSnapshot(page: BatchQuery, editor: boolean) {
         params: [...(page.params ?? []), ...(query.params ?? [])],
       })),
     ],
-    read([result, ...related]: D1Result[]) {
+    // Public readers append their own statements to this batch, so only the editor's own FAQ read is read here.
+    read([result, blockRows, mediaRows, faqRows]: D1Result[]) {
       const row = result!.results[0] as (PageRepresentationRow & ContentDocumentRow & { public_path?: string | null; source_path: string | null }) | undefined
       if (!row) return null
-      const blocks = tenantPageBlocksFromRows(related)
-      const faq = related[2]?.results as QaDocument[] | undefined
+      const blocks = tenantPageBlocksFromRows([blockRows!, mediaRows!])
+      const faq = editor ? faqRows!.results as QaDocument[] : undefined
       if (faq?.length) for (const block of blocks) {
         if (block.type === 'faq' && block.data.source === 'page_qa' && (!Array.isArray(block.data.items) || !block.data.items.length)) {
           block.data.items = faq.map(qa => ({ title: qa.question, description: qa.answer ?? '' }))
