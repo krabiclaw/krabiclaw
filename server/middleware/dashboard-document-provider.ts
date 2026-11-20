@@ -1,7 +1,7 @@
 import { parseHomesAdding } from '~/server/utils/billing'
 import { stayAccessFor } from '~/server/domain/stays'
-import { memberAccessPrincipal, roleAllows, assertRoleAllows } from '~/server/utils/member-access'
-import { getDashboardContext, getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { memberAccessPrincipal, roleAllows, assertRoleAllows, assertOrganizationWideAccess } from '~/server/utils/member-access'
+import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { readDashboardAgenda } from '~/server/utils/dashboard-agenda-reader'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { readDashboardEarnings, readDashboardPayoutsDocument } from '~/server/utils/dashboard-earnings'
@@ -54,12 +54,13 @@ export default defineHandler(event => {
             if (query.view !== 'performance') throw new HTTPError({ statusCode: 400, message: 'Earnings performance is required' })
             return readDashboardEarnings(event, query, orgSlug)
           case '/api/integrations/social-connections': {
-            const { organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
+            const { env, db, organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
             const scope = event.context.dashboardPostScope as { organization_id: string; location_id: string | null } | undefined
-            if (query.locationId !== undefined && typeof query.locationId !== 'string') throw new HTTPError({ statusCode: 400, message: 'Invalid publishing scope' })
-            const locationId = typeof query.locationId === 'string' && query.locationId ? query.locationId : null
+            const queryLocation = query.locationId ?? query.location_id
+            if (queryLocation !== undefined && typeof queryLocation !== 'string') throw new HTTPError({ statusCode: 400, message: 'Invalid publishing scope' })
+            const locationId = typeof queryLocation === 'string' && queryLocation ? queryLocation : null
             if (scope?.organization_id !== organization.id || scope.location_id !== locationId || query.organizationId !== undefined && query.organizationId !== organization.id) throw new HTTPError({ statusCode: 404, message: 'Publishing scope was not read for this document' })
-            if (locationId === null) await getDashboardContext(event, { organizationSlug: orgSlug })
+            if (locationId === null) await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
             if (!website?.content.has('post-connections')) throw new HTTPError({ statusCode: 404, message: 'Publishing destinations were not read for this document' })
             return website.content.get('post-connections')
           }
@@ -80,7 +81,8 @@ export default defineHandler(event => {
           }
           case '/api/dashboard/settings':
             if (query.view === 'website') {
-              await getDashboardContext(event, { organizationSlug: orgSlug })
+              const { env, db, organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
+              await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
               if (!website?.settings) throw new HTTPError({ statusCode: 500, message: 'Website settings were not read for this document' })
               return website.settings
             }
@@ -89,23 +91,25 @@ export default defineHandler(event => {
             return readCalendarSettingsDocument(event, orgSlug)
           default:
             if (/^\/api\/organizations\/[^/]+\/billing\/homes$/.test(resource)) {
-              const { organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
+              const { env, db, organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
+              await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
               const quote = event.context.dashboardHomesQuote as { organization_id: string; adding: number; read: () => Promise<unknown> } | undefined
               if (resource !== `/api/organizations/${organization.id}/billing/homes` || quote?.organization_id !== organization.id || quote.adding !== parseHomesAdding(query.adding)) throw new HTTPError({ statusCode: 404, message: 'Home cost was not read for this document' })
               return await timeRequestPhase(event, 'stripe_quote', () => quote.read())
             }
             if (/^\/api\/organizations\/[^/]+\/domains$/.test(resource)) {
-              const { organization } = await getDashboardContext(event, { organizationSlug: orgSlug })
+              const { env, db, organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
+              await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
               const domains = event.context.dashboardDomains as { organization_id: string; resource: unknown } | undefined
               if (resource !== `/api/organizations/${organization.id}/domains` || domains?.organization_id !== organization.id) throw new HTTPError({ statusCode: 404, message: 'Domains were not read for this document' })
               return domains.resource
             }
             if (resource.startsWith('/api/editor/') || /^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(resource)
               || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(resource)) {
-              const { organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
+              const { env, db, organization } = await getDashboardMemberContext(event, { organizationSlug: orgSlug })
               const prefix = `/api/editor/organizations/${organization.id}/`
               if (resource === `${prefix}locales` && query.view === 'progress') {
-                await getDashboardContext(event, { organizationSlug: orgSlug })
+                await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
                 const locales = event.context.dashboardLocales as { organization_id: string; resource: unknown } | undefined
                 if (locales?.organization_id !== organization.id) throw new HTTPError({ statusCode: 404, message: 'Languages were not read for this document' })
                 return locales.resource

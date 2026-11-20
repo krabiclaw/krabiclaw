@@ -417,8 +417,9 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
   const postId = websiteDocument && websiteSocialPost(panel)
   const post = postId && postId !== 'new' ? preparePost({ sql: BATCH_VIEWER.organization }, postId, BATCH_VIEWER) : null
   const postLocations = postId ? prepareOrganizationLocations(BATCH_VIEWER) : null
-  const postLocation = postId && !post && typeof query.location_id === 'string'
-    ? dashboardLocationQuery({ id: query.location_id }, { sql: BATCH_VIEWER.organization }, BATCH_VIEWER) : null
+  const postLocationId = typeof query.location_id === 'string' && query.location_id ? query.location_id : typeof query.locationId === 'string' && query.locationId ? query.locationId : null
+  const postLocation = postId && !post && postLocationId
+    ? dashboardLocationQuery({ id: postLocationId }, { sql: BATCH_VIEWER.organization }, BATCH_VIEWER) : null
   const postScope = post ? post.queries[0] : postLocation ? { query: `SELECT organization_id, id AS location_id FROM (${postLocation.query})`, params: postLocation.params } : undefined
   const postConnections = postId ? prepareSocialConnections(websiteEditorOrganization, postScope) : null
   const articleId = websiteBlogPost(panel) || (postId === 'new' && typeof query.article_id === 'string' ? query.article_id : null)

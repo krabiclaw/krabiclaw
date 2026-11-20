@@ -1109,7 +1109,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   ]
   if (!changedFields.length) {
     if (path !== '/') await refreshSocialCard({ db, env: input.env, owner: { owner_type: 'content_document', owner_id: variantId }, actorId: input.userId })
-    return { page: await getTenantPageById(db, variantId, input.scope) }
+    return { page: input.snapshot?.page ?? await getTenantPageById(db, variantId, input.scope) }
   }
   const updateVariant: BatchQuery = {
     query: 'UPDATE content_documents SET path = ?, title = ?, summary = ?, updated_by = ? WHERE id = ? AND organization_id = ?',
@@ -1122,7 +1122,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
     params: [metadata.pageType, metadata.recipe, sortOrder, input.userId,
       row.page_id, input.scope.organizationId, variantId],
   }
-  await updateContentDocument(db, row, {
+  const updateResult = await updateContentDocument(db, row, {
     blocks: blocksChanged ? blocksAsInputs(blocks) : undefined, updated_at: input.data.updated_at,
     actorId: input.userId, changedFields,
     additionalQueriesAfter: [...placementQueries, updateVariant, updatePage, ...bindingQueries],
@@ -1132,7 +1132,18 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   if (path !== '/') {
     await refreshSocialCard({ db, env: input.env, owner: { owner_type: 'content_document', owner_id: variantId }, actorId: input.userId })
   }
-  return { page: await getTenantPageById(db, variantId, input.scope) }
+  const isRoot = variantId === row.page_id
+  const updatedRow: PageRepresentationRow = {
+    ...row,
+    title: metadata.title,
+    summary: metadata.summary,
+    page_type: isRoot ? pageType : row.page_type,
+    recipe: isRoot ? metadata.recipe : row.recipe,
+    sort_order: isRoot ? sortOrder : row.sort_order,
+    product_id: isRoot && bindingQueries.length ? (asString(input.data.product_id, 'product_id') || null) : row.product_id,
+    updated_at: updateResult.updated_at,
+  }
+  return { page: pageDto(updatedRow, documentOf(updatedRow), blocks) }
 }
 
 /**
