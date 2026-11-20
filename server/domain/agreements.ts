@@ -40,9 +40,9 @@ export interface AgreementBooking {
   productKind: ProductKind
   status: string
   endsAt: string
-  /** The account that booked; it signs the listing's agreement. */
+  /** The account that booked; it signs the listing's agreement under the booking's guest name. */
   bookingUserId: string | null
-  guestName: string
+  guestName: string | null
 }
 
 export interface AgreementViewer {
@@ -55,78 +55,91 @@ export interface AgreementViewer {
 type AgreementRecord = MessageRow & { asset_id: string | null; file_name: string | null; r2_key: string | null; public_url: string | null }
 type ListingDocument = { asset_id: string; file_name: string | null; r2_key: string | null; public_url: string | null }
 
-function recordsQuery(conversationId: string): BatchQuery {
+/**
+ * The booking an agreement read is for: its ID, and its organization as a SQL
+ * value. A caller that batches the booking's own read passes the organization
+ * its batch already resolved (`BATCH_VIEWER.organization`), so the agreement
+ * rides in that same round trip.
+ */
+export interface AgreementTarget {
+  booking: { sql: string; params: unknown[] }
+  organization: { sql: string; params: unknown[] }
+}
+
+const BOOKING_CONVERSATION = (target: AgreementTarget) => ({
+  sql: `(SELECT id FROM conversations WHERE booking_id = ${target.booking.sql} AND organization_id = ${target.organization.sql} AND kind = 'booking')`,
+  params: [...target.booking.params, ...target.organization.params],
+})
+
+function recordsQuery(target: AgreementTarget): BatchQuery {
+  const conversation = BOOKING_CONVERSATION(target)
   return {
     query: `SELECT m.*, ma.id AS asset_id, ma.file_name, ma.r2_key, ma.public_url
       FROM messages m
       LEFT JOIN media_placements mp ON mp.owner_type = 'message' AND mp.owner_id = m.id AND mp.slot = 'agreement' AND mp.status = 'active'
       LEFT JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
-      WHERE m.conversation_id = ? AND m.event_name IN (${AGREEMENT_EVENTS.map(() => '?').join(', ')})
+      WHERE m.conversation_id = ${conversation.sql} AND m.event_name IN (${AGREEMENT_EVENTS.map(() => '?').join(', ')})
       ORDER BY m.sequence`,
-    params: [conversationId, ...AGREEMENT_EVENTS],
+    params: [...conversation.params, ...AGREEMENT_EVENTS],
   }
 }
 
-function listingQuery(organizationId: string, bookingId: string): BatchQuery {
+function listingQuery(target: AgreementTarget): BatchQuery {
   return {
     query: `SELECT ma.id AS asset_id, ma.file_name, ma.r2_key, ma.public_url
-      FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
-      WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.slot = 'agreement' AND mp.status = 'active'
-        AND mp.owner_id = (SELECT product_id FROM bookings WHERE id = ? AND organization_id = ?)`,
-    params: [organizationId, bookingId, organizationId],
+      FROM bookings b JOIN media_placements mp ON mp.organization_id = b.organization_id AND mp.owner_type = 'product' AND mp.owner_id = b.product_id AND mp.slot = 'agreement' AND mp.status = 'active'
+      JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
+      WHERE b.id = ${target.booking.sql} AND b.organization_id = ${target.organization.sql}`,
+    params: [...target.booking.params, ...target.organization.params],
   }
 }
 
-function bookingQuery(conversation: AgreementConversation): BatchQuery {
+function bookingQuery(target: AgreementTarget): BatchQuery {
   return {
-    query: `SELECT b.product_id, p.kind, b.status, b.ends_at, b.user_id, COALESCE(json_extract(c.payload_json, '$.guest.name'), u.name) AS guest_name
+    query: `SELECT c.id AS conversation_id, b.id AS booking_id, b.organization_id, b.product_id, p.kind, b.status, b.ends_at, b.user_id, COALESCE(json_extract(c.payload_json, '$.guest.name'), u.name) AS guest_name
       FROM bookings b JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
-      JOIN conversations c ON c.id = ? AND c.booking_id = b.id AND c.organization_id = b.organization_id
+      JOIN conversations c ON c.booking_id = b.id AND c.organization_id = b.organization_id AND c.kind = 'booking'
       LEFT JOIN user u ON u.id = b.user_id
-     WHERE b.id = ? AND b.organization_id = ?`,
-    params: [conversation.id, conversation.booking_id, conversation.organization_id],
+     WHERE b.id = ${target.booking.sql} AND b.organization_id = ${target.organization.sql}`,
+    params: [...target.booking.params, ...target.organization.params],
   }
 }
 
-function signersQuery(conversationId: string): BatchQuery {
+function signersQuery(target: AgreementTarget): BatchQuery {
+  const conversation = BOOKING_CONVERSATION(target)
   return {
     query: `SELECT p.user_id, u.name, u.isAnonymous AS anonymous, json_extract(c.payload_json, '$.guest.name') AS booked_name, json_extract(c.payload_json, '$.guest.email') AS booked_email
       FROM conversation_participants p JOIN user u ON u.id = p.user_id JOIN conversations c ON c.id = p.conversation_id
-     WHERE p.conversation_id = ? AND p.role = 'guest' ORDER BY p.created_at`,
-    params: [conversationId],
+     WHERE p.conversation_id = ${conversation.sql} AND p.role = 'guest' ORDER BY p.created_at`,
+    params: conversation.params,
   }
 }
 
-type AgreementConversation = Pick<ConversationRow, 'id' | 'organization_id' | 'booking_id' | 'kind'> & { booking_id: string }
-
-function bookingConversation(conversation: Pick<ConversationRow, 'id' | 'organization_id' | 'booking_id' | 'kind'>): AgreementConversation {
-  if (conversation.kind !== 'booking' || !conversation.booking_id) throw new HTTPError({ statusCode: 404, message: 'This conversation has no booking', data: { code: 'BOOKING_NOT_FOUND', field: 'conversation_id' } })
-  return { ...conversation, booking_id: conversation.booking_id }
+/**
+ * Everything an agreement reads, as statements for one batch: the booking, its
+ * conversation's agreement messages with their documents, the listing's
+ * agreement and, for the business, the guests it may ask to sign. A reader of
+ * the booking appends these to its own batch.
+ */
+export function agreementQueries(target: AgreementTarget, withSigners = false): BatchQuery[] {
+  return [bookingQuery(target), recordsQuery(target), listingQuery(target), ...(withSigners ? [signersQuery(target)] : [])]
 }
 
-/**
- * Everything an agreement reads, as statements for one batch: the booking, the
- * conversation's agreement messages with their documents, the listing's
- * agreement and, for the business, the guests it may ask to sign. A caller
- * that already reads the booking appends these to its own batch.
- */
-export function agreementQueries(conversation: Pick<ConversationRow, 'id' | 'organization_id' | 'booking_id' | 'kind'>, withSigners = false): BatchQuery[] {
-  const target = bookingConversation(conversation)
-  return [bookingQuery(target), recordsQuery(target.id), listingQuery(target.organization_id, target.booking_id), ...(withSigners ? [signersQuery(target.id)] : [])]
+/** How many statements `agreementQueries` adds to a batch. */
+export function agreementQueryCount(withSigners = false): number {
+  return withSigners ? 4 : 3
 }
 
 type SignerRow = { user_id: string; name: string | null; anonymous: number; booked_name: string | null; booked_email: string | null }
 
 /** The batch results of `agreementQueries`, in their order. */
-export function agreementFromResults(conversation: Pick<ConversationRow, 'id' | 'organization_id' | 'booking_id' | 'kind'>, results: { results: unknown[] }[]) {
-  const target = bookingConversation(conversation)
+export function agreementFromResults(results: { results: unknown[] }[]) {
   const [bookingRows, records, listing, signers] = results
-  const row = bookingRows?.results[0] as { product_id: string; kind: ProductKind; status: string; ends_at: string; user_id: string | null; guest_name: string | null } | undefined
-  if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found', data: { code: 'BOOKING_NOT_FOUND', field: 'conversation_id' } })
-  if (!row.guest_name?.trim()) throw new HTTPError({ statusCode: 409, message: 'This booking has no guest name to sign under', data: { code: 'GUEST_NAME_MISSING', field: 'guest_name' } })
+  const row = bookingRows?.results[0] as { conversation_id: string; booking_id: string; organization_id: string; product_id: string; kind: ProductKind; status: string; ends_at: string; user_id: string | null; guest_name: string | null } | undefined
+  if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found', data: { code: 'BOOKING_NOT_FOUND', field: 'booking_id' } })
   const booking: AgreementBooking = {
-    conversationId: target.id, organizationId: target.organization_id, bookingId: target.booking_id,
-    productId: row.product_id, productKind: row.kind, status: row.status, endsAt: row.ends_at, bookingUserId: row.user_id, guestName: row.guest_name.trim(),
+    conversationId: row.conversation_id, organizationId: row.organization_id, bookingId: row.booking_id,
+    productId: row.product_id, productKind: row.kind, status: row.status, endsAt: row.ends_at, bookingUserId: row.user_id, guestName: row.guest_name?.trim() || null,
   }
   return {
     booking,
@@ -136,9 +149,14 @@ export function agreementFromResults(conversation: Pick<ConversationRow, 'id' | 
   }
 }
 
-/** One D1 round trip for the agreement and its booking. */
-async function readAgreement(db: DbClient, conversation: Pick<ConversationRow, 'id' | 'organization_id' | 'booking_id' | 'kind'>, withSigners = false) {
-  return agreementFromResults(conversation, await executeBatch(db, agreementQueries(conversation, withSigners), { operation: 'Read booking agreement' }))
+function conversationTarget(conversation: Pick<ConversationRow, 'organization_id' | 'booking_id' | 'kind'>): AgreementTarget {
+  if (conversation.kind !== 'booking' || !conversation.booking_id) throw new HTTPError({ statusCode: 404, message: 'This conversation has no booking', data: { code: 'BOOKING_NOT_FOUND', field: 'conversation_id' } })
+  return { booking: { sql: '?', params: [conversation.booking_id] }, organization: { sql: '?', params: [conversation.organization_id] } }
+}
+
+/** One D1 round trip for the agreement and its booking, for a write or a document read. */
+async function readAgreement(db: DbClient, conversation: Pick<ConversationRow, 'organization_id' | 'booking_id' | 'kind'>, withSigners = false) {
+  return agreementFromResults(await executeBatch(db, agreementQueries(conversationTarget(conversation), withSigners), { operation: 'Read booking agreement' }))
 }
 
 function payload(record: Pick<MessageRow, 'payload_json'>): unknown {
@@ -177,10 +195,11 @@ function agreementState(records: AgreementRecord[], listing: ListingDocument | n
   if (listingSignature) {
     if (!listingSignature.asset_id) throw new Error(`Agreement signature ${listingSignature.id} has no document`)
     const signed = signedSchema.parse(payload(listingSignature))
-    return { request: null, listing: null, listingSignature, fields: [], signers: [{ key: signed.signer_key, name: booking.guestName, role: 'guest', signature: listingSignature }] }
+    return { request: null, listing: null, listingSignature, fields: [], signers: [{ key: signed.signer_key, name: signed.typed_name, role: 'guest', signature: listingSignature }] }
   }
   const open = (booking.status === 'pending' || booking.status === 'confirmed') && booking.endsAt > now
-  if (!listing || !open || !booking.bookingUserId) return null
+  // A booking with no guest named has no one to sign the listing's agreement.
+  if (!listing || !open || !booking.bookingUserId || !booking.guestName) return null
   return { request: null, listing, listingSignature: null, fields: [], signers: [{ key: `user:${booking.bookingUserId}`, name: booking.guestName, role: 'guest', signature: null }] }
 }
 
@@ -219,6 +238,15 @@ export function presentBookingAgreement(read: Pick<ReturnType<typeof agreementFr
   return state ? presentAgreement(state, read.booking, viewer) : null
 }
 
+/** The agreement as a booking read presents it, from the rows its batch read with `agreementQueries`. */
+export function bookingAgreementFromRows(rows: { results: unknown[] }[], viewer: AgreementViewer, actor: AgreementActor | null) {
+  const read = agreementFromResults(rows)
+  return {
+    agreement: presentBookingAgreement(read, viewer),
+    ...(viewer.canManage && read.signerRows && actor ? { agreement_signers: availableSigners(read.signerRows, actor) } : {}),
+  }
+}
+
 /** The agreement, and for the business who it may ask to sign, in one D1 round trip. */
 export async function readBookingAgreement(db: DbClient, conversation: Pick<ConversationRow, 'id' | 'organization_id' | 'booking_id' | 'kind'>, viewer: AgreementViewer, actor: AgreementActor) {
   const read = await readAgreement(db, conversation, viewer.canManage)
@@ -252,7 +280,7 @@ function joinNames(names: string[]): string {
   return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 }
 
-interface AgreementActor { userId: string; name: string }
+export interface AgreementActor { userId: string; name: string }
 
 /** A signed copy the business keeps on the booking. */
 export async function storeAgreement(env: CloudflareEnv, conversation: ConversationRow, actor: AgreementActor, file: File) {

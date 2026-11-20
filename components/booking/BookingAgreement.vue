@@ -48,13 +48,19 @@ const props = defineProps<{
   conversationId: string
   /** The booking's own route, under which the business sends a document to sign. */
   editorPath?: string | null
-  /** Changes when the conversation does, so a signature elsewhere shows here. */
-  revision?: number
+  /**
+   * The agreement the booking's read already carries. Without it — a guest who
+   * joined the conversation but holds no booking panel — the conversation's
+   * own agreement route is read instead.
+   */
+  preloaded?: { agreement: BookingAgreement | null; canManage: boolean }
 }>()
+const emit = defineEmits<{ changed: [] }>()
 
 const rowClass = 'flex w-full items-center gap-3 py-2.5 text-left text-sm text-highlighted disabled:opacity-50'
-const agreement = ref<BookingAgreement | null>(null)
-const canManage = ref(false)
+const fetched = ref<{ agreement: BookingAgreement | null; canManage: boolean } | null>(null)
+const agreement = computed(() => (props.preloaded ?? fetched.value)?.agreement ?? null)
+const canManage = computed(() => (props.preloaded ?? fetched.value)?.canManage === true)
 const error = ref('')
 const busy = ref<'store' | 'cancel' | null>(null)
 const signing = ref(false)
@@ -85,15 +91,19 @@ const statusLine = computed(() => {
   return `Waiting on ${names(waiting)}`
 })
 
+/** Read again after a write: the booking re-reads its own record, the conversation reads its route. */
 async function load() {
   error.value = ''
+  if (props.preloaded) {
+    emit('changed')
+    return
+  }
   try {
     const answer = await applicationFetch(base.value, {
       validate: (value): value is { agreement: BookingAgreement | null; can_manage: boolean } => isRecord(value)
         && (value.agreement === null || isBookingAgreement(value.agreement)) && typeof value.can_manage === 'boolean',
     })
-    agreement.value = answer.agreement
-    canManage.value = answer.can_manage
+    fetched.value = { agreement: answer.agreement, canManage: answer.can_manage }
   } catch (failure) {
     error.value = getErrorMessage(failure, 'The agreement could not be loaded')
   }
@@ -132,5 +142,6 @@ async function cancelRequest() {
   }
 }
 
-watch(() => [props.conversationId, props.revision], () => { void load() }, { immediate: true })
+// The conversation's own read, once, when no booking read carries the agreement.
+if (!props.preloaded) void load()
 </script>

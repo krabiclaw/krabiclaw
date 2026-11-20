@@ -13,6 +13,7 @@ import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevisio
 import { validateFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { agreementQueries, bookingAgreementFromRows } from '~/server/domain/agreements'
 import { assignedOperationsRoles, roleMatchesSql } from '~/utils/organization-access'
 import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, bookingOperationsScope, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
@@ -2461,7 +2462,7 @@ export async function readStayReservationHome(db: DbClient, input: Parameters<ty
 export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
-  stay: StayDetail
+  stay: StayDetail & { agreement: import('~/shared/agreements').BookingAgreement | null }
   home: Omit<StayReservationHome, 'internal_name'>
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
@@ -2469,14 +2470,24 @@ export interface GuestStay {
 }
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
-export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
+export async function readGuestStay(db: DbClient, viewer: { userId: string; verifiedEmail: string | null }, activityId: string): Promise<GuestStay> {
   const now = new Date()
-  const owned = await queryFirst<{ id: string; conversation_id: string; organization_id: string; product_id: string; paid_online: number; payment_processing: number }>(db, `
-    SELECT s.id, r.id AS conversation_id, s.organization_id, s.product_id,
+  const buyerUserId = viewer.userId
+  // The stay's agreement is read with its ownership, in the same round trip.
+  const ownedStay = `SELECT s.id, s.organization_id FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
+     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`
+  const [ownedRows, ...agreementRows] = await executeBatch(db, [{
+    query: `SELECT s.id, r.id AS conversation_id, s.organization_id, s.product_id,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id AND captured_amount > 0) AS paid_online,
            CASE WHEN s.status='pending' AND ${stayRequestRespondBySql('s')} IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql('r.id')}) ELSE 0 END AS payment_processing
       FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
-     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`, [now.toISOString(), activityId, buyerUserId])
+     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`,
+    params: [now.toISOString(), activityId, buyerUserId],
+  }, ...agreementQueries({
+    booking: { sql: `(SELECT id FROM (${ownedStay}))`, params: [activityId, buyerUserId] },
+    organization: { sql: `(SELECT organization_id FROM (${ownedStay}))`, params: [activityId, buyerUserId] },
+  })], { operation: 'Read the guest stay' })
+  const owned = ownedRows!.results[0] as { id: string; conversation_id: string; organization_id: string; product_id: string; paid_online: number; payment_processing: number } | undefined
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
   await ownedBuyerRequest(db, buyerUserId, owned.conversation_id)
   const stay = await getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id)
@@ -2490,7 +2501,8 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
   const paidStay = stay.status !== 'cancelled' && owned.paid_online === 1 && home.check_in_time !== null
     ? await ownedPaidStay(db, owned.organization_id, owned.id, buyerUserId) : null
   const cancellation = paidStay ? await guestStayCancellationQuote(db, paidStay.stay, paidStay.payment, now.toISOString()) : null
-  return { organization_id: owned.organization_id, stay, home, cancellation, payment_processing: owned.payment_processing === 1 }
+  const { agreement } = bookingAgreementFromRows(agreementRows, { ...viewer, canManage: false }, null)
+  return { organization_id: owned.organization_id, stay: { ...stay, agreement }, home, cancellation, payment_processing: owned.payment_processing === 1 }
 }
 
 /**

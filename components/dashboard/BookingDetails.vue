@@ -172,7 +172,7 @@
             </p>
           </div>
 
-          <BookingAgreement v-if="conversationId && !purchase" :class="sectionClass" :conversation-id="conversationId" :editor-path="personalScope ? null : editorPath" :revision="agreementRevision" />
+          <BookingAgreement v-if="conversationId && agreementRead" :class="sectionClass" :conversation-id="conversationId" :editor-path="personalScope ? null : editorPath" :preloaded="agreementRead" @changed="refreshDetails()" />
           <div v-if="panel.location || panel.address || panel.pin || panel.guide?.directions" id="getting-there" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Getting there</h2>
             <StaySetupMap v-if="panel.pin" :key="`${panel.pin.latitude},${panel.pin.longitude}`" :pin="panel.pin" :marker-icon="stay ? 'i-lucide-house' : 'i-lucide-map-pin'" :interactive="false" compact class="mt-4" />
@@ -553,7 +553,12 @@ function manageBookingParty() { guestManagement?.open(bookingParty.value) }
 const otherGuestLabel = computed(() => `${partySize.value - 1} other ${partySize.value === 2 ? recordCopy.value?.guestLabel ?? 'guest' : recordCopy.value?.guestsLabelPlural ?? 'guests'}`)
 const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text)
 const conversationId = computed(() => booking.value?.conversation_id ?? detail.value?.conversation_id ?? null)
-const agreementRevision = ref(0)
+/** The agreement the booking's own read carries; a read that carries none (a turnover) shows none. */
+const agreementRead = computed(() => {
+  const record = booking.value ?? detail.value
+  if (!record || !('agreement' in record) || record.agreement === undefined) return null
+  return { agreement: record.agreement, canManage: 'agreement_signers' in record && record.agreement_signers !== undefined }
+})
 const messageTo = computed(() => {
   if (!conversationId.value || (stay.value && !props.personalScope && !managedStay.value?.can_message_guest)) return null
   return `/dashboard/${encodeURIComponent(orgSlug.value)}/messages/${encodeURIComponent(conversationId.value)}`
@@ -648,9 +653,8 @@ watch(realtime.event, (event) => {
   } else if (event.type === 'stay.changed' && stay.value && (event.booking_id === stay.value.booking_id || (event.booking_id === null && event.product_id === stay.value.product_id))) {
     void refreshDetails()
   } else if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled && event.conversation_id === conversationId.value) {
-    // An agreement is signed or sent in the conversation; its panel reads it again.
-    agreementRevision.value++
-    if (booking.value || detail.value?.channel === 'airbnb') void refreshDetails()
+    // A signature or a sent agreement is a message, so the record reads again with its agreement.
+    if (booking.value || detail.value?.channel === 'airbnb' || agreementRead.value) void refreshDetails()
   }
 })
 watch(realtime.reconnectEpoch, epoch => {

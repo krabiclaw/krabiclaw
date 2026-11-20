@@ -22,8 +22,8 @@ export default defineHandler(async event => {
   const record = await ownedBuyerRequest(env.DB, session.user.id, id, lookup ?? 'booking')
   const headers = { 'cache-control': 'private, no-store' }
   if (record.unit === 'nights') {
-    const { stay, ...details } = await readGuestStay(env.DB, session.user.id, record.conversation_id)
+    const { stay, ...details } = await readGuestStay(env.DB, { userId: session.user.id, verifiedEmail: session.user.emailVerified ? session.user.email : null }, record.conversation_id)
     return jsonResponse({ ...details, booking: nightBooking(stay) }, { headers })
   }
-  return jsonResponse({ booking: await loadBuyerBookingDetails(env.DB, env, session.user.id, 'booking', record.booking_id, 'booking') }, { headers })
+  return jsonResponse({ booking: await loadBuyerBookingDetails(env.DB, env, { userId: session.user.id, verifiedEmail: session.user.emailVerified ? session.user.email : null }, 'booking', record.booking_id, 'booking') }, { headers })
 })
