@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:b99baed17a54fa1275aede1eb24fdcb45625be59066fc590a59531fbcc1698b4",
-  "documentationFingerprint": "sha256:e3efb484920594c0fa14ff182e4c4b78bf664f1f685c82b05faadd9a00246424",
+  "fingerprint": "sha256:e243e87ed1c72f629faf29612e7276a134b630880b167ae1150e5c6b4ba7e3ce",
+  "documentationFingerprint": "sha256:30e4fcd5eb6f97f57d49cf0e126db49758dfb1eca38c7090e1eb37ea7c91c2e6",
   "tools": [
     {
       "name": "add_organization_language",
@@ -13354,7 +13354,8 @@
                   "booking_change",
                   "custom",
                   "consultation_prep",
-                  "consultation_follow_up"
+                  "consultation_follow_up",
+                  "maintenance"
                 ],
                 "type": "string"
               },
@@ -13411,6 +13412,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "place": {
+                "type": [
+                  "string",
+                  "null"
                 ]
               },
               "product_id": {
@@ -13489,6 +13496,7 @@
               "image_url",
               "status_line",
               "title",
+              "place",
               "when",
               "detail",
               "error",
@@ -37093,19 +37101,19 @@
     {
       "name": "create_task",
       "title": "Create task",
-      "description": "Create a task with optional dates and one assignee. Specify location_id when the product is offered at multiple locations. A new assignee may be notified according to their settings. Reuse idempotency_key only for the same request.",
+      "description": "Create a task with optional dates and one assignee, or a maintenance job: a repair at a listing (product_id) or a location (location_id), posted to its person in a team conversation. A maintenance job reported by a guest names their message with source_message_id; its photos go with the job. A maintenance job requires assigned_member_id. Specify location_id when the product is offered at multiple locations. A new assignee may be notified according to their settings. Reuse idempotency_key only for the same request.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "assigned_member_id": {
-            "description": "A Better Auth member id from list_tasks assignees. null unassigns only a task someone added; a job (a clean, a home to get ready, a follow-up, a prep) always has a member.",
+            "description": "A Better Auth member id from list_tasks assignees. null unassigns only a task someone added; a job (a clean, a home to get ready, a follow-up, a prep, maintenance) always has a member, and maintenance goes to a maintenance member, an owner or an admin.",
             "type": [
               "string",
               "null"
             ]
           },
           "claim_role": {
-            "description": "Offer custom work to this role on the selected product_id.",
+            "description": "Offer custom work to this role on the selected product_id. Not for maintenance.",
             "type": "string"
           },
           "due_at": {
@@ -37116,6 +37124,14 @@
           "idempotency_key": {
             "maxLength": 200,
             "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "description": "custom (the default) or maintenance.",
+            "enum": [
+              "custom",
+              "maintenance"
+            ],
             "type": "string"
           },
           "location_id": {
@@ -37133,6 +37149,11 @@
             "type": "string"
           },
           "product_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_message_id": {
+            "description": "For maintenance: the guest message from get_conversation that reported the problem.",
             "minLength": 1,
             "type": "string"
           },
@@ -37276,7 +37297,8 @@
                   "booking_change",
                   "custom",
                   "consultation_prep",
-                  "consultation_follow_up"
+                  "consultation_follow_up",
+                  "maintenance"
                 ],
                 "type": "string"
               },
@@ -37333,6 +37355,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "place": {
+                "type": [
+                  "string",
+                  "null"
                 ]
               },
               "product_id": {
@@ -37411,6 +37439,7 @@
               "image_url",
               "status_line",
               "title",
+              "place",
               "when",
               "detail",
               "error",
@@ -71009,7 +71038,7 @@
     {
       "name": "list_tasks",
       "title": "List tasks",
-      "description": "Read Today or Upcoming as stored tasks: turnovers, booking decisions, scheduled messages that did not send and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
+      "description": "Read Today or Upcoming as stored tasks: turnovers, maintenance jobs, booking decisions, scheduled messages that did not send and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71025,7 +71054,8 @@
               "booking_change",
               "custom",
               "consultation_prep",
-              "consultation_follow_up"
+              "consultation_follow_up",
+              "maintenance"
             ],
             "type": "string"
           },
@@ -71231,7 +71261,8 @@
                           "booking_change",
                           "custom",
                           "consultation_prep",
-                          "consultation_follow_up"
+                          "consultation_follow_up",
+                          "maintenance"
                         ],
                         "type": "string"
                       },
@@ -71288,6 +71319,12 @@
                           {
                             "type": "null"
                           }
+                        ]
+                      },
+                      "place": {
+                        "type": [
+                          "string",
+                          "null"
                         ]
                       },
                       "product_id": {
@@ -71366,6 +71403,7 @@
                       "image_url",
                       "status_line",
                       "title",
+                      "place",
                       "when",
                       "detail",
                       "error",
@@ -101671,7 +101709,8 @@
                   "booking_change",
                   "custom",
                   "consultation_prep",
-                  "consultation_follow_up"
+                  "consultation_follow_up",
+                  "maintenance"
                 ],
                 "type": "string"
               },
@@ -101728,6 +101767,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "place": {
+                "type": [
+                  "string",
+                  "null"
                 ]
               },
               "product_id": {
@@ -101806,6 +101851,7 @@
               "image_url",
               "status_line",
               "title",
+              "place",
               "when",
               "detail",
               "error",
@@ -126250,7 +126296,7 @@
         "additionalProperties": false,
         "properties": {
           "assigned_member_id": {
-            "description": "A Better Auth member id from list_tasks assignees. null unassigns only a task someone added; a job (a clean, a home to get ready, a follow-up, a prep) always has a member.",
+            "description": "A Better Auth member id from list_tasks assignees. null unassigns only a task someone added; a job (a clean, a home to get ready, a follow-up, a prep, maintenance) always has a member, and maintenance goes to a maintenance member, an owner or an admin.",
             "type": [
               "string",
               "null"
@@ -126292,7 +126338,7 @@
             "type": "string"
           },
           "title": {
-            "description": "Only for a task someone added.",
+            "description": "Only for a task someone added or a maintenance job.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
@@ -126431,7 +126477,8 @@
                   "booking_change",
                   "custom",
                   "consultation_prep",
-                  "consultation_follow_up"
+                  "consultation_follow_up",
+                  "maintenance"
                 ],
                 "type": "string"
               },
@@ -126488,6 +126535,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "place": {
+                "type": [
+                  "string",
+                  "null"
                 ]
               },
               "product_id": {
@@ -126566,6 +126619,7 @@
               "image_url",
               "status_line",
               "title",
+              "place",
               "when",
               "detail",
               "error",

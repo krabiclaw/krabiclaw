@@ -322,8 +322,9 @@ export const jwks = sqliteTable("jwks", {
 export const tasks = sqliteTable('tasks', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  kind: text({ enum: ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] }).notNull(),
-  subject_type: text({ enum: ['scheduled_guest_message', 'booking', 'product_session'] }),
+  kind: text({ enum: ['turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up', 'maintenance'] }).notNull(),
+  // A maintenance job's subject is the guest's message that reported it, when it came from one.
+  subject_type: text({ enum: ['scheduled_guest_message', 'booking', 'product_session', 'message'] }),
   subject_id: text(),
   product_id: text(),
   location_id: text(),
@@ -348,10 +349,12 @@ export const tasks = sqliteTable('tasks', {
   index('tasks_status_due_idx').on(table.organization_id, table.status, table.due_at),
   index('tasks_member_status_due_idx').on(table.organization_id, table.assigned_member_id, table.status, table.due_at),
   index('tasks_subject_idx').on(table.subject_type, table.subject_id),
-  check('tasks_kind_check', sql`kind IN ('turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
+  check('tasks_kind_check', sql`kind IN ('turnover', 'message_delivery', 'booking_review', 'booking_change', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up', 'maintenance')
     AND (subject_type IS NULL) = (subject_id IS NULL)
-    AND (subject_type IS NULL OR subject_type IN ('scheduled_guest_message', 'booking', 'product_session'))
-    AND (kind <> 'custom' OR subject_type IS NULL)`),
+    AND (subject_type IS NULL OR subject_type IN ('scheduled_guest_message', 'booking', 'product_session', 'message'))
+    AND (kind <> 'custom' OR subject_type IS NULL)
+    AND (subject_type IS NOT 'message' OR kind = 'maintenance')
+    AND (kind <> 'maintenance' OR ((subject_type IS NULL OR subject_type = 'message') AND title IS NOT NULL AND location_id IS NOT NULL AND claim_role IS NULL))`),
   check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind <> 'custom' OR title IS NOT NULL)
     AND (notes IS NULL OR length(trim(notes)) BETWEEN 1 AND 5000)
     AND length(trim(dedupe_key)) > 0 AND timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
