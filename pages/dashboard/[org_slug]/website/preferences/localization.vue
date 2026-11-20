@@ -155,6 +155,7 @@ interface Language {
 }
 
 interface LocalizationSettings {
+  progress: LocalizationProgress[]
   languages: Language[]
   available_catalogs: Array<{ locale: string; label: string; direction: string }>
 }
@@ -180,6 +181,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const isLocalizationSettings = (value: unknown): value is LocalizationSettings => {
   if (!isRecord(value)) return false
+  if (!Array.isArray(value.progress) || !value.progress.every(isLocalizationProgress)) return false
   if (!Array.isArray(value.languages)) return false
   const langsValid = value.languages.every((language: unknown) => isRecord(language)
     && typeof language.locale === 'string' && Boolean(language.locale.trim())
@@ -213,18 +215,10 @@ const localesPath = `/api/editor/organizations/${organizationId}/locales`
 
 const { data: settings, error: settingsError, refresh: refreshSettings } = await useAsyncData(
   `organization-localization:${organizationId}`,
-  () => dashboardApi<LocalizationSettings>(localesPath, { validate: isLocalizationSettings }),
+  () => dashboardApi<LocalizationSettings>(localesPath, { query: { view: 'progress' }, validate: isLocalizationSettings }),
 )
 
-const { data: progressRows, refresh: refreshProgress } = await useAsyncData(
-  `organization-localization-progress:${organizationId}`,
-  () => Promise.all((settings.value?.languages ?? [])
-    .filter(language => !language.is_source)
-    .map(async (language) => {
-      const progress = await dashboardApi<LocalizationProgress>(`${localesPath}/${encodeURIComponent(language.locale)}/opportunities`, { validate: isLocalizationProgress })
-      return { ...progress, label: language.label }
-    })),
-)
+const progressRows = computed(() => settings.value?.progress.map(progress => ({ ...progress, label: settings.value!.languages.find(language => language.locale === progress.locale)!.label })) ?? [])
 
 const loadError = computed(() => settingsError.value ? (settingsError.value instanceof Error ? settingsError.value.message : 'Languages could not be loaded.') : null)
 
@@ -294,7 +288,6 @@ async function saveSelectedLanguages() {
     }
     addModalOpen.value = false
     await refreshSettings()
-    await refreshProgress()
   } catch (error) {
     actionError.value = error instanceof Error ? error.message : 'Adding languages failed.'
   } finally {
@@ -319,7 +312,6 @@ async function deleteLanguage(language: Language) {
       validate: isLanguageMutation,
     })
     await refreshSettings()
-    await refreshProgress()
   } catch (error) {
     actionError.value = error instanceof Error ? error.message : 'Hiding language failed.'
   } finally {
@@ -336,7 +328,6 @@ async function publishLanguage(language: Language) {
       validate: isLanguageMutation,
     })
     await refreshSettings()
-    await refreshProgress()
   } catch (error) {
     actionError.value = error instanceof Error ? error.message : 'Publishing language failed.'
   } finally {

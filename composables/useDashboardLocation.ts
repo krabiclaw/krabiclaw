@@ -1,38 +1,80 @@
-// Which location the current route addresses.
-//
-// This used to also export `routeLocationSlug`, `inLocationWorkspace`,
-// `routeLocation` (a pure alias of `currentLocation`), `buildLocationWorkspacePath`
-// and `selectLocation`. Nothing consumed any of them — every caller takes the
-// composable whole and reads only the three below. The path builder among them
-// fell back to `?? locationIdOrSlug` when a lookup missed, so an unknown id
-// produced a real-looking URL to a location that does not exist, while
-// `selectLocation` right beside it fast-failed on the same lookup. Two answers to
-// one question, neither reachable.
-export function useDashboardLocation() {
-  const dashboard = useDashboardOrganization()
-  const route = useRoute()
+import type { CatalogRow } from '~/shared/catalog-screen'
+import type { CatalogCounts } from '~/utils/product-presentation'
+import type { LocationContentCounts } from '~/server/utils/dashboard-editor-resources'
+import type { OpeningHours, SpecialHours } from '~/shared/reservation-hours'
+import type { PostalAddress } from '~/utils/postal-address'
+import { coordinatesFailure } from '~/utils/location-map'
+import { STAY_MAP_SHARING_MODES, type StayMapSharing } from '~/shared/stay-listing'
 
-  const routeLocationSlug = computed(() => {
-    const slug = route.params.location_slug
-    return typeof slug === 'string' ? slug : null
-  })
+export interface BusinessLocation {
+  id: string
+  slug: string
+  updated_at: string
+  title: string
+  address: PostalAddress | null
+  stay_map_sharing: StayMapSharing
+  latitude: number | null
+  longitude: number | null
+  phone: string | null
+  email: string | null
+  maps_url: string | null
+  google_review_url: string | null
+  description: string | null
+  short_description: string | null
+  price_level: string | null
+  google_place_id: string | null
+  opening_hours: OpeningHours
+  special_hours: SpecialHours
+  rating: number | null
+  review_count: number | null
+  status: string
+  last_synced_at: string | null
+  timezone: string
+}
 
-  const currentLocation = computed(() => {
-    if (!routeLocationSlug.value) return null
-    return dashboard.locations.value.find(location => location.slug === routeLocationSlug.value) ?? null
-  })
-
-  const currentLocationId = computed(() => currentLocation.value?.id ?? null)
-
-  // Falls back to the route's own slug because the URL is what names the
-  // location, whether or not the site's locations have loaded yet. This is not
-  // standing in for a missing record: an unknown slug yields no `currentLocation`
-  // and no `currentLocationId`, which is what callers check before acting.
-  const currentLocationSlug = computed(() => currentLocation.value?.slug ?? routeLocationSlug.value ?? null)
-
-  return {
-    currentLocation,
-    currentLocationId,
-    currentLocationSlug,
+const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string'
+export const isBusinessLocation = (value: unknown): value is BusinessLocation => {
+  if (!isRecord(value)) return false
+  return typeof value.id === 'string'
+    && typeof value.slug === 'string'
+    && typeof value.updated_at === 'string'
+    && typeof value.title === 'string'
+    && typeof value.status === 'string'
+    && STAY_MAP_SHARING_MODES.includes(value.stay_map_sharing as StayMapSharing)
+    && (value.latitude === null || typeof value.latitude === 'number')
+    && (value.longitude === null || typeof value.longitude === 'number')
+    && !coordinatesFailure({ latitude: value.latitude, longitude: value.longitude })
+    && (value.address === null || isRecord(value.address))
+    && isNullableString(value.phone)
+    && isNullableString(value.google_place_id)
   }
+
+export interface DashboardLocationEditorResource {
+  location: { success: true; location: BusinessLocation }
+  rows: CatalogRow[]
+  settings: CatalogRow
+  catalog: CatalogCounts
+  counts: LocationContentCounts
+}
+
+export function isDashboardLocationEditorResource(value: unknown): value is DashboardLocationEditorResource {
+  return isRecord(value) && isRecord(value.location) && value.location.success === true && isBusinessLocation(value.location.location)
+    && Array.isArray(value.rows) && isRecord(value.settings) && isRecord(value.catalog) && isRecord(value.counts)
+}
+
+/** One route resource owns the location, its index and all of its editable concerns. */
+export function useDashboardLocation() {
+  const route = useRoute()
+  const organizationId = useDashboardOrganizationId()
+  const api = useDashboardApi()
+  const slug = computed(() => typeof route.params.location_slug === 'string' ? route.params.location_slug : null)
+  const key = computed(() => `dashboard-location:${organizationId}:${slug.value ?? ''}`)
+  const read = useWebsiteIndexData<DashboardLocationEditorResource | null>(key, signal => {
+    if (!slug.value || slug.value === 'new') return Promise.resolve(null)
+    return api('/api/dashboard/locations', { query: { view: 'editor', location_slug: slug.value }, signal, validate: isDashboardLocationEditorResource })
+  })
+  const currentLocation = computed(() => read.data.value?.location.location ?? null)
+  return { ready: read, key, resource: read.data, error: read.error, refresh: read.refresh,
+    currentLocation, currentLocationId: computed(() => currentLocation.value?.id ?? null),
+    currentLocationSlug: computed(() => currentLocation.value?.slug ?? slug.value) }
 }

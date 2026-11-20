@@ -39,8 +39,7 @@ export const dark = {
 } as const
 
 /**
- * Coral marks, never a button: actions are monochrome like the product's,
- * navy on light and white on dark (the light and dark text tokens above).
+ * Brand primary accent: coral for marks and primary actions across all modes.
  */
 export const brand = {
   /** --kc-coral */

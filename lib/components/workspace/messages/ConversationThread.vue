@@ -32,8 +32,18 @@
               <template v-for="message in item.runs" :key="message.id">
                 <div v-if="message.job" class="w-full max-w-md rounded-[28px] bg-accented/50 p-2" :data-team-message="message.id" data-automatic data-testid="conversation-job-card">
                   <div class="rounded-3xl bg-default p-4 shadow-sm">
-                    <p class="text-sm text-muted">Job</p>
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-sm text-muted">Job</p>
+                      <UBadge v-if="message.job_status === 'done'" label="Done" color="success" variant="subtle" size="sm" />
+                      <UBadge v-else-if="message.job_status === 'cancelled'" label="Cancelled" color="neutral" variant="subtle" size="sm" />
+                      <UBadge v-else-if="message.job_status === 'skipped'" label="Skipped" color="neutral" variant="subtle" size="sm" />
+                    </div>
                     <p class="mt-0.5 whitespace-pre-wrap break-words text-base font-semibold text-highlighted">{{ message.body }}</p>
+                    <div v-if="message.photos.length" class="mt-3 grid gap-1" :class="message.photos.length > 1 ? 'grid-cols-2' : 'grid-cols-1'">
+                      <button v-for="(photo, at) in message.photos" :key="photo.id" type="button" class="block overflow-hidden rounded-2xl bg-accented" :aria-label="`Open photo ${at + 1} of ${message.photos.length}`" @click="viewer = { photos: message.photos.map(item => ({ url: item.url })), at }">
+                        <img :src="photo.thumbnail_url" alt="" loading="lazy" class="size-full object-cover" :class="message.photos.length > 1 ? 'aspect-square' : 'max-h-64'">
+                      </button>
+                    </div>
                     <UButton v-if="data?.job_actions?.[message.id]" label="Done" color="neutral" variant="soft" block class="mt-3 rounded-xl" :loading="closing" data-testid="conversation-job-done" @click="emit('done', message.id)" />
                   </div>
                 </div>
@@ -42,9 +52,10 @@
             </div>
 
             <div v-else class="flex min-w-0 max-w-[76%] flex-col gap-0.5" :class="item.mine ? 'items-end self-end' : 'relative items-start self-start pl-10'" :data-message="item.key">
-              <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" /></span>
-              <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
-              <div v-for="message in item.runs" :key="settledKeys[message.id] ?? message.id" class="flex min-w-0 flex-col" :class="item.mine ? 'items-end' : 'items-start'" :data-team-message="thread.kind === 'team' ? message.id : undefined" :data-automatic="message.automatic || undefined">
+              <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :image="imageOf(item.runs[0]!.author_user_id)" :support="thread.kind === 'support'" size="sm" /></span>
+              <!-- Airbnb's run header: "Shoba · Host 9:52 AM". -->
+              <p class="mb-1 mt-3 text-xs text-muted"><span class="font-semibold text-highlighted">{{ [item.runs[0]!.author, item.runs[0]!.side === 'business' ? titleOf(item.runs[0]!.author_user_id) : null].filter(Boolean).join(' · ') }}</span> {{ item.runs[0]!.time }}</p>
+              <div v-for="message in item.runs" :key="settledKeys[message.id] ?? message.id" class="group/message flex min-w-0 flex-col" :class="item.mine ? 'items-end' : 'items-start'" :data-team-message="thread.kind === 'team' ? message.id : undefined" :data-automatic="message.automatic || undefined">
                 <div v-if="message.photos.length" class="grid max-w-sm gap-1" :class="[message.photos.length > 1 ? 'grid-cols-2' : 'grid-cols-1', message.sending ? 'opacity-60' : '']">
                   <button
                     v-for="(photo, at) in message.photos"
@@ -57,18 +68,22 @@
                     <img :src="photo.thumbnail_url" alt="" :width="photo.width ?? undefined" :height="photo.height ?? undefined" loading="lazy" class="size-full object-cover" :class="message.photos.length > 1 ? 'aspect-square' : 'max-h-80'">
                   </button>
                 </div>
-                <div
-                  v-if="message.body"
-                  class="max-w-full whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2.5 text-base [overflow-wrap:anywhere]"
-                  :class="[item.mine ? 'rounded-br-md bg-inverted text-inverted' : 'rounded-bl-md bg-elevated text-default', message.sending ? 'opacity-60' : '']"
-                >{{ message.body }}</div>
+                <div v-if="message.body" class="flex min-w-0 max-w-full items-center gap-2" :class="item.mine ? 'flex-row-reverse' : ''">
+                  <div
+                    class="min-w-0 whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-base [overflow-wrap:anywhere]"
+                    :class="[item.mine ? 'bg-inverted text-inverted' : 'bg-accented/70 text-highlighted', message.sending ? 'opacity-60' : '']"
+                  >{{ message.body }}</div>
+                  <!-- What can be done with one message sits behind ⋯ beside it, as on Airbnb, not under every bubble. -->
+                  <UDropdownMenu v-if="messageActions(message, item.mine).length" :items="messageActions(message, item.mine)" :content="{ align: item.mine ? 'end' : 'start' }">
+                    <UButton icon="i-lucide-ellipsis" color="neutral" variant="outline" square size="sm" class="shrink-0 rounded-full opacity-0 transition group-hover/message:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100" :aria-label="`Actions for ${message.author}'s message`" />
+                  </UDropdownMenu>
+                </div>
                 <p v-if="message.unshown_files" class="mx-1 mt-0.5 flex items-center gap-1.5 text-xs text-muted">
                   <UIcon name="i-lucide-paperclip" class="size-3.5 shrink-0" />{{ message.unshown_files === 1 ? 'Sent a file that can’t be shown here' : `Sent ${message.unshown_files} files that can’t be shown here` }}
                 </p>
                 <p v-if="message.receipt && (message.receipt === 'Not delivered' || message.id === newestBusinessId)" class="mt-0.5 text-xs" :class="message.receipt === 'Not delivered' ? 'text-error' : 'text-muted'">
                   {{ message.receipt }}<template v-if="message.retryable"> · <button type="button" class="underline underline-offset-2 disabled:opacity-50" :disabled="retrying" @click="retry(message.id)">Try again</button></template>
                 </p>
-                <UButton v-if="thread.kind === 'team' && !message.automatic && !item.mine" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" @click="reportError = null; reporting = message">Report</UButton>
                 <div v-if="thread.kind === 'team' && failedDeliveries(message).length" class="mt-1 text-xs text-error" data-team-delivery-failure>
                   <p>Message saved. {{ failedDeliveries(message).length === 1 ? 'A notification failed.' : `${failedDeliveries(message).length} notifications failed.` }}</p>
                   <UCollapsible v-if="failedDeliveries(message).some(delivery => delivery.error)">
@@ -87,8 +102,6 @@
       <div class="shrink-0 pb-6 pt-2" :class="dashboardGutterClass">
         <UAlert v-if="actionError || readError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError ?? readError ?? undefined" class="mb-2" />
         <UButton v-if="readError" class="mb-2" color="neutral" variant="ghost" @click="readThroughNewest">Retry read receipt</UButton>
-
-        <UButton v-if="scheduledTo" :to="scheduledTo" label="Sent and upcoming" icon="i-lucide-clock" color="neutral" variant="link" size="sm" class="mb-1" />
 
         <!-- Suggested replies: rows above the composer, never side by side; one fills the field and does not send. -->
         <div v-if="suggestions.length" class="mb-2">
@@ -113,6 +126,9 @@
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
         <MessageComposer v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope && thread.kind !== 'team'" :suggest-reply="suggestionsOn && !!latestGuestMessage && !personalScope" :generating-suggestions="generatingSuggestions" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @suggest-reply="generateSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
+        <TaskCreate v-if="data?.maintenance && conversationOrganization" :open="repairing !== null" :organization-id="conversationOrganization"
+          :report="repairing ? { message_id: repairing.id, product_id: data.maintenance.product_id, location_id: data.maintenance.location_id, guest: data.maintenance.guest, photos: repairing.photos.length } : undefined"
+          @update:open="value => { if (!value) repairing = null }" @created="repairing = null; toast.add({ title: 'Maintenance job created', color: 'success' })" />
         <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell Blawby what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
     </template>
@@ -132,6 +148,7 @@ import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDr
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import InboxAvatar from './InboxAvatar.vue'
 import ReportDialog from './ReportDialog.vue'
+import TaskCreate from '~/components/dashboard/TaskCreate.vue'
 import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
@@ -158,10 +175,6 @@ const thread = computed(() => data.value?.conversation ?? null)
 const conversationOrganization = computed(() => thread.value?.organization_id ?? organizationId.value ?? undefined)
 const realtime = useDashboardInvalidations()
 const guestThread = computed(() => thread.value?.kind === 'team' ? null : thread.value)
-const scheduledTo = computed(() => !props.personalScope && guestThread.value ? {
-  path: `/dashboard/${encodeURIComponent(String(route.params.org_slug))}/messages/scheduled`,
-  query: { ...route.query, conversation_id: props.threadId },
-} : null)
 const entries = computed(() => data.value?.entries ?? [])
 const clockFormat = computed(() => new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }))
 const older = shallowRef<ConversationEntriesPage[]>([])
@@ -352,7 +365,7 @@ const rows = computed<Row[]>(() => {
   }
   if (attempt.value && sending.value && !items.some(item => item.type === 'message' && settledKeys.value[item.id] === `pending:${attempt.value?.key}`)) {
     items.push({
-      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, automatic: false, job: false, deliveries: [], sent_at: new Date().toISOString(),
+      type: 'message', id: `pending:${attempt.value.key}`, sequence: Number.MAX_SAFE_INTEGER, side: mineSide.value, author: 'You', author_user_id: userId.value ?? null, author_kind: mineSide.value === 'guest' ? 'guest' : 'member', automatic: false, job: false, deliveries: [], sent_at: new Date().toISOString(),
       time: 'Sending', body: attempt.value.body || null, receipt: null, retryable: false, unshown_files: 0, sending: true,
       photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnail_url: photo.url, width: null, height: null })),
     })
@@ -399,6 +412,17 @@ const rows = computed<Row[]>(() => {
 })
 
 const initialOf = (name: string) => [...name.trim()][0]?.toUpperCase() ?? '?'
+// A teammate's run carries their photo, as the participants list has it.
+const imageOf = (userId: string | null) => userId === null ? null : thread.value?.participants.find(person => person.id === userId)?.image ?? null
+const titleOf = (userId: string | null) => userId === null ? null : thread.value?.participants.find(person => person.id === userId && person.role === 'member')?.title ?? null
+function messageActions(message: MessageItem, mine: boolean) {
+  return [
+    ...data.value?.maintenance && message.author_kind === 'guest' && conversationOrganization.value
+      ? [{ label: 'Create maintenance job', icon: 'i-lucide-wrench', onSelect: () => { repairing.value = message } }] : [],
+    ...thread.value?.kind === 'team' && !message.automatic && !mine
+      ? [{ label: 'Report', icon: 'i-lucide-flag', onSelect: () => { reportError.value = null; reporting.value = message } }] : [],
+  ]
+}
 
 const viewer = ref<MessagePhotoViewerState | null>(null)
 
@@ -515,6 +539,9 @@ async function sendReply() {
 const chosen = useMessagePhotoDraft()
 
 const reporting = ref<MessageItem | null>(null)
+/** The guest's message a maintenance job is being made from. */
+const repairing = ref<MessageItem | null>(null)
+watch(() => props.threadId, () => { repairing.value = null })
 const reportSaving = ref(false)
 const reportError = ref<string | null>(null)
 const reportKeys = new Map<string, string>()

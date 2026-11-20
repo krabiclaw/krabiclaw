@@ -2,7 +2,7 @@ import type { H3Event } from 'h3'
 
 interface PublicResourceLoadOptions<T> {
   organizationId: string | null
-  resourceKind: 'shell' | 'page' | 'config'
+  resourceKind: 'shell' | 'page' | 'config' | 'document' | 'inquiry'
   url: string
   key: string
   query: Record<string, string | undefined>

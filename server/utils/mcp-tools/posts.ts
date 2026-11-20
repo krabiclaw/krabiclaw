@@ -76,7 +76,7 @@ const channelPostObject = {
 export const POSTS_TOOLS: McpToolDefinition[] = [
   organizationTool({
     name: 'get_social_connections',
-    description: "Read the site’s website, Facebook Page, Instagram and Discord channel publishing connections before selecting a publication target. Returns target_id, connection_revision, supported formats and operations, setup links, and problems, including whether Meta currently accepts each connection and whether the Blawby bot can still post to the connected Discord channel. Credentials are not returned.",
+    description: "Read the site's saved website, Facebook Page, Instagram and Discord publishing destinations before selecting a target. Returns target_id, connection_revision, supported formats and operations, setup links and saved setup problems. A channel operation checks access through its provider.",
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {},

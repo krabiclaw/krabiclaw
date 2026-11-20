@@ -24,6 +24,7 @@
       :class="rowsOnMobile ? 'border-b border-default last:border-b-0 lg:border-b-0' : undefined"
     >
       <NuxtLink
+        prefetch-on="interaction"
         :to="item.to"
         :aria-label="item.label"
         :aria-current="item.id === activeItem ? 'page' : undefined"

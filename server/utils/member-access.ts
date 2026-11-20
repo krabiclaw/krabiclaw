@@ -1,5 +1,5 @@
 import { listingGrantSql } from '~/server/domain/listing-access'
-import { assignedOperationsRoles, roleMatchesSql, workspaceManagementRoles, workspaceOperationsRoles } from '~/utils/organization-access'
+import { assignedOperationsRoles, roleMatchesSql, rolesAllowing, workspaceManagementRoles, workspaceOperationsRoles } from '~/utils/organization-access'
 import { HTTPError } from 'nitro';
 
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -111,6 +111,10 @@ export async function findLocation(
     LIMIT 1
   `, [input.locationId, input.organizationId])
 }
+
+/** The organization's first owner, by when they joined: who a job goes to when nobody else does it. The one place this is looked up. */
+export const organizationOwnerSql = (organizationSql: string) =>
+  `(SELECT owner.id FROM member owner WHERE owner.organizationId = ${organizationSql} AND ${roleMatchesSql('owner.role', ['owner'])} ORDER BY owner.createdAt, owner.id LIMIT 1)`
 
 export function isOrganizationWideRole(role: string): boolean {
   return role.split(',').some(value => workspaceManagementRoles.some(management => management === value.trim()))
@@ -400,7 +404,7 @@ export async function assertResponsibleMember(db: DbClient, organizationId: stri
   return memberId as string | null
 }
 
-/** Clear only departed/dangling current targets; booked-person history stays. */
+/** Clear only departed/dangling current targets, and repairs held by someone who no longer does maintenance; booked-person history stays. */
 export async function reconcileResponsibilities(env: GuestInboxPublicationEnv & EventsEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
   const now = new Date().toISOString()
   let changed = false
@@ -410,9 +414,11 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv & 
     // A job always has someone: it goes to the owner; a task someone added and an offering are left with nobody.
     const open = table === 'tasks' ? " AND status = 'open'" : ''
     const released = table === 'tasks'
-      ? `CASE WHEN kind IN ('turnover', 'consultation_follow_up', 'consultation_prep') THEN (SELECT owner.id FROM member owner WHERE owner.organizationId = tasks.organization_id AND owner.role = 'owner' ORDER BY owner.createdAt, owner.id LIMIT 1) END`
+      ? `CASE WHEN kind IN ('turnover', 'consultation_follow_up', 'consultation_prep', 'maintenance') THEN ${organizationOwnerSql('tasks.organization_id')} END`
       : 'NULL'
-    const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
+    // A repair also leaves someone whose role no longer does maintenance.
+    const repairer = roleMatchesSql('m.role', [...workspaceManagementRoles, 'maintenance'])
+    const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id${table === 'tasks' ? ` AND (${table}.kind <> 'maintenance' OR ${repairer})` : ''})`
     const rows = await queryAll<{ resource_id: string; assigned_member_id: string }>(db,
       `SELECT ${key} AS resource_id, assigned_member_id FROM ${table} WHERE organization_id = ?${open} AND ${memberMissing}`,
       [input.organizationId])
@@ -474,13 +480,14 @@ export const DASHBOARD_ORGANIZATION_COLUMNS = `o.theme_id, o.vertical, o.subdoma
   (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active') AS public_url,
   o.status, o.onboarding_status, o.default_currency, o.timezone`
 
-function membershipQuery(field: 'slug' | 'id', value: string, userId: string | BatchQuery): BatchQuery {
+function membershipQuery(field: 'slug' | 'id', value: string | BatchQuery, userId: string | BatchQuery): BatchQuery {
   const user = typeof userId === 'string' ? { query: '?', params: [userId] } : userId
+  const target = typeof value === 'string' ? { query: '?', params: [value] } : value
   return {
     query: `SELECT o.id AS organization_id, o.name, o.slug, m.id AS member_id, m.userId AS user_id, m.role,
         ${roleMatchesSql('m.role', workspaceOperationsRoles)} AS organization_wide, ${DASHBOARD_ORGANIZATION_COLUMNS}
-      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ${user.query} WHERE o.${field} = ?`,
-    params: [...user.params ?? [], value],
+      FROM organization o JOIN member m ON m.organizationId = o.id AND m.userId = ${user.query} WHERE o.${field} = ${target.query}`,
+    params: [...user.params ?? [], ...target.params ?? []],
   }
 }
 
@@ -489,7 +496,7 @@ export function membershipBySlugQuery(slug: string, userId: string | BatchQuery)
   return membershipQuery('slug', slug, userId)
 }
 
-export function membershipByIdQuery(id: string, userId: string): BatchQuery {
+export function membershipByIdQuery(id: string | BatchQuery, userId: string | BatchQuery): BatchQuery {
   return membershipQuery('id', id, userId)
 }
 
@@ -610,6 +617,20 @@ export async function assertLocationAccess(db: DbClient, input: MemberAccessPrin
   const assigned = await queryFirst<{ id: string }>(db, `SELECT bl.id FROM business_locations bl
     WHERE bl.organization_id = ? AND bl.id = ? AND ${locationMemberSql('bl.organization_id', 'bl.id')}`, [input.organizationId, input.locationId, input.userId])
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
+}
+
+export function locationAccessSql(viewer: ViewerTerms, alias: string) {
+  const manages = roleMatchesSql(viewer.role!, rolesAllowing({ locations: ['update'] }))
+  const assigned = roleMatchesSql(viewer.role!, rolesAllowing({ locations: ['assigned'] }))
+  return `(${manages} OR (${assigned} AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.id`, viewer.user)}))`
+}
+
+export function resourceLocationScopeSql(viewer: ViewerTerms, alias: string) {
+  const wide = roleMatchesSql(viewer.role!, workspaceManagementRoles)
+  return `((${alias}.location_id IS NULL AND ${wide}) OR EXISTS (
+    SELECT 1 FROM business_locations bl WHERE bl.id = ${alias}.location_id
+      AND bl.organization_id = ${alias}.organization_id AND ${locationAccessSql(viewer, 'bl')}
+  ))`
 }
 
 /** A resource that may or may not belong to one location (e.g. a review row) — dispatches to assertOrganizationWideAccess when the row's own location_id is null, assertLocationAccess otherwise. Check the target row's location_id, never a caller-supplied param. Media authorization uses its placement owner instead. */

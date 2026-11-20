@@ -71,7 +71,6 @@ APNS_BUNDLE_ID = "com.krabiclaw.app"
 # Web push (VAPID). The public key is what browsers subscribe with; VAPID_PRIVATE_KEY is its secret.
 NUXT_PUBLIC_VAPID_PUBLIC_KEY = "BG_WwHiB15TZy0I_b0OUKcTFNZk_7PS1gE2ljDNsC0xrLRltELxY8ZpbHtrPPF28CYu702QYvmutaHvbiy2sdCc"
 CF_PLATFORM_ZONE_ID = "cdde6f2a8040e76dd081c08c18ad41dd"
-CF_LEGACY_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 CF_SAAS_CNAME_TARGET = "customers.blawby.com"
 BETTER_AUTH_URL = "https://blawby.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://blawby.com"
@@ -224,8 +223,8 @@ WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "blawby-production-v28"
-database_id = "737276b7-41f7-4e05-8c6c-dc575b8d8e2a"
+database_name = "blawby-production-v29"
+database_id = "ba04f645-2820-4813-83fa-4567850be3e1"
 migrations_dir = "migrations"
 remote = false
 
@@ -422,8 +421,8 @@ WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]
 binding = "DB"
-database_name = "blawby-production-v28"
-database_id = "737276b7-41f7-4e05-8c6c-dc575b8d8e2a"
+database_name = "blawby-production-v29"
+database_id = "ba04f645-2820-4813-83fa-4567850be3e1"
 migrations_dir = "migrations"
 remote = false
 

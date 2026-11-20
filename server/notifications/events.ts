@@ -196,6 +196,9 @@ export function bookingCreatedMessage(input: BookingEventInput & { status: 'pend
   const counterparty = input.counterpartyLabel ?? input.presentation.counterpartyLabel
   const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   return {
+    subject: input.status === 'confirmed'
+      ? `${input.presentation.label} confirmed: ${input.guestName} - ${input.productTitle} @ ${input.date}${input.time ? ` ${input.time}` : ''}`
+      : `${input.presentation.label} request: ${input.guestName} - ${input.productTitle} @ ${input.date}${input.time ? ` ${input.time}` : ''}`,
     // A booking that arrived confirmed says so; one waiting for the business is a request.
     title: input.status === 'confirmed'
       ? `${input.presentation.label} confirmed - ${input.guestName}, ${input.day}`
@@ -227,6 +230,7 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
   const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   const standing = input.wasConfirmed ? `Confirmed ${input.presentation.noun}` : `${input.presentation.label} request`
   return {
+    subject: `${input.presentation.label} cancelled: ${input.guestName} - ${input.productTitle} @ ${input.date}${input.time ? ` ${input.time}` : ''}`,
     title: `${input.presentation.label} ${input.wasConfirmed ? 'canceled' : 'request withdrawn'} - ${input.guestName}, ${input.day}`,
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,

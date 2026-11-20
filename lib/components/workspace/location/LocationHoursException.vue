@@ -18,7 +18,7 @@
       </div>
       <UButton icon="i-lucide-plus" color="neutral" variant="soft" class="rounded-full" label="Add period" @click="entry.periods.push({ open_time: '09:00', close_time: '17:00', close_day_offset: 0 })" />
     </template>
-    <UFormField label="Guest message"><UInput :model-value="entry.note ?? ''" class="w-full" @update:model-value="entry.note = String($event) || null" /></UFormField>
+    <UFormField label="Guest message"><UTextarea :model-value="entry.note ?? ''" :rows="3" class="w-full" @update:model-value="entry.note = String($event) || null" /></UFormField>
   </div>
 </template>
 

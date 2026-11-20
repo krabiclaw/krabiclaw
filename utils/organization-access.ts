@@ -114,7 +114,7 @@ export const organizationRoleCards: Record<OrganizationRole, RoleCard> = {
   admin: { label: 'Admin', description: 'Manage the workspace and its team.', access: [] },
   property_manager: { label: 'Property Manager', vertical: 'lodging', description: 'Manage bookings, calendars, guest messages, and tasks across the workspace.', access: [] },
   cleaner: { label: 'Cleaner', vertical: 'lodging', description: 'See assigned cleaning work and claim available jobs at selected homes.', access: ['tasks'] },
-  maintenance: { label: 'Maintenance', vertical: 'lodging', description: 'See assigned repair work and claim available jobs at selected homes.', access: ['tasks'] },
+  maintenance: { label: 'Maintenance', description: 'See and finish the repair work assigned to you.', access: ['tasks'] },
   restaurant_manager: { label: 'Restaurant Manager', vertical: 'restaurant', description: 'Manage reservations, calendars, guest messages, and tasks across the workspace.', access: [] },
   kitchen: { label: 'Kitchen', vertical: 'restaurant', description: 'See the menu and work on assigned and available kitchen tasks.', access: ['tasks'] },
   host: { label: 'Host', vertical: 'restaurant', description: 'Handle table reservations and guest messages for selected tables.', access: allAccess },

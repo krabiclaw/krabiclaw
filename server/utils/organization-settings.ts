@@ -1,9 +1,9 @@
 import { HTTPError } from 'nitro'
 import { isLodgingConfirmationMode, LODGING_BOOKING_CHOICES } from '~/shared/lodging-booking'
-import { readLodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
+import { LODGING_BOOKING_POLICY_COLUMNS, lodgingBookingPolicy } from '~/server/utils/lodging-booking-policy'
 import { isLegalPracticeSite, isPlatformSite, resolvePublicSite } from '~/utils/site-routing'
-import { getPublicCompliance, getPublicConsultationSettings } from '~/server/utils/professional-services'
-import { deleteConfig, getConfig, setConfig } from '~/server/utils/organization-config'
+import { publicConsultationFromJson } from '~/server/utils/professional-services'
+import { CONFIG_COLUMNS, deleteConfig, getConfig, parseConfig, setConfig, type ConfigRow } from '~/server/utils/organization-config'
 import { createSystemSubdomain, isSystemSubdomainSpent } from '~/server/utils/domains'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -14,15 +14,18 @@ import type { UpdateOrganizationSettingsRequest } from '~/server/types/organizat
 import { integrationSummary, integrationsFromRows, integrationsQuery } from '~/server/utils/organization-integrations'
 import { executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
-import { buildSingleMediaPlacementQueries, hydrateMediaAssetRefs, readMediaPlacements } from '~/server/utils/media-asset-manager'
+import { buildSingleMediaPlacementQueries, groupMediaPlacements, hydrateMediaAssetRefs, mediaPlacementsQuery } from '~/server/utils/media-asset-manager'
 import { applySitePalettePatch, resolveSitePalette } from '~/shared/site-palette'
 import { SITE_RECIPE_KEYS, SITE_RECIPE_OPTIONS, isSiteRecipeValue, parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~/shared/media-placement-contract'
-import { loadOrganizationSocialCardRefresh, refreshSocialCard, queueOrganizationSocialCardRefresh } from '~/server/utils/social-card'
+import { organizationSocialCardRefresh, organizationSocialCardRefreshQuery, refreshSocialCard, queueOrganizationSocialCardRefresh } from '~/server/utils/social-card'
 import { BUSINESS_CURRENCY_FIXED, businessCurrencyFixed, type CloudflareEnv } from '~/server/utils/auth'
 import { prepareFormQuestionsWrite, readFormQuestions } from '~/server/domain/form-questions'
-import { formQuestionsRevision, type FormQuestion } from '~/shared/form-questions'
+import { formQuestionsRevision, parseStoredFormQuestions, type FormQuestion } from '~/shared/form-questions'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
+import { pageTasks, prepareTenantPages } from '~/server/utils/content/pages'
+import { recentArticleCards, recentArticleCardsQuery } from '~/server/utils/content/publishing'
+import { recentPostCardsQuery } from '~/server/utils/post-management'
 
 type SetupEnv = Parameters<typeof createSystemSubdomain>[0]
 
@@ -44,18 +47,11 @@ interface FullOrganizationRow extends OrganizationSettingsRow {
   timezone: string
   brand_description: string | null
   announcement_json: string | null
-  announcement_media_id: string | null
-  announcement_public_url: string | null
-  announcement_thumbnail_url: string | null
-  announcement_kind: 'image' | 'video' | null
-  favicon_media_id: string | null
-  favicon_public_url: string | null
-  favicon_thumbnail_url: string | null
-  favicon_kind: 'image' | 'video' | null
-  social_share_media_id: string | null
-  social_share_public_url: string | null
-  social_share_thumbnail_url: string | null
-  social_share_kind: 'image' | 'video' | null
+  consultation_settings_json: string | null
+  address_visibility: string | null
+  questions: string | null
+  policy_type: string | null
+  confirmation_mode: unknown
   contact_email: string | null
   seo_title: string | null
   seo_description: string | null
@@ -122,131 +118,127 @@ export async function loadSettingsPayload(
   env: CloudflareEnv,
   organizationId: string,
 ) {
-  const updatedOrganization = await queryFirst<FullOrganizationRow & { vertical: string; theme_id: string; locations_json: string }>(db, `
-    SELECT organization.id, subdomain, organization.status,
-           (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url, COALESCE((SELECT status FROM organization_domains WHERE organization_id = organization.id AND type = 'custom' AND status NOT IN ('deleted', 'disabled') ORDER BY role = 'canonical' DESC, created_at, id LIMIT 1), 'none') AS custom_domain_status, default_currency, timezone,
+  const plan = prepareSettingsPayload(organizationId, env)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read website settings' }))
+}
+
+export function prepareWebsiteSettings(organizationId: string | { sql: string }, env: CloudflareEnv) {
+  const settings = prepareSettingsPayload(organizationId, env)
+  const pages = prepareTenantPages(organizationId)
+  return {
+    queries: [...settings.queries, ...pages.queries, recentArticleCardsQuery(organizationId), recentPostCardsQuery(organizationId)],
+    read(rows: D1Result[]) {
+      const saved = settings.read(rows.slice(0, settings.queries.length))
+      const { pages: pageRows, source_locale } = pages.read(rows.slice(settings.queries.length, -2), saved.id)
+      return {
+        success: true, settings: saved,
+        pages: pageRows, tasks: pageTasks(pageRows),
+        source_locale,
+        articles: recentArticleCards(rows.at(-2)!.results), posts: rows.at(-1)!.results,
+      }
+    },
+  }
+}
+
+export function prepareSettingsPayload(organizationId: string | { sql: string }, env: CloudflareEnv) {
+  const org = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const params = typeof organizationId === 'string' ? [organizationId] : []
+  const connections = prepareConnectionSummary(organizationId)
+  const queries = [{ query: `
+    SELECT o.id, subdomain, o.status,
+           (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active') AS public_url, COALESCE((SELECT status FROM organization_domains WHERE organization_id = o.id AND type = 'custom' AND status NOT IN ('deleted', 'disabled') ORDER BY role = 'canonical' DESC, created_at, id LIMIT 1), 'none') AS custom_domain_status, default_currency, timezone,
            name, brand_description,
-           json_extract(organization.settings_json, '$.config.announcement') AS announcement_json,
-           amp.asset_id AS announcement_media_id, ama.public_url AS announcement_public_url,
-           ama.thumbnail_url AS announcement_thumbnail_url, ama.kind AS announcement_kind,
-           fmp.asset_id AS favicon_media_id, fma.public_url AS favicon_public_url,
-           fma.thumbnail_url AS favicon_thumbnail_url, fma.kind AS favicon_kind,
-           smp.asset_id AS social_share_media_id, sma.public_url AS social_share_public_url,
-           sma.thumbnail_url AS social_share_thumbnail_url, sma.kind AS social_share_kind,
+           json_extract(o.settings_json, '$.config.announcement') AS announcement_json,
+           ${CONFIG_COLUMNS},
+           ${LODGING_BOOKING_POLICY_COLUMNS},
+           json_extract(o.settings_json, '$.inquiry.questions') AS questions,
+           json_extract(o.settings_json, '$.compliance.address_visibility') AS address_visibility,
+           CASE WHEN json_type(o.consultation_settings_json) = 'object' THEN o.consultation_settings_json END AS consultation_settings_json,
            contact_email,
            seo_title, seo_description, canonical_url,
-           CASE WHEN json_type(organization.consultation_settings_json) = 'object' THEN json_extract(organization.consultation_settings_json, '$.mode') END AS consultation_mode,
-           strftime('%Y-%m-%dT%H:%M:%fZ', organization."createdAt", 'unixepoch') AS created_at, organization.updated_at,
+           CASE WHEN json_type(o.consultation_settings_json) = 'object' THEN json_extract(o.consultation_settings_json, '$.mode') END AS consultation_mode,
+           strftime('%Y-%m-%dT%H:%M:%fZ', o."createdAt", 'unixepoch') AS created_at, o.updated_at,
            vertical, theme_id,
-           COALESCE(NULLIF((SELECT COUNT(*) FROM reviews WHERE organization_id = organization.id AND status = 'approved'), 0), (SELECT SUM(review_count) FROM business_locations WHERE organization_id = organization.id AND status = 'active'), 0) AS reviews_count,
-           COALESCE((SELECT ROUND(AVG(rating), 2) FROM reviews WHERE organization_id = organization.id AND status = 'approved'), (SELECT ROUND(AVG(rating), 2) FROM business_locations WHERE organization_id = organization.id AND status = 'active' AND rating > 0), 0) AS average_rating,
-           ${INTEGRATION_LOCATIONS_JSON} AS locations_json
-    FROM organization
-    LEFT JOIN media_placements amp ON amp.organization_id = organization.id AND amp.owner_type = 'organization'
-      AND amp.owner_id = organization.id AND amp.slot = 'announcement' AND amp.sort_order = 0 AND amp.status = 'active'
-    LEFT JOIN media_assets ama ON ama.id = amp.asset_id AND ama.status = 'active'
-    LEFT JOIN media_placements fmp ON fmp.organization_id = organization.id AND fmp.owner_type = 'organization'
-      AND fmp.owner_id = organization.id AND fmp.slot = 'favicon' AND fmp.sort_order = 0 AND fmp.status = 'active'
-    LEFT JOIN media_assets fma ON fma.id = fmp.asset_id AND fma.status = 'active'
-    LEFT JOIN media_placements smp ON smp.organization_id = organization.id AND smp.owner_type = 'organization'
-      AND smp.owner_id = organization.id AND smp.slot = 'social_share' AND smp.sort_order = 0 AND smp.status = 'active'
-    LEFT JOIN media_assets sma ON sma.id = smp.asset_id AND sma.status = 'active'
-    WHERE organization.id = ?
-    LIMIT 1
-  `, [organizationId])
+           COALESCE(NULLIF((SELECT COUNT(*) FROM reviews WHERE organization_id = o.id AND status = 'approved'), 0), (SELECT SUM(review_count) FROM business_locations WHERE organization_id = o.id AND status = 'active'), 0) AS reviews_count,
+           COALESCE((SELECT ROUND(AVG(rating), 2) FROM reviews WHERE organization_id = o.id AND status = 'approved'), (SELECT ROUND(AVG(rating), 2) FROM business_locations WHERE organization_id = o.id AND status = 'active' AND rating > 0), 0) AS average_rating
+    FROM organization o WHERE o.id = ${org}
+  `, params },
+  mediaPlacementsQuery({ organizationId, ownerType: 'organization', owners: { sql: `SELECT ${org}`, params } }),
+  organizationSocialCardRefreshQuery(organizationId),
+  ...connections.queries]
 
-  if (!updatedOrganization) {
-    throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  }
+  return { queries, read }
 
-  const siteConfig = await getConfig(db, organizationId)
-  const site = resolvePublicSite({ themeId: updatedOrganization.theme_id}).slug
-  const [compliance, consultation] = isLegalPracticeSite({ vertical: updatedOrganization.vertical, themeId: updatedOrganization.theme_id })
-    ? await Promise.all([getPublicCompliance(db, organizationId), getPublicConsultationSettings(db, organizationId)])
-    : [null, null]
-  // Both logos with their presentation, through the canonical placement reader.
-  const logos = (await readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] }))
-    .get(organizationId)!.filter(item => (LOGO_SLOTS as readonly string[]).includes(item.slot))
+  function read([organization, placements, refresh, ...integrationRows]: D1Result[]) {
+    const updatedOrganization = organization!.results[0] as FullOrganizationRow & ConfigRow | undefined
+    if (!updatedOrganization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+    const id = updatedOrganization.id
+    const siteConfig = parseConfig(updatedOrganization)
+    const site = resolvePublicSite({ themeId: updatedOrganization.theme_id }).slug
+    const isLegal = isLegalPracticeSite({ vertical: updatedOrganization.vertical, themeId: updatedOrganization.theme_id })
+    const consultation = isLegal ? publicConsultationFromJson(updatedOrganization.consultation_settings_json) : null
+    if (isLegal && !consultation) throw new HTTPError({ statusCode: 500, statusMessage: 'Professional-service consultation settings are missing', data: { code: 'CONSULTATION_SETTINGS_MISSING' } })
+    const media = groupMediaPlacements(placements!.results).get(id) ?? []
+    const questions = updatedOrganization.questions === null ? [] : parseStoredFormQuestions(updatedOrganization.questions)
 
-  return {
-    id: updatedOrganization.id,
-    subdomain: updatedOrganization.subdomain,
-    theme: site,
-    status: updatedOrganization.status,
+    return {
+      id: updatedOrganization.id,
+      subdomain: updatedOrganization.subdomain,
+      theme: site,
+      status: updatedOrganization.status,
 
-    public_url: updatedOrganization.public_url ? tenantOrganizationOrigin({
-      platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
-      freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
-      subdomain: updatedOrganization.subdomain ?? '',
-      canonicalDomain: updatedOrganization.public_url,
-    }) : null,
-    custom_domain_status: updatedOrganization.custom_domain_status,
-    name: updatedOrganization.name,
-    social_card_refresh: await loadOrganizationSocialCardRefresh(db, organizationId),
-    brand_description: updatedOrganization.brand_description,
-    announcement: updatedOrganization.announcement_json ? { format: 'modal', ...JSON.parse(updatedOrganization.announcement_json) } : null,
-    media: [
-      ...(updatedOrganization.announcement_media_id ? [{
-        asset_id: updatedOrganization.announcement_media_id,
-        slot: 'announcement',
-        public_url: updatedOrganization.announcement_public_url,
-        thumbnail_url: updatedOrganization.announcement_thumbnail_url,
-        kind: updatedOrganization.announcement_kind,
-      }] : []),
-      ...logos.map(logo => ({
-        asset_id: logo.asset_id,
-        slot: logo.slot,
-        public_url: logo.public_url,
-        thumbnail_url: logo.thumbnail_url,
-        kind: logo.kind,
-        presentation: logo.presentation ?? ORIGINAL_LOGO_PRESENTATION,
+      public_url: updatedOrganization.public_url ? tenantOrganizationOrigin({
+        platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+        freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+        subdomain: updatedOrganization.subdomain ?? '',
+        canonicalDomain: updatedOrganization.public_url,
+      }) : null,
+      custom_domain_status: updatedOrganization.custom_domain_status,
+      name: updatedOrganization.name,
+      social_card_refresh: organizationSocialCardRefresh(refresh!.results[0] as Parameters<typeof organizationSocialCardRefresh>[0]),
+      brand_description: updatedOrganization.brand_description,
+      announcement: updatedOrganization.announcement_json ? { format: 'modal', ...JSON.parse(updatedOrganization.announcement_json) } : null,
+      media: media.filter(item => ['announcement', 'favicon', 'social_share', ...LOGO_SLOTS].includes(item.slot)).map(item => ({
+        asset_id: item.asset_id,
+        slot: item.slot,
+        public_url: item.public_url,
+        thumbnail_url: item.thumbnail_url,
+        kind: item.kind,
+        ...((LOGO_SLOTS as readonly string[]).includes(item.slot) ? { presentation: item.presentation ?? ORIGINAL_LOGO_PRESENTATION } : {}),
       })),
-      ...(updatedOrganization.favicon_media_id ? [{
-        asset_id: updatedOrganization.favicon_media_id,
-        slot: 'favicon',
-        public_url: updatedOrganization.favicon_public_url,
-        thumbnail_url: updatedOrganization.favicon_thumbnail_url,
-        kind: updatedOrganization.favicon_kind,
-      }] : []),
-      ...(updatedOrganization.social_share_media_id ? [{
-        asset_id: updatedOrganization.social_share_media_id,
-        slot: 'social_share',
-        public_url: updatedOrganization.social_share_public_url,
-        thumbnail_url: updatedOrganization.social_share_thumbnail_url,
-        kind: updatedOrganization.social_share_kind,
-      }] : []),
-    ],
-    contact_email: updatedOrganization.contact_email,
-    seo_title: updatedOrganization.seo_title,
-    seo_description: updatedOrganization.seo_description,
-    canonical_url: updatedOrganization.canonical_url,
-    // The website's booking switch exists only where consultation settings do.
-    consultation_mode: consultation?.mode ?? updatedOrganization.consultation_mode,
-    ...(updatedOrganization.vertical === 'lodging' ? {
-      lodging_booking: await readLodgingBookingPolicy(db, organizationId),
-      lodging_booking_choices: LODGING_BOOKING_CHOICES,
-    } : {}),
-    ...(consultation ? { address_visibility: compliance?.address_visibility ?? 'hidden' } : {}),
-    palette: site !== 'platform' ? resolveSitePalette(siteConfig.palette) : null,
-    palette_source: site !== 'platform' ? (siteConfig.palette ? 'custom' : 'default') : null,
-    font_preset: resolveOrganizationFontPreset(siteConfig.font_preset),
-    // A choice the site has not made reads as absent: the Default applies.
-    ...parseSiteRecipe(siteConfig),
-    default_currency: updatedOrganization.default_currency,
-    timezone: updatedOrganization.timezone,
-    press_email: siteConfig.press_email || '',
-    partnerships_email: siteConfig.partnerships_email || '',
-    catering_email: siteConfig.catering_email || '',
-    careers_email: siteConfig.careers_email || '',
-    google_analytics_measurement_id: siteConfig.google_analytics_measurement_id || '',
-    // The inquiry form's own questions, and the revision a write or a form names.
-    ...await (async () => { const questions = await readFormQuestions(db, { kind: 'inquiry', organizationId }); return { inquiry_questions: questions, inquiry_questions_revision: formQuestionsRevision(questions) } })(),
-    integrations: await loadConnectionSummary(db, organizationId, JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
-    vertical: updatedOrganization.vertical,
-    reviews_count: Number(updatedOrganization.reviews_count || 0),
-    average_rating: Number(updatedOrganization.average_rating || 0),
-    created_at: updatedOrganization.created_at,
-    updated_at: updatedOrganization.updated_at,
+      contact_email: updatedOrganization.contact_email,
+      seo_title: updatedOrganization.seo_title,
+      seo_description: updatedOrganization.seo_description,
+      canonical_url: updatedOrganization.canonical_url,
+      // The website's booking switch exists only where consultation settings do.
+      consultation_mode: consultation?.mode ?? updatedOrganization.consultation_mode,
+      ...(updatedOrganization.vertical === 'lodging' ? {
+        lodging_booking: lodgingBookingPolicy(id, updatedOrganization),
+        lodging_booking_choices: LODGING_BOOKING_CHOICES,
+      } : {}),
+      ...(consultation ? { address_visibility: updatedOrganization.address_visibility === 'visible' ? 'visible' as const : 'hidden' as const } : {}),
+      palette: site !== 'platform' ? resolveSitePalette(siteConfig.palette) : null,
+      palette_source: site !== 'platform' ? (siteConfig.palette ? 'custom' : 'default') : null,
+      font_preset: resolveOrganizationFontPreset(siteConfig.font_preset),
+      // A choice the site has not made reads as absent: the Default applies.
+      ...parseSiteRecipe(siteConfig),
+      default_currency: updatedOrganization.default_currency,
+      timezone: updatedOrganization.timezone,
+      press_email: siteConfig.press_email || '',
+      partnerships_email: siteConfig.partnerships_email || '',
+      catering_email: siteConfig.catering_email || '',
+      careers_email: siteConfig.careers_email || '',
+      google_analytics_measurement_id: siteConfig.google_analytics_measurement_id || '',
+      // The inquiry form's own questions, and the revision a write or a form names.
+      inquiry_questions: questions,
+      inquiry_questions_revision: formQuestionsRevision(questions),
+      integrations: connections.read(integrationRows),
+      vertical: updatedOrganization.vertical,
+      reviews_count: Number(updatedOrganization.reviews_count || 0),
+      average_rating: Number(updatedOrganization.average_rating || 0),
+      created_at: updatedOrganization.created_at,
+      updated_at: updatedOrganization.updated_at,
+    }
   }
 }
 

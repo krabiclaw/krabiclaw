@@ -1,5 +1,5 @@
 import type { StayDetail } from '~/server/domain/stays'
-import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref, type ShallowRef } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, toValue, watch, type InjectionKey, type MaybeRefOrGetter, type Ref, type ShallowRef } from 'vue'
 import { isDashboardInvalidation, type DashboardInvalidation } from '~/shared/dashboard-invalidations'
 import type { ConversationPage } from '~/shared/messages-contract'
 
@@ -10,6 +10,7 @@ type SavedReservation = Omit<StayDetail, 'id'> & { booking_id: string; unit: 'ni
 export interface DashboardInvalidationConnection {
   savedReservation: ShallowRef<SavedReservation | null>
   status: Ref<DashboardInvalidationStatus>
+  readyForReuse: Readonly<Ref<boolean>>
   event: Ref<DashboardInvalidation | null>
   /** Last successful reconnect in the current workspace or account scope; reads made before it re-read once. The first open does not count. */
   reconnectEpoch: Ref<number>
@@ -90,6 +91,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
   const conversationReads = new Map<string, Promise<ConversationPage | undefined>>()
   const reads = new Map<string, HeldRead>()
   const status = ref<DashboardInvalidationStatus>('closed')
+  const readyForReuse = computed(() => status.value === 'open' && Boolean(reader.value))
   const held = heldReads(status, reads)
   const savedReservation = shallowRef<SavedReservation | null>(null)
   // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
@@ -97,7 +99,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
   // `yarn dev:worker`, staging and production; here the dashboard stays on its
   // reads instead of retrying a connection that cannot open and reporting it.
   if (import.meta.dev) {
-    return { status, event: shallowRef(null), reconnectEpoch: ref(0), accessEnded: ref(0), savedReservation, conversationReads, held, connect: () => {} }
+    return { status, readyForReuse, event: shallowRef(null), reconnectEpoch: ref(0), accessEnded: ref(0), savedReservation, conversationReads, held, connect: () => {} }
   }
 
   const event = shallowRef<DashboardInvalidation | null>(null)
@@ -283,7 +285,7 @@ function useInvalidationSocket(path: Readonly<Ref<string | null>>, organizationI
     status.value = 'closed'
   })
 
-  return { status, event, reconnectEpoch, accessEnded, savedReservation, conversationReads, held, connect }
+  return { status, readyForReuse, event, reconnectEpoch, accessEnded, savedReservation, conversationReads, held, connect }
 }
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>, personal: Readonly<Ref<boolean>>, reader: Readonly<Ref<string | undefined>>, sessionPending: Readonly<Ref<boolean>>): DashboardInvalidationConnection {
@@ -301,4 +303,43 @@ export function useDashboardInvalidations(): DashboardInvalidationConnection {
   const connection = inject(dashboardInvalidationKey, null)
   if (!connection) throw new Error('Dashboard invalidations require the dashboard layout')
   return connection
+}
+
+/** A CMS index can reuse its last authorized response while its workspace socket is live. */
+export function useWebsiteIndexData<T>(key: MaybeRefOrGetter<string>, read: (signal?: AbortSignal) => Promise<T>, options: { server?: boolean; lazy?: boolean; immediate?: boolean; enabled?: MaybeRefOrGetter<boolean> } = {}) {
+  const nuxt = useNuxtApp()
+  const realtime = useDashboardInvalidations()
+  const cacheKey = (name: string) => `website:${name}`
+  const request = useAsyncData(key, async (_app, { signal }) => {
+    const entry = realtime.held.begin(cacheKey(toValue(key)), businessChanged)
+    const value = await read(signal)
+    realtime.held.hold(entry, value, Date.now() + 30_000, 16)
+    return value
+  }, {
+    ...options,
+    dedupe: 'defer',
+    getCachedData(name, app, { cause }) {
+      if (cause !== 'initial') return undefined
+      return (import.meta.server || app.isHydrating ? app.payload.data[name] : realtime.held.get(cacheKey(name))) as T | undefined
+    },
+  })
+  if (import.meta.client && nuxt.isHydrating) {
+    const name = toValue(key)
+    const value = nuxt.payload.data[name] as T | undefined
+    const hold = () => {
+      if (value === undefined || toValue(key) !== name || request.data.value !== value) return
+      const entry = realtime.held.begin(cacheKey(name), businessChanged)
+      realtime.held.hold(entry, value, Date.now() + 30_000, 16)
+    }
+    // The first session read clears holds made before the reader was known.
+    if (realtime.readyForReuse.value) hold()
+    else if (value !== undefined) {
+      const stop = watch([realtime.readyForReuse, realtime.status], ([ready, status]) => {
+        if (!ready && status !== 'failed') return
+        stop()
+        if (ready) hold()
+      }, { flush: 'post' })
+    }
+  }
+  return request
 }

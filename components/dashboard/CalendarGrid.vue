@@ -22,7 +22,7 @@
           </div>
         </header>
         <UAlert v-if="error" color="error" variant="soft" :title="words.loadError" :description="getErrorMessage(error, 'Calendar request failed')" :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => refresh() }]" />
-        <div v-else-if="status === 'pending' && !windowData" class="overflow-x-auto rounded-xl shadow-sm ring ring-default animate-pulse" role="status" aria-label="Loading calendar...">
+        <div v-else-if="status === 'pending' && !windowData" class="-mx-4 overflow-x-auto border-y border-default animate-pulse sm:-mx-6" role="status" aria-label="Loading calendar...">
           <div class="p-6 space-y-4">
             <div class="h-6 w-48 rounded bg-elevated/80" />
             <div class="space-y-3">
@@ -34,8 +34,8 @@
           </div>
         </div>
         <p v-else-if="windowData && !rows.length" class="py-10 text-center text-sm text-muted">{{ search ? words.noMatch : words.none }}</p>
-        <!-- The grid is its own scroller on both axes: the day header pins to its top and the home column to its left, the corner over both. -->
-        <div v-else-if="windowData" class="min-h-0 overflow-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" :inert="!hasRequestedWindow" :data-testid="`${words.testId}-grid`">
+        <!-- The grid is its own scroller on both axes, edge to edge like Airbnb's multi-calendar: the day header pins to its top and the home column to its left, the corner over both. -->
+        <div v-else-if="windowData" class="-mx-4 min-h-0 overflow-auto overscroll-contain border-y border-default sm:-mx-6" :aria-busy="status === 'pending'" :inert="!hasRequestedWindow" :data-testid="`${words.testId}-grid`">
           <div
             ref="gridElement"
             class="grid w-max select-none [--home-column:8rem] sm:[--home-column:14rem]"
@@ -47,7 +47,7 @@
           >
             <div role="row" class="contents">
               <div role="columnheader" class="sticky left-0 top-0 z-30 border-b border-r border-default bg-default" />
-              <div v-for="day in dates" :key="day" role="columnheader" :data-date="day" class="sticky top-0 z-20 border-b border-default px-1 py-1 text-center text-xs sm:py-2" :class="day === todayKey ? 'bg-primary/10' : 'bg-default'">
+              <div v-for="day in dates" :key="day" role="columnheader" :data-date="day" class="sticky top-0 z-20 border-b border-default px-1 py-1 text-center text-xs sm:py-2 bg-default">
                 <span class="block text-muted">{{ day.endsWith('-01') || day === dates[0] ? formatCalendarDate(day, 'en', { month: 'short' }) : formatCalendarDate(day, 'en', { weekday: 'short' }) }}</span>
                 <span class="block font-semibold" :class="day === todayKey ? 'text-primary' : 'text-highlighted'">{{ Number(day.slice(-2)) }}</span>
               </div>
@@ -72,7 +72,7 @@
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
                   class="relative flex flex-col justify-end border-r border-default px-1.5 text-left text-xs leading-4 tabular-nums outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
                   :class="[
-                    row.home ? 'min-h-19 pb-2 pt-8 sm:min-h-22 sm:pt-10' : 'min-h-16 py-1 sm:min-h-18',
+                    row.home ? 'min-h-22 pb-2 pt-10' : 'min-h-16 py-1 sm:min-h-18',
                     cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted',
                     inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '',
                   ]"
@@ -96,7 +96,7 @@
                 <div
                   v-for="(piece, pieceIndex) in pills(rowIndex)"
                   :key="piece.column"
-                  class="pointer-events-none z-[5] mx-0.5 mt-1 flex h-5 min-w-0 items-center self-start rounded-full sm:mt-1.5 sm:h-7 bg-accented px-2.5 text-xs font-semibold text-highlighted ring-2 ring-inset ring-inverted"
+                  class="pointer-events-none z-[5] mx-0.5 mt-1 flex h-7 min-w-0 items-center self-start rounded-full sm:mt-1.5 bg-accented px-2.5 text-xs font-semibold text-highlighted ring-2 ring-inset ring-inverted"
                   :style="{ gridRow: 1, gridColumn: `${piece.column} / span ${piece.span}` }"
                   :data-testid="`${words.testId}-selection`"
                   aria-hidden="true"
@@ -109,7 +109,7 @@
                   :to="bar.to"
                   :prefetch="Boolean(bar.stayId)"
                   prefetch-on="interaction"
-                  class="z-10 mx-0.5 mt-1 flex h-5 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white sm:mt-1.5 sm:h-7"
+                  class="z-10 mx-0.5 mt-1 flex h-7 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white sm:mt-1.5"
                   :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}`, backgroundColor: STAY_CHANNEL_COLORS[bar.channel ?? 'direct'] }"
                   :title="reservationRead.error.value?.bookingId === bar.stayId ? reservationRead.error.value?.message : bar.title"
                   :data-stay="bar.stayId"
@@ -118,7 +118,7 @@
                   @pointerenter="reservationRead.prefetch(bar.stayId)"
                   @focus="reservationRead.prefetch(bar.stayId)"
                 >
-                  <ChannelMark v-if="bar.channel" :channel="bar.channel" class="size-4 shrink-0 rounded-none! border-0!" />
+                  <ChannelMark v-if="bar.channel" :channel="bar.channel" class="-ml-1.5" />
                   <span class="truncate">{{ bar.label }}</span>
                 </NuxtLink>
               </div>

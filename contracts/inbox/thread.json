@@ -38,7 +38,7 @@
         "type": "day"
       }
     },
-    "title": "Mililani"
+    "title": "74 D · Sky"
   },
   "entries": [
     {
@@ -48,6 +48,7 @@
     },
     {
       "author": "Mililani",
+      "author_kind": "guest",
       "author_user_id": null,
       "automatic": false,
       "body": "¿En invierno dejan aparcar en la calle?",
@@ -66,6 +67,7 @@
     },
     {
       "author": "Mililani",
+      "author_kind": "guest",
       "author_user_id": null,
       "automatic": false,
       "body": null,
@@ -91,7 +93,8 @@
       "unshown_files": 0
     },
     {
-      "author": "You",
+      "author": "Sky",
+      "author_kind": "member",
       "author_user_id": null,
       "automatic": false,
       "body": "Yes, the street facing downhill is easiest.",
@@ -110,6 +113,7 @@
     },
     {
       "author": "Mililani",
+      "author_kind": "guest",
       "author_user_id": null,
       "automatic": false,
       "body": "Thank you! What time is check-in?",
@@ -133,6 +137,7 @@
     },
     {
       "author": "Automatic",
+      "author_kind": "blawby",
       "author_user_id": null,
       "automatic": true,
       "body": "Your door code is 1106. Garage D is unlocked.",
@@ -165,6 +170,7 @@
     },
     {
       "author": "You",
+      "author_kind": "member",
       "author_user_id": "owner-contract",
       "automatic": false,
       "body": "Check-in is from 4 PM.",
@@ -182,6 +188,11 @@
       "unshown_files": 0
     }
   ],
+  "maintenance": {
+    "guest": "Mililani",
+    "location_id": "location",
+    "product_id": "00000000-0000-4000-8000-000000000012"
+  },
   "page": {
     "before": null,
     "newest": 8,
@@ -190,7 +201,7 @@
   },
   "viewer_role": "member",
   "work": {
-    "task_id": "00000000-0000-4000-8000-000000000012",
+    "task_id": "00000000-0000-4000-8000-000000000013",
     "type": "done",
     "version": 1
   }

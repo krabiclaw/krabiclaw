@@ -1,4 +1,4 @@
-import type { StoredListingAccess } from '~/utils/organization-access'
+import { listingAccessGrantsQuery, listingAccessGrantsFromRows } from '~/server/domain/listing-access'
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery, getRouterParam } from 'nitro/h3'
 import { resolveConversationAccess } from '~/server/domain/conversations'
@@ -39,7 +39,7 @@ export async function listingAccessContext(event: H3Event) {
   if (!await queryFirst(context.db, "SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND kind IN ('stay', 'table', 'service', 'experience')", [organizationId, listingId])) {
     throw new HTTPError({ statusCode: 404, message: 'Listing not found', data: { code: 'LISTING_NOT_FOUND', field: 'listing_id' } })
   }
-  const grants = () => queryAll<{ member_id: string; access: StoredListingAccess }>(context.db,
-    'SELECT member_id, access FROM listing_message_members WHERE organization_id = ? AND listing_id = ? ORDER BY member_id', [organizationId, listingId])
+  const query = listingAccessGrantsQuery(organizationId, listingId)
+  const grants = async () => listingAccessGrantsFromRows(await queryAll(context.db, query.query, query.params))
   return { ...context, listingId, grants }
 }

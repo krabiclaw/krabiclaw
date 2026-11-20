@@ -1,7 +1,7 @@
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxPhoto, InboxThreadKind } from '~/server/domain/guest-threads/types'
 
 export const PLATFORM_MESSAGE_AUTHOR_KIND = 'blawby'
-export const PLATFORM_MESSAGE_AUTHOR_KINDS = [PLATFORM_MESSAGE_AUTHOR_KIND, 'krabiclaw'] as const
+export const PLATFORM_MESSAGE_AUTHOR_KINDS = [PLATFORM_MESSAGE_AUTHOR_KIND] as const
 export const PLATFORM_MESSAGE_AUTHOR_KINDS_SQL = PLATFORM_MESSAGE_AUTHOR_KINDS.map(value => `'${value}'`).join(', ')
 
 export function isPlatformMessageAuthor(value: string): value is typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number] {
@@ -40,11 +40,14 @@ export interface ConversationMessage {
   id: string
   sequence: number
   author_user_id: string | null
+  /** Who wrote it, as stored: the guest's own words, a member, or Blawby (a booking's opening, a support mirror). `side` is where it is drawn. */
+  author_kind: 'guest' | 'member' | typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number]
   side: 'guest' | 'business'
   author: string
   automatic: boolean
   /** Blawby's post of a job: the card the job's Done is on. */
   job: boolean
+  job_status?: 'open' | 'done' | 'skipped' | 'cancelled' | null
   sent_at: string
   time: string | null
   body: string | null
@@ -115,6 +118,8 @@ export interface ConversationPage extends Omit<ConversationEntriesPage, 'convers
   work: { type: 'done'; task_id: string; version: number } | { type: 'review' } | null
   /** The open task each actionable job message represents, keyed by message ID. */
   job_actions?: Record<string, string>
+  /** For whoever creates tasks in a guest conversation: where a guest's report is, to make a maintenance job of it. */
+  maintenance?: { product_id: string | null; location_id: string | null; guest: string }
 }
 
 export interface ConversationDetails {

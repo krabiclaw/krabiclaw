@@ -5,6 +5,7 @@ import { HISTORY_DELIVERY_COLUMNS, HISTORY_DELIVERY_FIELDS, groupMessageDeliveri
 import type { ConversationEntry, ConversationMessage } from '~/shared/messages-contract'
 import type { GuestThreadEntryAttachmentViewModel } from './guest-threads/types'
 import { transcriptDays } from './guest-threads/presentation'
+import type { TaskStatus } from './tasks'
 
 export function groupConversationEntries(entries: Exclude<ConversationEntry, { type: 'day' }>[], timeZone: string, now: Date): ConversationEntry[] {
   const dates = transcriptDays(timeZone, now)
@@ -30,12 +31,12 @@ export function groupConversationEntries(entries: Exclude<ConversationEntry, { t
 }
 
 export function conversationMessage(input: {
-  id: string; sequence: number; authorUserId: string | null; side: ConversationMessage['side']; author: string;
+  id: string; sequence: number; authorUserId: string | null; authorKind: ConversationMessage['author_kind']; side: ConversationMessage['side']; author: string;
   automatic: boolean; sentAt: string; body: string | null; attachments: GuestThreadEntryAttachmentViewModel[];
   deliveries?: HistoryDelivery[]; unshownFiles?: number;
 }): ConversationMessage {
   return {
-    type: 'message', id: input.id, sequence: input.sequence, author_user_id: input.authorUserId,
+    type: 'message', id: input.id, sequence: input.sequence, author_user_id: input.authorUserId, author_kind: input.authorKind,
     side: input.side, author: input.author, automatic: input.automatic, job: false,
     sent_at: input.sentAt, time: null, body: input.body, unshown_files: input.unshownFiles ?? 0,
     photos: input.attachments.map(({ id, url, thumbnailUrl, width, height }) => ({ id, url, thumbnail_url: thumbnailUrl, width, height })),
@@ -48,6 +49,7 @@ export type HistoryRow = Pick<MessageRow, 'id' | 'organization_id' | 'conversati
   author_name: string | null
   photo_rows: string
   delivery_rows: string | null
+  job_status?: TaskStatus | null
 }
 
 const receiptFields = HISTORY_DELIVERY_FIELDS.map(field => `'${field}', d.${field}`).join(', ')
@@ -86,7 +88,11 @@ export function conversationHistorySql(
     SELECT m.*, CASE WHEN a.anonymous = 1 THEN COALESCE((SELECT c.payload_json ->> '$.guest.name' FROM conversations c WHERE c.id = m.conversation_id), a.name) ELSE a.name END AS author_name,
       CASE WHEN m.enrich THEN (SELECT json_group_array(json_object('owner_id', p.owner_id, 'id', p.id, 'public_url', p.public_url,
         'thumbnail_url', p.thumbnail_url, 'alt_text', p.alt_text, 'width', p.width, 'height', p.height)) FROM (${photos}) p) END AS photo_rows,
-      ${receipts} AS delivery_rows
+      ${receipts} AS delivery_rows,
+      CASE WHEN m.author_kind = 'krabiclaw' AND instr(json_extract(m.payload_json, '$.key'), 'job:') = 1
+        THEN (SELECT t.status FROM tasks t WHERE t.organization_id = m.organization_id
+          AND t.id = substr(json_extract(m.payload_json, '$.key'), 5, instr(substr(json_extract(m.payload_json, '$.key'), 5) || ':', ':') - 1))
+        END AS job_status
     FROM display m LEFT JOIN authors a ON a.id = m.author_user_id ${visibleAuthors} ORDER BY m.sequence`,
   params: [...(scope.params ?? []), ...(window.before === null ? [] : [window.before]), window.limit + 1, window.limit] }
 }

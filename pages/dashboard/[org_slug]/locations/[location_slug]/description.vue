@@ -9,7 +9,7 @@
     @save="editor.save"
   >
     <div class="space-y-6">
-      <UFormField label="Short description"><UInput v-model="editor.detailsForm.short_description" class="w-full" /></UFormField>
+      <UFormField label="Short description"><UTextarea v-model="editor.detailsForm.short_description" :rows="3" class="w-full" /></UFormField>
       <UFormField label="Description"><UTextarea v-model="editor.detailsForm.description" :rows="10" class="w-full" /></UFormField>
       <UFormField label="Price level"><UInput v-model="editor.detailsForm.price_level" class="w-full" /></UFormField>
     </div>

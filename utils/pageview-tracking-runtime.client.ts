@@ -3,31 +3,9 @@ import { normalizeReferrerHost, readAttributionParams } from '~/utils/analytics-
 import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { isTrackablePath } from '~/utils/pageview-path'
-import { LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT } from '~/utils/zaraz-consent'
 
-interface ZarazPageviewApi {
-  track?: (name: string, properties?: Record<string, unknown>) => Promise<void>
-}
+import { browserPageviewTransport, type BrowserPageview as TrackedPage } from '~/utils/browser-pageview'
 
-/**
- * One observed page visit. Everything an event says about the visit is captured here, at the moment
- * the navigation is observed: a payload built later would read the next route's query string.
- */
-interface TrackedPage {
-  eventId: string
-  path: string
-  fullPath: string
-  enteredAt: number
-  durationSent: boolean
-  /** The pageview request, fixed when the navigation was observed. Null when the route is not tracked. */
-  pageview: Record<string, unknown> | null
-  /** Resolves true only when the collector persisted this exact event. */
-  pageviewReady: Promise<boolean>
-}
-
-
-// The pages observed so far, by path, so an action names the visit it happened on even when it was
-// captured before the collector registered or after the visitor moved on.
 const observedPages = new Map<string, TrackedPage>()
 const OBSERVED_PAGES_MAX = 20
 
@@ -78,7 +56,7 @@ export function automatedBrowser(): boolean {
 }
 
 export function registerPageviewTracking() {
-  const win = window as Window & { __kc_pageview_tracking_registered?: boolean; zaraz?: ZarazPageviewApi }
+  const win = window as Window & { __kc_pageview_tracking_registered?: boolean }
   if (win.__kc_pageview_tracking_registered || automatedBrowser()) { settleRegistration(); return }
 
   const nuxtApp = useNuxtApp()
@@ -91,46 +69,10 @@ export function registerPageviewTracking() {
   const locales = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
   const isTracked = (path: string) => isTrackablePath(resolveTenantLocalePath(path, locales.value.map(item => item.locale)).sourcePath) && path !== '/dev' && !path.startsWith('/dev/')
 
-  // The collector answers `ignored` for a request it deliberately does not record (a known bot), and
-  // an error for one it could not. Neither is a persisted event. A failure is reported through the
-  // application's own error hook — the one the error tracker already listens to — and never breaks
-  // the page the visitor is on.
-  const send = async (payload: Record<string, unknown>) => {
-    const response = await fetch('/api/analytics/track', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify(payload),
-      keepalive: true,
-    })
-    if (!response.ok) throw new Error(`Analytics collection was rejected (${response.status})`)
-    return await response.json() as { ignored?: boolean; ga4_delivery?: { dispatch?: boolean; event_name?: string } }
-  }
-  const report = (error: unknown) => {
+  const { deliver: deliverPageview, duration: sendDuration } = browserPageviewTransport(error => {
     void nuxtApp.callHook('vue:error', error, null, 'analytics-collector')
-    return false as const
-  }
-  // Google Analytics is a destination of the native record: its page view is sent, manually, only
-  // once the collector accepted this exact pageview, and names it by the native event id. An
-  // ignored or failed pageview sends nothing.
-  const deliverPageview = async (after: Promise<boolean>, page: TrackedPage): Promise<boolean> => {
-    await after
-    const result = await send(page.pageview!).catch(report)
-    if (!result || result.ignored) return false
-    const delivery = result.ga4_delivery
-    if (delivery?.dispatch) {
-      // Native readiness never waits for an optional destination or its receipt.
-      void (async () => {
-        let deliveryStatus = 'dispatched'
-        try {
-          if (!win.zaraz?.track) throw new Error('Zaraz is unavailable for the recorded pageview')
-          await win.zaraz.track(delivery.event_name ?? LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT, { event_id: page.eventId, page_location: new URL(page.fullPath, window.location.origin).href })
-        } catch (error) { deliveryStatus = 'failed'; report(error) }
-        await send({ event_id: page.eventId, event_type: 'ga4_delivery', page_path: page.path, delivery_status: deliveryStatus }).catch(report)
-      })()
-    }
-    return true
-  }
+    return false
+  })
 
   // Observed at navigation time: the destination's own query parameters, its path, and the moment.
   // The referrer is the browser's for the first page only; later pages are internal navigations.
@@ -152,20 +94,6 @@ export function registerPageviewTracking() {
       ...(Object.keys(attribution).length > 0 ? { attribution } : {}),
     }
     return page
-  }
-
-  const sendDuration = (page: TrackedPage) => {
-    if (page.durationSent || !page.pageview) return
-    const durationSeconds = Math.round((Date.now() - page.enteredAt) / 1000)
-    if (durationSeconds <= 0) return
-    page.durationSent = true
-    const payload = JSON.stringify({ event_id: page.eventId, event_type: 'duration', page_path: page.path, duration_seconds: durationSeconds })
-    void page.pageviewReady.then((recorded) => {
-      if (!recorded) return
-      // Exact-event duration: a beacon survives the page going away; without one the same request is sent.
-      if (navigator.sendBeacon?.('/api/analytics/track', new Blob([payload], { type: 'application/json' }))) return
-      return send(JSON.parse(payload) as Record<string, unknown>).catch(report)
-    })
   }
 
   const remember = (page: TrackedPage) => {

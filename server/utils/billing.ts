@@ -5,13 +5,13 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
-import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
+import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, prepareOrganizationSubscriptionTerms, readOrganizationSubscriptions, type OrganizationSubscriptionTerms } from '~/server/utils/billing-access'
 import { BASIC_HOMES, BILLING_METER_KEYS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { stripeMeterContract, reportStripeMeterUsage } from '~/server/utils/stripe-meter-usage'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
-import { planSubscriptionItem, readStripeCatalog, recurringPriceAmount, selectMeteredPrices } from '~/server/utils/stripe-catalog'
+import { planSubscriptionItem, recurringPriceAmount } from '~/server/utils/stripe-catalog'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
 
 export interface BillingEnv {
@@ -47,9 +47,9 @@ const billingAuthorizationOptions = {
   roles: organizationRoles,
 } as const
 
-export function getStripe(env: BillingEnv): Stripe {
+export function getStripe(env: BillingEnv, requestDb?: D1Database): Stripe {
   if (!env.STRIPE_SECRET_KEY) throw new Error('Stripe secret key not configured')
-  return createStripeClient(env.STRIPE_SECRET_KEY)
+  return createStripeClient(env.STRIPE_SECRET_KEY, 'canonical', requestDb)
 }
 
 
@@ -329,7 +329,10 @@ function homePriceMinor(price: Stripe.Price): number {
  */
 export async function homeAllowance(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number) {
   const [used, subscriptions] = await Promise.all([countActiveHomes(db, organizationId), readOrganizationSubscriptions(env, [organizationId])])
-  const rows = subscriptions.get(organizationId) ?? []
+  return homeAllowanceFrom(organizationId, used, subscriptions.get(organizationId) ?? [], adding)
+}
+
+function homeAllowanceFrom<T extends Parameters<typeof planFromSubscriptions>[1][number]>(organizationId: string, used: number, rows: T[], adding: number) {
   const plan = planFromSubscriptions(organizationId, rows)
   const paid = isKnownRecurringPlan(plan)
   return { plan, used, subscription: paid ? entitlingSubscription(organizationId, rows) : null, allowed: paid || used + adding <= BASIC_HOMES }
@@ -345,10 +348,26 @@ export async function homeAllowance(env: CloudflareEnv, db: DbClient, organizati
  * homes it allows, and is quoted the published homes price from the Stripe
  * catalog, what each home costs once Growth or Business is chosen.
  */
-export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number): Promise<HomesQuote> {
-  const [{ plan, used, subscription, allowed }, drafts] = await Promise.all([homeAllowance(env, db, organizationId, adding), queryFirst<{ homes: number }>(db, `SELECT (${DRAFT_HOMES_SQL}) AS homes`, [organizationId])])
-  if (!drafts) throw new Error('Billing usage could not be read')
-  const stripe = getStripe(env)
+export function prepareHomesQuote(organizationId: string | { sql: string }) {
+  const scope = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const usage: BatchQuery = { query: `SELECT (${ACTIVE_HOMES_SQL.replace('?', scope)}) AS used, (${DRAFT_HOMES_SQL.replace('?', scope)}) AS drafts`,
+    params: typeof organizationId === 'string' ? [organizationId, organizationId] : [] }
+  const subscriptions = prepareOrganizationSubscriptionTerms(organizationId)
+  return { queries: [usage, subscriptions.query], async read([usageRows, subscriptionRows]: D1Result[], env: CloudflareEnv, resolvedId: string, adding: number): Promise<HomesQuote> {
+    const usage = usageRows!.results[0] as { used: number; drafts: number } | undefined
+    if (!usage) throw new Error('Billing usage could not be read')
+    const allowance = homeAllowanceFrom(resolvedId, usage.used, subscriptions.read(subscriptionRows!), adding)
+    return await priceHomesQuote(env, allowance, usage.drafts, adding)
+  } }
+}
+
+export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number, preloaded?: D1Result[]): Promise<HomesQuote> {
+  const plan = prepareHomesQuote(organizationId)
+  return await plan.read(preloaded ?? await executeBatch(db, plan.queries, { operation: 'Read homes quote facts' }), env, organizationId, adding)
+}
+
+async function priceHomesQuote(env: CloudflareEnv, { plan, used, subscription, allowed }: ReturnType<typeof homeAllowanceFrom<OrganizationSubscriptionTerms>>, drafts: number, adding: number): Promise<HomesQuote> {
+  const stripe = getStripe(env, env.DB)
   let terms: { included: number; additional: number }
   let trialEnd: string | null = null
   if (subscription) {
@@ -360,14 +379,19 @@ export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationI
     terms = { included: 0, additional: homes ? homePriceMinor(homes.price) : 0 }
     trialEnd = subscriptionTrial(native)?.end ?? null
   } else {
-    terms = { included: BASIC_HOMES, additional: homePriceMinor(selectMeteredPrices(await readStripeCatalog(stripe)).homes) }
+    const prices = await stripe.prices.list({ active: true, type: 'recurring', currency: 'usd', limit: 100, expand: ['data.product'] }).autoPagingToArray({ limit: 10_000 })
+    const homes = prices.filter(price => typeof price.product !== 'string' && !price.product.deleted && price.product.active
+      && price.product.metadata.product_family === 'homes' && price.id === price.product.metadata.monthly_price_id
+      && price.recurring?.usage_type === 'metered' && price.recurring.interval === 'month' && price.recurring.interval_count === 1)
+    if (homes.length !== 1) throw new Error(`Stripe catalog has ${homes.length} published homes prices; exactly one is required`)
+    terms = { included: BASIC_HOMES, additional: homePriceMinor(homes[0]!) }
   }
   const added = additionalHomes(terms.included, used, adding)
   return {
     plan,
     currency: 'USD',
     upgrade: subscription ? null : { billable_homes: used + adding, unit_amount_minor: terms.additional, amount_minor: (used + adding) * terms.additional },
-    homes: { used, drafts: drafts.homes, included: terms.included, limit: subscription ? null : terms.included, additional_price_minor: terms.additional, amount_minor: additionalHomes(terms.included, 0, used) * terms.additional },
+    homes: { used, drafts, included: terms.included, limit: subscription ? null : terms.included, additional_price_minor: terms.additional, amount_minor: additionalHomes(terms.included, 0, used) * terms.additional },
     adding: { count: adding, additional_homes: added, amount_minor: added * terms.additional, allowed },
     billing: { period_end: subscription?.periodEnd?.toISOString() ?? null, trial_end: trialEnd, prorated: false },
   }

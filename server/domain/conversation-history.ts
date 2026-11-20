@@ -7,10 +7,10 @@ import { formatFormAnswer } from '~/shared/form-questions'
 import type { ProductKind } from '~/shared/product-details'
 import { formatCalendarRange } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { assignedMemberSql, bookingOperationsScope } from '~/server/utils/member-access'
+import { assignedMemberSql, bookingOperationsScope, roleAllows } from '~/server/utils/member-access'
 import {
   conversationAccessDenied, conversationAccessFromRow, conversationAccessQuery, conversationParticipantsSql, guestVisibleSql, isEventMessage, MEMBER_REPLY_EVENT, messageRole,
-  MIRRORED_EVENT, OPENING_EVENT, parseMessagePayload, participantGuard, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, SUPPORT_CONVERSATION_SQL,
+  channelSenderName, MIRRORED_EVENT, OPENING_EVENT, parseMessagePayload, participantGuard, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, SUPPORT_CONVERSATION_SQL,
   type ConversationAccessRow, type ConversationParticipantRow, type ConversationRow, type ConversationWindow, type MessageRow,
 } from './conversations'
 import { conversationDeliveryReceipt, conversationGuestName } from './guest-threads/inbox'
@@ -23,7 +23,7 @@ import { jobBookingIdSql, jobPostMatchSql, taskScopeSql } from './tasks'
 
 type TranscriptViewer = { conversationId: string; userId: string; organizationId?: string }
 type MessageContext = Pick<ConversationHistory, 'photos' | 'deliveriesByMessage'>
-type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; booking_type: 'booking' | 'stay' | null; booking_assigned: number; support: number; airbnb: number; roster: string | null; jobs: string | null; review: number | null; reservation: string | null }
+type HistoryContext = { organization_name: string; timezone: string; record_title: string | null; place_product_id: string | null; place_location_id: string | null; booking_type: 'booking' | 'stay' | null; booking_assigned: number; support: number; airbnb: number; roster: string | null; jobs: string | null; review: number | null; reservation: string | null }
 
 type ConversationJob = { task_id: string; version: number; message_id: string | null }
 
@@ -53,14 +53,14 @@ function reservationInThread(context: HistoryContext, viewer: { conversation: Co
   return { at, day: { type: 'day', id: `day:${day.key}`, label: dayFormat.label(instant, day) }, confirmation }
 }
 
-function presentMessage(message: Pick<MessageRow, 'id' | 'sequence' | 'event_name'>, context: MessageContext, input: {
+function presentMessage(message: Pick<MessageRow, 'id' | 'sequence' | 'event_name' | 'author_kind'>, context: MessageContext, input: {
   author: string; viewerRole: ConversationViewerRole; guestName: string; authorUserId: string | null
   side: ConversationMessage['side']; body: string | null; sentAt: string; automatic: boolean; showAlerts: boolean
   unshownFiles?: number
 }): ConversationMessage {
   const deliveries = input.viewerRole === 'member' ? context.deliveriesByMessage.get(message.id) : undefined
   const projected = conversationMessage({
-    id: message.id, sequence: message.sequence, authorUserId: input.authorUserId, side: input.side, author: input.author,
+    id: message.id, sequence: message.sequence, authorUserId: input.authorUserId, authorKind: message.author_kind, side: input.side, author: input.author,
     automatic: input.automatic, sentAt: input.sentAt, body: input.body, attachments: context.photos.get(message.id) ?? [],
     deliveries: input.showAlerts ? deliveries?.filter(delivery => delivery.purpose === 'owner_alert') : undefined,
     unshownFiles: input.unshownFiles,
@@ -143,16 +143,15 @@ function presentEntries(
       continue
     }
     const payload = parseMessagePayload(message)
-    const meta = payload.meta && typeof payload.meta === 'object' ? payload.meta : null
     const support = mirrored && isPlatformMessageAuthor(authorKind)
-    const providerName = mirrored && meta ? entryText(Reflect.get(meta, 'name')) : null
+    const providerName = mirrored ? channelSenderName(payload) : null
     const side = authorKind === 'guest' || opening || support ? 'guest' : 'business'
     const authorUserId = guestViewer && (!mine || authorKind !== 'guest') ? null : message.author_user_id
     const author = support ? providerName || 'Airbnb Support'
       : side === 'guest' ? guestViewer && (mine || opening) ? 'You' : providerName || (message.author_user_id !== conversation.user_id && name) || guestName
         : guestViewer ? context.organization_name
           : scheduled ? 'Automatic'
-            : mine || mirrored ? 'You' : name ? (conversation.kind === 'team' ? name : firstName(name)) : isPlatformMessageAuthor(message.author_kind) ? 'Sent automatically' : 'Deleted account'
+            : mine ? 'You' : mirrored ? providerName || context.organization_name : name ? (conversation.kind === 'team' ? name : firstName(name)) : isPlatformMessageAuthor(message.author_kind) ? 'Sent automatically' : 'Deleted account'
     const photos = history.photos.get(message.id)?.length ?? 0
     const links = mirrored && Array.isArray(payload.attachments) ? payload.attachments.length : 0
     const unshownFiles = Math.max(links - photos, 0) + (Array.isArray(payload.unshownFiles) ? payload.unshownFiles.length : 0)
@@ -164,6 +163,9 @@ function presentEntries(
     const projected = presentMessage(message, history, { author, viewerRole: role, guestName, authorUserId, side, sentAt, body,
       automatic, showAlerts: conversation.kind === 'team', unshownFiles })
     projected.job = isPlatformMessageAuthor(message.author_kind) && typeof payload.key === 'string' && payload.key.startsWith('job:')
+    if (projected.job) {
+      projected.job_status = message.job_status ?? null
+    }
     if (side === 'business') {
       if (newestBusiness && newestBusiness.receipt !== 'Not delivered') newestBusiness.receipt = null
       newestBusiness = projected
@@ -200,12 +202,15 @@ export async function loadConversationPage(
           WHERE cfg.organization_id = b.organization_id AND cfg.product_id = b.product_id AND ${assignedMemberSql('cfg')}))` : '0'} AS booking_assigned,
         ${head ? `(SELECT json_group_array(json_object('id', p.id, 'name', p.name, 'image', p.image, 'role', p.role, 'title', p.title, 'invitation_id', p.invitation_id))
           FROM (${conversationParticipantsSql('c', 'c.viewer_role')}) p)` : 'NULL'} AS roster,
-        -- What a team conversation about a booking is titled by: the home or offering, as its row in the list is.
-        ${head ? `CASE WHEN c.kind = 'team' THEN (SELECT COALESCE(sc.internal_name, p.name) FROM bookings about JOIN products p ON p.organization_id = about.organization_id AND p.id = about.product_id
+        -- What a conversation about a listing is titled by, as Airbnb heads it and its row in the list reads:
+        -- the host's name for the home, the guest the listing's own.
+        ${head ? `(SELECT CASE WHEN c.viewer_role = 'guest' THEN p.name ELSE COALESCE(sc.internal_name, p.name) END FROM products p
           LEFT JOIN product_stay_configs sc ON sc.organization_id = p.organization_id AND sc.product_id = p.id
-          WHERE about.organization_id = c.organization_id AND about.id = c.booking_id) END` : 'NULL'} AS record_title,
+          WHERE p.organization_id = c.organization_id AND p.id = COALESCE(
+            (SELECT about.product_id FROM bookings about WHERE about.organization_id = c.organization_id AND about.id = c.booking_id),
+            (SELECT ct.product_id FROM channel_threads ct WHERE ct.organization_id = c.organization_id AND ct.conversation_id = c.id)))` : 'NULL'} AS record_title,
         -- A job action belongs to its latest assignment post in the current team's conversation.
-        ${head ? `CASE WHEN c.viewer_role = 'member' AND c.booking_id IS NOT NULL THEN (
+        ${head ? `CASE WHEN c.viewer_role = 'member' AND (c.booking_id IS NOT NULL OR (c.kind = 'team' AND c.location_id IS NOT NULL)) THEN (
           SELECT json_group_array(json_object('task_id', job.task_id, 'version', job.version, 'message_id', job.message_id))
           FROM (
             SELECT t.id AS task_id, t.version, CASE WHEN c.kind = 'team' AND EXISTS (
@@ -215,7 +220,9 @@ export async function loadConversationPage(
             ) THEN (SELECT m.id FROM messages m WHERE m.conversation_id = c.id AND m.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL})
               AND ${jobPostMatchSql('t', 'm')} ORDER BY m.sequence DESC LIMIT 1) END AS message_id
             FROM tasks t WHERE t.organization_id = c.organization_id AND t.status = 'open'
-              AND t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep') AND (${jobBookingIdSql('t')}) = c.booking_id
+              -- A booking's jobs, or a repair in its place's team conversation.
+              AND ((t.kind IN ('turnover', 'consultation_follow_up', 'consultation_prep') AND (${jobBookingIdSql('t')}) = c.booking_id)
+                OR (t.kind = 'maintenance' AND c.kind = 'team' AND c.booking_id IS NULL AND t.location_id = c.location_id))
               AND (c.kind = 'team' OR c.member_id = t.assigned_member_id OR (t.assigned_member_id IS NULL AND c.member_role IN ('owner', 'admin')))
               AND ${taskScopeSql('t', () => ({
                 organization: 'c.organization_id', user: '?', member: 'c.member_id', organizationWide: roleMatchesSql('c.member_role', workspaceOperationsRoles),
@@ -234,7 +241,10 @@ export async function loadConversationPage(
               WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL})
                 AND m.event_name IN ('booking.confirm', 'payment.payment_captured')
               ORDER BY m.sequence DESC LIMIT 1) END
-        ) END` : 'NULL'} AS reservation
+        ) END` : 'NULL'} AS reservation,
+        -- Where a guest's report of something broken is: the booked listing and its location, else the conversation's location.
+        ${head ? 'b.product_id' : 'NULL'} AS place_product_id,
+        ${head ? `COALESCE(b.location_id, (SELECT sc.location_id FROM product_stay_configs sc WHERE sc.organization_id = b.organization_id AND sc.product_id = b.product_id), c.location_id)` : 'NULL'} AS place_location_id
       FROM authorized c
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
@@ -264,12 +274,15 @@ export async function loadConversationPage(
   const jobActions = Object.fromEntries(jobs.flatMap(({ message_id, task_id }) => message_id === null ? [] : [[message_id, task_id] as const]))
   const managesBookingGuests = context.booking_type !== null || (role === 'member' && conversation.kind === 'booking' && conversation.booking_id !== null)
   const activityPath = context.booking_type ? accountActivityPath(context.booking_type, conversation.id) : null
-  const [groupCapabilities, bookingScope] = await Promise.all([
+  const [groupCapabilities, bookingScope, createsTasks] = await Promise.all([
     conversationGroupCapabilities(membership, conversation),
     membership && conversation.booking_id ? bookingOperationsScope(membership) : null,
+    membership && conversation.kind !== 'team' ? roleAllows({ ...membership, permissions: { task: ['create'] } }) : false,
   ])
   const canReadBooking = activityPath !== null || bookingScope === 'manage' || (bookingScope === 'assigned' && context.booking_assigned === 1)
-  const title = role === 'guest' ? context.organization_name : conversation.name || (conversation.kind === 'team' ? context.record_title : guestName)
+  // A team chat keeps the name it was given; a guest conversation is headed by its listing, as Airbnb's are.
+  const title = (conversation.kind === 'team' ? conversation.name || context.record_title : context.record_title || conversation.name)
+    || (role === 'guest' ? context.organization_name : conversation.kind === 'team' ? null : guestName)
     || roster.filter(person => person.id !== userId).map(person => person.name).join(', ') || 'You'
   return {
     conversation: {
@@ -290,5 +303,7 @@ export async function loadConversationPage(
     capabilities: { ...groupCapabilities, can_invite_guest: managesBookingGuests && conversation.blocked_at === null },
     work: job ? { type: 'done' as const, task_id: job.task_id, version: job.version } : context.review ? { type: 'review' as const } : null,
     ...(Object.keys(jobActions).length ? { job_actions: jobActions } : {}),
+    // A guest's message can become a maintenance job for whoever creates tasks.
+    ...(createsTasks ? { maintenance: { product_id: context.place_product_id, location_id: context.place_location_id, guest: firstName(guestName) } } : {}),
   }
 }

@@ -10,6 +10,12 @@
         <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
       </button>
     </template>
+    <!-- Sent and upcoming messages for this guest, one round button beside the header rather than a row above the composer. -->
+    <template v-if="scheduledTo" #right>
+      <UTooltip text="Sent and upcoming">
+        <UButton :to="scheduledTo" icon="i-lucide-clock" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Sent and upcoming" />
+      </UTooltip>
+    </template>
 
     <UAlert v-if="doneError" color="error" variant="soft" title="Done could not be saved" :description="getErrorMessage(doneError, 'The request failed')" class="mx-4 mb-2" />
     <ConversationThread :key="threadId" :thread-id="threadId" :history="history" :personal-scope="personalScope" :reservation-to="reservationTo" :closing="closing" @done="done" />
@@ -44,6 +50,10 @@ const headerPeople = computed(() => {
   const counterparts = participants.filter(person => person.role !== page.viewer_role)
   return counterparts.length ? counterparts.slice(0, 3) : [{ name: title, image: null }]
 })
+const scheduledTo = computed(() => !personalScope && conversation.value && conversation.value.kind !== 'team' ? {
+  path: `${listPath}/scheduled`,
+  query: { ...route.query, conversation_id: threadId.value },
+} : null)
 const sheetOpen = ref(false)
 const manageGuests = ref(false)
 const bookingParty = ref<'clients' | 'guests'>()

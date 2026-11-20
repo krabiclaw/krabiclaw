@@ -28,19 +28,18 @@
       </nav>
 
       <div class="flex items-center justify-end gap-2">
-        <TenantButton v-if="primaryAction" :to="localePath(primaryAction.path)" size="sm" @click="primaryAction.consultation && trackConsultation()">
+        <TenantButton v-if="primaryAction" :to="localePath(primaryAction.path)" :data-public-consultation="primaryAction.consultation ? consultation?.schedule_path : undefined" size="sm" @click="primaryAction.consultation && trackConsultation()">
           {{ primaryAction.label }}
         </TenantButton>
 
-        <details ref="mobileNavDetails" class="relative lg:hidden" @toggle="syncMobileNavState">
+        <details ref="mobileNavDetails" class="group relative lg:hidden">
           <summary
             class="inline-flex size-8 list-none items-center justify-center rounded-full text-muted transition hover:bg-muted hover:text-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
             :aria-label="t('site.header.toggle_navigation')"
-            :aria-expanded="mobileMenuOpen"
           >
             <svg class="size-4 overflow-visible stroke-current" viewBox="0 0 14 14" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-              <path :class="mobileMenuOpen ? 'scale-90 opacity-0' : ''" class="origin-center transition" d="M0 1H14M0 7H14M0 13H14" />
-              <path :class="mobileMenuOpen ? '' : 'scale-90 opacity-0'" class="origin-center transition" d="M2 2L12 12M12 2L2 12" />
+              <path class="origin-center transition group-open:scale-90 group-open:opacity-0" d="M0 1H14M0 7H14M0 13H14" />
+              <path class="origin-center scale-90 opacity-0 transition group-open:scale-100 group-open:opacity-100" d="M2 2L12 12M12 2L2 12" />
             </svg>
           </summary>
           <div class="absolute right-0 top-full mt-3 max-h-[calc(100vh-5rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-default bg-elevated p-4 text-base normal-case text-default shadow-xl ring-1 ring-default">
@@ -67,15 +66,16 @@
 </template>
 
 <script setup lang="ts">
-import { shallowRef } from 'vue'
+import { defineAsyncComponent, shallowRef } from 'vue'
 import type { PublicPageLink, PublicConsultationSettings } from '~/types/public-site'
-import ArticleSidebar from '~/components/blog/ArticleSidebar.vue'
-import PlatformCommandSearchTrigger from '~/components/platform/search/PlatformCommandSearchTrigger.vue'
 import { articleNavKey } from '~/composables/useArticleNav'
 import { catalogNavigation } from '~/utils/product-presentation'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { hasPublicLocationPages, isLegalPractice } from '~/utils/site-routing'
 import type { PublicShellPayload } from '~/utils/public-resource-contracts'
+
+const ArticleSidebar = defineAsyncComponent(() => import('~/components/blog/ArticleSidebar.vue'))
+const PlatformCommandSearchTrigger = defineAsyncComponent(() => import('~/components/platform/search/PlatformCommandSearchTrigger.vue'))
 
 const props = withDefaults(defineProps<{
   organization: ApiRecord | null
@@ -171,18 +171,10 @@ const primaryAction = computed(() => {
   return available && verticalCopy.value.reserveCta ? { path, label: verticalCopy.value.reserveCta, consultation: false } : null
 })
 
-// Mobile Drawer State
-const mobileMenuOpen = ref(false)
 const articleNav = inject(articleNavKey, null)
 const articleSearchLabel = computed(() => articleNav ? t('site.search.dialog_title', { surface: articleNav.value.indexLabel }) : '')
 const mobileNavDetails = ref<HTMLDetailsElement | null>(null)
-
-function syncMobileNavState(event: Event) {
-  mobileMenuOpen.value = (event.currentTarget as HTMLDetailsElement).open
-}
-
 function closeMobileNav() {
-  mobileMenuOpen.value = false
   if (mobileNavDetails.value) mobileNavDetails.value.open = false
 }
 

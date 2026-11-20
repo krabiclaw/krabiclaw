@@ -1,3 +1,10 @@
+import { prepareStayHomeSetup } from '~/server/utils/stay-home-setup-draft'
+import { prepareEditorCatalog } from '~/server/utils/product-management'
+import { prepareHomesQuote } from '~/server/utils/billing'
+import { prepareStayHomeDocument } from '~/server/domain/stays'
+import { prepareOrganizationLanguageSettings } from '~/server/utils/organization-languages'
+import { organizationDomainsDashboardPayload, prepareOrganizationDomains } from '~/server/utils/domain-read-model'
+import { prepareDashboardLocationOverview, prepareDashboardProductRead } from '~/server/utils/dashboard-editor-resources'
 import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/edge-cache'
 // Tenant resolution middleware: every host, Blawby's own included, resolves
 // to an organization. The organization's site decides whether it renders as
@@ -25,10 +32,10 @@ import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation, type Sit
 import { publicTenantPageSql } from '~/server/utils/content/pages'
 import { buildLoginUrl } from '~/shared/auth/return-target'
 import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
-import { getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
-import { dashboardOrganizationFrom, getDashboardSession, readDashboardMembership } from '~/server/utils/dashboard-context'
+import { dashboardSessionUserQuery, getAuthSession, type DashboardAuthRead } from '~/server/utils/auth'
+import { dashboardOrganizationFrom, getDashboardSession, dashboardLocationQuery, prepareOrganizationLocations, readDashboardMembership } from '~/server/utils/dashboard-context'
 import { prepareDashboardWorkspaceAccess, readDashboardWorkspaceAccess } from '~/server/utils/dashboard-context-service'
-import { membershipBySlugQuery, BATCH_VIEWER, withViewer } from '~/server/utils/member-access'
+import { membershipBySlugQuery, BATCH_VIEWER, withViewer, isOrganizationWideRole } from '~/server/utils/member-access'
 import { prepareToday } from '~/server/domain/today'
 import { staffAccessWritesEnabled } from '~/server/domain/listing-access'
 import { readDashboardTodayDocument } from '~/server/utils/dashboard-today'
@@ -36,7 +43,22 @@ import { readPublicSourceLocale, sourceLocaleQuery } from '~/server/utils/locali
 import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { calendarCoverageQuery } from '~/server/domain/member-scheduling'
 import { calendarConnectionQuery, calendarSettingsFromRows, readCalendarSettingsDocument } from '~/server/utils/google-calendar'
-import { prepareConnectionSummary } from '~/server/utils/organization-settings'
+import { prepareTenantPageEditor, websiteEditorOrganization } from '~/server/utils/tenant-pages-api'
+import { prepareConnectionSummary, prepareWebsiteSettings } from '~/server/utils/organization-settings'
+import { prepareOrganizationReviews } from '~/server/utils/organization-reviews'
+import { preparePublicLocationDocument } from '~/server/utils/public-route'
+import { preparePublicAuthoredPage } from '~/server/utils/public-tenant-pages'
+import { preparePublicInquiryForm } from '~/server/domain/form-questions'
+import { isDocumentOnlyPublicPath } from '~/shared/public-locale-routes'
+import { blogPostCategoriesQuery, prepareBlogList, prepareBlogPost } from '~/server/utils/content/publishing'
+import { articleCategoriesQuery, readArticleCategories } from '~/server/utils/content/article-categories'
+import { isArticleCollection } from '~/utils/article-collections'
+import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
+import { prepareSocialConnections, presentSocialConnections } from '~/server/utils/social-publication'
+import { preparePost, preparePostList } from '~/server/utils/post-management'
+import { mcpPageWindow } from '~/server/utils/mcp-pagination'
+import { prepareDashboardQa } from '~/server/utils/location-qa'
+import { dashboardLocationSlug, dashboardProductId, rendersProductArrival, rendersProductCreation, rendersStayHomeSetup, rendersCatalogEditor, needsWebsiteSettings, rendersWebsiteDocument, websiteBlogPost, websitePageVariant, websiteQuestion, websiteSocialPost } from '~/utils/dashboard-document'
 import { readDashboardConnectionsDocument } from '~/server/utils/dashboard-connections'
 import { prepareDashboardCatalog, readDashboardCatalogDocument } from '~/server/utils/dashboard-catalog'
 import { setDashboardSocketScope } from '~/server/utils/dashboard-socket-scope'
@@ -121,9 +143,16 @@ const TENANT_SELECT_SQL = `SELECT ${publicBaseColumns('o')},
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/acceptable-use' AND ${publicTenantPageSql('d')}) AS acceptable_use_policy,
              ${PUBLIC_CONFIG_COLUMNS}`
 
+function authoredDocumentPath(path: string) {
+  return /^\/(?:about|contact|schedule|policies\/(?:privacy|terms|acceptable-use))?$/.test(path) ? path : null
+}
+
 function tenantSelectFor(event: H3Event) {
   const path = normalizedPath(event.url.pathname)
-  if (!['GET', 'HEAD'].includes(event.method) || !/^\/(?:[A-Za-z-]+\/)?(?:menu|reviews|reservations|pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(path)) {
+  const sourcePath = splitLocalePrefix(path).sourcePath
+  const document = authoredDocumentPath(sourcePath) || isDocumentOnlyPublicPath(sourcePath)
+    || /^\/(?:[A-Za-z-]+\/)?(?:reservations|pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(path)
+  if (!['GET', 'HEAD'].includes(event.method) || !document) {
     return { query: TENANT_SELECT_SQL, params: [] }
   }
   const redirect = publicTenantRedirectQuery({ sql: 'o.id' }, path)
@@ -244,23 +273,35 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
 
   const routing = splitLocalePrefix(path)
   const requestedLocale = routing.localeSegment && platformLocale(routing.localeSegment)?.locale
-  const sourcePath = requestedLocale ? routing.sourcePath : path
+  const sourcePath = (requestedLocale ? routing.sourcePath : path).replace(/\/$/, '') || '/'
   const collectionKind = publicDocumentCollectionKind(sourcePath)
   const includeReviews = sourcePath === '/reviews'
+  const locationRoute = /^\/locations\/([a-z0-9_-]+)\/(menu|reviews)$/.exec(sourcePath)
   const privateCheckout = /^\/(?:pay\/[^/]+|bookings\/(?:confirmed|stay))$/.test(sourcePath)
-  if (!collectionKind && !includeReviews && !privateCheckout) {
+  const authoredApi = path === '/api/public/pages'
+  const apiPath = authoredApi ? event.url.searchParams.get('path') : null
+  const authoredPath = apiPath?.startsWith('/') && !apiPath.startsWith('//') ? normalizedPath(apiPath)
+    : authoredDocumentPath(sourcePath)
+  if (!collectionKind && !includeReviews && !locationRoute && !privateCheckout && !authoredPath) {
     return queryFirst<TenantRow>(db, host.query, host.params)
   }
 
   const organization = { sql: '(SELECT id FROM viewer)' }
   const locale = { sql: `(SELECT locale FROM organization_locales WHERE organization_id = ${organization.sql} AND is_source = 1)` }
-  const plan = preparePublicShellRows(organization, requestedLocale || locale, { collectionKind, includeReviews, previewMenu: false })
-  const localizations = requestedLocale ? [publicLocalizationsQuery(organization, requestedLocale)] : []
+  const documentLocale = authoredApi ? event.url.searchParams.get('locale') : requestedLocale
+  const plan = authoredApi ? null : preparePublicShellRows(organization, requestedLocale || locale, { collectionKind, includeReviews, previewMenu: false })
+  const localizations = documentLocale ? [publicLocalizationsQuery(organization, documentLocale)] : []
+  const location = locationRoute ? preparePublicLocationDocument(organization, {
+    slug: locationRoute[1]!, page: locationRoute[2]!, locale: requestedLocale || undefined,
+  }) : null
+  const authored = authoredPath ? preparePublicAuthoredPage(organization, authoredPath, documentLocale || locale) : null
+  const inquiry = !authoredApi && authoredPath === '/contact' ? preparePublicInquiryForm(organization, documentLocale || locale) : null
   const returningId = /^\/pay\/([a-f0-9-]+)$/.exec(sourcePath)?.[1]
   const returnPlan = returningId && typeof claim === 'string' && /^[a-f0-9-]{72}$/u.test(claim)
     ? await preparePaymentReturn(tenantScope, returningId, claim) : null
   const [hostRows, ...results] = await executeBatch(db, [
-    host, ...[...plan.queries, ...localizations].map(query => withViewer(authorized, query)),
+    host, ...[...plan?.queries ?? [], ...localizations, ...location?.queries ?? [], ...authored?.queries ?? [], ...inquiry ? [inquiry.statement] : []]
+      .map(query => withViewer(authorized, query)),
     ...(returnPlan ? [returnPlan] : []),
   ], {
     operation: 'Read the public tenant document',
@@ -269,13 +310,25 @@ async function readTenantFromHost(event: H3Event, db: DbClient, canonicalDomain:
   if (tenant?.status === 'active' && tenant.onboarding_status === 'active') {
     const source = JSON.parse(tenant.source_locale_rows) as { locale: string }[]
     if (source.length === 1) {
-      event.context.publicDocumentShell = {
+      const shellLength = plan?.queries.length ?? 0
+      const locationStart = shellLength + localizations.length
+      const authoredStart = locationStart + (location?.queries.length ?? 0)
+      if (plan) event.context.publicDocumentShell = {
         organizationId: tenant.id, locale: requestedLocale || source[0]!.locale, collectionKind, includeReviews, plan,
-        results: results.slice(0, plan.queries.length),
+        results: results.slice(0, shellLength),
       } satisfies PublicDocumentShell
-      if (requestedLocale) event.context.publicDocumentLocalizations = {
-        organizationId: tenant.id, locale: requestedLocale,
-        rows: results[plan.queries.length]!.results as StoredPublicLocalizationRow[],
+      if (documentLocale) event.context.publicDocumentLocalizations = {
+        organizationId: tenant.id, locale: documentLocale,
+        rows: results[shellLength]!.results as StoredPublicLocalizationRow[],
+      }
+      if (location) event.context.publicLocationDocument = location.read(results.slice(locationStart, authoredStart), tenant.id)
+      if (authored) event.context.publicAuthoredPage = {
+        organizationId: tenant.id, locale: documentLocale || source[0]!.locale, path: authoredPath!, plan: authored,
+        rows: results.slice(authoredStart, authoredStart + authored.queries.length),
+      }
+      if (inquiry) event.context.publicInquiryForm = {
+        organizationId: tenant.id, locale: documentLocale || source[0]!.locale,
+        value: results[authoredStart + (authored?.queries.length ?? 0)]!.results[0],
       }
       if (returnPlan && typeof claim === 'string') {
         const resolvedLocale = requestedLocale || source[0]!.locale
@@ -315,9 +368,7 @@ async function resolveDashboardTenant(event: H3Event, slug: string, panel: strin
   let plan: ReturnType<typeof prepareDashboardTenant> | undefined
   const read: DashboardAuthRead = {
     queries(token) {
-      plan = prepareDashboardTenant(event, db, env, membershipBySlugQuery(slug, {
-        query: '(SELECT "userId" FROM session WHERE token = ? AND "expiresAt" >= unixepoch())', params: [token],
-      }), slug, panel)
+      plan = prepareDashboardTenant(event, db, env, membershipBySlugQuery(slug, dashboardSessionUserQuery(token)), slug, panel)
       return plan.queries
     },
   }
@@ -344,13 +395,61 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
       admin: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ members: ['read'] })) }),
   ] : null
   const query = getQuery(event)
+  const menuDocument = /^\/products\/menu(?:\/|$)/.test(panel)
+  const catalogEditor = rendersCatalogEditor(panel)
+  const productId = dashboardProductId(panel)
+  const product = productId ? prepareDashboardProductRead(productId, true, undefined, {
+    access: /^\/products\/[^/]+\/team(?:\/|$)/.test(panel),
+    members: /^\/products\/[^/]+\/(?:booking|team)(?:\/|$)/.test(panel),
+    scheduleLocation: /^\/products\/[^/]+\/booking(?:\/|$)/.test(panel) && typeof query.location_id === 'string' && query.location_id !== 'online' ? query.location_id : undefined,
+  }) : null
+  const homeQuote = productId && !rendersProductArrival(panel, query) && /^\/products\/[^/]+\/publication(?:\/|$)/.test(panel) ? prepareHomesQuote(websiteEditorOrganization) : null
+  const arrival = productId && rendersProductArrival(panel, query) ? prepareStayHomeDocument(productId) : null
+  if (product && query.location_id !== undefined && typeof query.location_id !== 'string') throw new HTTPError({ statusCode: 400, message: 'Invalid location scope' })
+  const websiteDocument = rendersWebsiteDocument(panel, query)
+  const website = websiteDocument && needsWebsiteSettings(panel) ? prepareWebsiteSettings(managedOrg, env) : null
+  const locales = panel === '/website/preferences/localization' ? prepareOrganizationLanguageSettings(managedOrg, true) : null
+  const domains = panel === '/website/preferences/domains' ? prepareOrganizationDomains(managedOrg) : null
+  const websitePanel = websiteDocument ? panel.split('/')[2] : undefined
+  const websiteList = prepareWebsitePanel(websitePanel === 'posts' ? { sql: BATCH_VIEWER.organization } : managedOrg, websitePanel, query, websiteQuestion(panel))
+  const variantId = websitePageVariant(panel)
+  const websiteEditor = variantId && variantId !== 'new' ? prepareTenantPageEditor(variantId) : null
+  const postId = websiteDocument && websiteSocialPost(panel)
+  const post = postId && postId !== 'new' ? preparePost({ sql: BATCH_VIEWER.organization }, postId, BATCH_VIEWER) : null
+  const postLocations = postId ? prepareOrganizationLocations(BATCH_VIEWER) : null
+  const postLocationId = typeof query.location_id === 'string' && query.location_id ? query.location_id : typeof query.locationId === 'string' && query.locationId ? query.locationId : null
+  const postLocation = postId && !post && postLocationId
+    ? dashboardLocationQuery({ id: postLocationId }, { sql: BATCH_VIEWER.organization }, BATCH_VIEWER) : null
+  const postScope = post ? post.queries[0] : postLocation ? { query: `SELECT organization_id, id AS location_id FROM (${postLocation.query})`, params: postLocation.params } : undefined
+  const postConnections = postId ? prepareSocialConnections(websiteEditorOrganization, postScope) : null
+  const articleId = websiteBlogPost(panel) || (postId === 'new' && typeof query.article_id === 'string' ? query.article_id : null)
+  const article = articleId && articleId !== 'new' ? prepareBlogPost(articleId, websiteEditorOrganization) : null
+  const categoryId = /^\/website\/blog\/categories\/([^/]+)/.exec(panel)?.[1]
+  const categoryIndex = /^\/website\/blog\/categories(?:\/|$)/.test(panel)
+  const categories = categoryIndex ? articleCategoriesQuery(websiteEditorOrganization, categoryId
+    ? { sql: `(SELECT collection FROM article_categories WHERE organization_id = ${websiteEditorOrganization.sql} AND id = ?)`, params: [decodeURIComponent(categoryId)] }
+    : isArticleCollection(query.collection) ? query.collection : 'blog') : articleId === 'new'
+    ? articleCategoriesQuery(websiteEditorOrganization, isArticleCollection(query.collection) ? query.collection : 'blog')
+    : articleId && /\/category\/?$/.test(panel) ? blogPostCategoriesQuery(articleId, websiteEditorOrganization) : null
   const catalogRead = { products: ['read'] } as const
   const catalogRoles = [...rolesAllowing({ products: ['read'] }), ...rolesAllowing({ products: ['assigned'] })]
-  const catalog = panel === '/products' && query.view !== 'menu' && query.view !== 'section'
+  const catalog = (panel === '/products' || panel === '/products/menu') && query.view !== 'menu' && query.view !== 'section'
     ? prepareDashboardCatalog({
       organizationId: { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, catalogRoles)} THEN ${BATCH_VIEWER.organization} END` },
       assignedUserId: { user: BATCH_VIEWER.user, unrestricted: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: [...catalogRead.products] })) },
     }, query) : null
+  const editorScope = { organizationId: { sql: `CASE WHEN ${roleMatchesSql(BATCH_VIEWER.role!, catalogRoles)} THEN ${BATCH_VIEWER.organization} END` }, assignedUserId: { user: BATCH_VIEWER.user,
+    unrestricted: roleMatchesSql(BATCH_VIEWER.role!, rolesAllowing({ products: ['read'] })) } }
+  const editorCatalogs = [
+    ...(menuDocument ? [{ key: `dish:${typeof query.location_id === 'string' ? query.location_id : 'all'}`,
+      plan: prepareEditorCatalog({ ...editorScope, kind: 'dish', locationId: typeof query.location_id === 'string' ? query.location_id : undefined }) }] : []),
+    ...(catalogEditor && (!menuDocument || /^\/products\/menu\/[^/]+/.test(panel)) ? [{ key: 'all', plan: prepareEditorCatalog(editorScope) }] : []),
+  ]
+  const locationSlug = dashboardLocationSlug(panel)
+  const location = locationSlug ? prepareDashboardLocationOverview({ slug: locationSlug }, /^\/locations\/[^/]+\/photos\/?$/.test(panel)) : null
+  const productCreation = rendersProductCreation(panel, query)
+  const homeSetup = rendersStayHomeSetup(panel, query) ? prepareStayHomeSetup(BATCH_VIEWER) : null
+  const locationList = menuDocument || productCreation && !homeSetup || /^\/locations(?:\/[^/]+)?\/?$/.test(panel) ? prepareOrganizationLocations(BATCH_VIEWER, productCreation || menuDocument) : null
   const bookingId = /^\/bookings\/([^/]+)$/.exec(panel)?.[1]
   const booking = bookingId && bookingId !== 'new' ? prepareDashboardBookingRead(membership, bookingId) : null
   const calendar = /^\/calendar(?:\/|$)/.test(panel)
@@ -381,9 +480,22 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     ...(connections?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(google?.map(query => withViewer(membership, query)) ?? []),
     ...(catalog?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...[...(locationList?.queries ?? []), ...(location?.queries ?? [])].map(query => withViewer(membership, query)),
+    ...(product?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(arrival?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(homeQuote?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(homeSetup?.queries.map(query => withViewer(membership, query)) ?? []),
     ...(booking?.queries ?? []),
     ...(calendar ? [calendar, ...agenda?.queries ?? []] : []),
     ...(earnings?.queries ?? []),
+    ...(website?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(websiteList?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(websiteEditor?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(article?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(categories ? [withViewer(membership, categories)] : []),
+    ...(locales?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...(domains?.queries.map(query => withViewer(membership, query)) ?? []),
+    ...[...(post?.queries ?? []), ...(postLocations?.queries ?? []), ...(postConnections?.queries ?? []), ...editorCatalogs.flatMap(({ plan }) => plan.queries)].map(query => withViewer(membership, query)),
   ]
   return { queries, present }
 
@@ -396,24 +508,117 @@ function prepareDashboardTenant(event: H3Event, db: D1Database, env: ReturnType<
     const userId = session.user.id
     if (organization.userId !== userId) throw new Error('Dashboard membership does not match the Better Auth session')
     await readDashboardMembership(event, slug, async () => viewer)
-    await readDashboardWorkspaceAccess(event, { db, env, organization }, true, workspace.read(rest.slice(0, workspace.queries.length), organization.id))
+    const access = await readDashboardWorkspaceAccess(event, { db, env, organization }, true, workspace.read(rest.slice(0, workspace.queries.length), organization.id))
     const panelRows = rest.slice(workspace.queries.length)
     if (today) await readDashboardTodayDocument(event, slug, () => today.read([viewerResult!, ...panelRows]))
     if (connections && (viewer as { organization_wide: number }).organization_wide === 1) {
       await readDashboardConnectionsDocument(event, slug, connections.read(panelRows))
       if (google) await readCalendarSettingsDocument(event, slug, calendarSettingsFromRows(panelRows.slice(connections.queries.length)))
     }
-    if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows, organization.id))
+    if (catalog) await readDashboardCatalogDocument(event, slug, catalog.read(panelRows.slice(0, catalog.queries.length), organization.id))
+    if (locales && (viewer as { organization_wide: number }).organization_wide === 1) event.context.dashboardLocales = { organization_id: organization.id, resource: locales.read(panelRows.slice(website?.queries.length ?? 0), organization.id, organization.slug) }
+    if (domains && (viewer as { organization_wide: number }).organization_wide === 1) event.context.dashboardDomains = { organization_id: organization.id, resource: await organizationDomainsDashboardPayload(domains.read(panelRows.slice(website?.queries.length ?? 0)), organization, env, access.effective_plan) }
+    if (locationList) event.context.dashboardLocations = { organization_id: organization.id, include_inactive: productCreation || menuDocument, resource: { success: true, locations: locationList.read(panelRows.slice(catalog?.queries.length ?? 0, (catalog?.queries.length ?? 0) + locationList.queries.length), organization.id).locations } }
+    if (location) event.context.dashboardLocation = { organization_id: organization.id, resource: location.read(panelRows.slice(locationList?.queries.length ?? 0), organization) }
+    if (editorCatalogs.length) {
+      const resources = new Map<string, unknown>()
+      let offset = panelRows.length - editorCatalogs.reduce((count, { plan }) => count + plan.queries.length, 0)
+      for (const { key, plan } of editorCatalogs) {
+        resources.set(key, { success: true, ...plan.read(panelRows.slice(offset, offset + plan.queries.length)), organization_id: organization.id })
+        offset += plan.queries.length
+      }
+      event.context.dashboardEditorCatalog = { organization_id: organization.id, resources }
+    }
+    if (product && productId) {
+      const locationId = typeof query.location_id === 'string' && query.location_id !== 'online' ? query.location_id : null
+      const resource = await product.read(panelRows.slice(0, product.queries.length), { env, db, organization }, locationId)
+      event.context.dashboardProduct = { organization_id: organization.id, product_id: productId,
+        path: `${locationId ? `locations/${encodeURIComponent(locationId)}/` : ''}products/${encodeURIComponent(productId)}`, resource }
+      if (homeQuote && resource.product.kind === 'stay' && isOrganizationWideRole(organization.role)) {
+        if (!resource.product.stay) throw new Error('Stay configuration was not read')
+        const adding = resource.product.stay.live ? 0 : 1
+        const offset = product.queries.length + (arrival?.queries.length ?? 0)
+        event.context.dashboardHomesQuote = { organization_id: organization.id, adding,
+          read: () => homeQuote.read(panelRows.slice(offset, offset + homeQuote.queries.length), env, organization.id, adding) }
+      }
+      if (arrival && resource.product.kind === 'stay') event.context.dashboardStayHome = {
+        organization_id: organization.id, product_id: productId, read: () => arrival.read(panelRows.slice(product.queries.length, product.queries.length + arrival.queries.length)),
+      }
+    }
+    if (homeSetup) event.context.dashboardHomeSetup = { organization_id: organization.id, read: () => homeSetup.read(panelRows.slice(0, homeSetup.queries.length)) }
     if (booking && bookingId) await readDashboardBookingDocument(event, { orgSlug: slug, bookingId }, [viewerResult!, ...panelRows])
     if (calendar) {
       event.context.dashboardCalendarPresence = { slug, has_places: (panelRows[0]!.results[0] as { has_places: number }).has_places === 1 }
       if (agenda) await agenda.apply(event, panelRows.slice(1), { env, organization })
     }
     if (earnings && panelRows[2]?.results.length) earnings.apply(event, panelRows, organization)
+    const wholeWorkspace = (viewer as { organization_wide: number }).organization_wide === 1
+    if (websiteDocument) {
+      const content = new Map<string, unknown>()
+      let offset = website?.queries.length ?? 0
+      if (websiteList) {
+        const list = websiteList.read(panelRows.slice(offset, offset + websiteList.queries.length), organization.id)
+        content.set(list.endpoint, list.value)
+        offset += websiteList.queries.length
+      }
+      if (websiteEditor) {
+        content.set(`pages/${encodeURIComponent(variantId!)}`, await websiteEditor.read(panelRows.slice(offset), organization, env))
+      }
+      if (article) {
+        content.set(`blog/${encodeURIComponent(articleId!)}`, { post: await article.read(panelRows.slice(offset, offset + article.queries.length), env) })
+        offset += article.queries.length
+      }
+      if (categories) content.set('blog/categories', { categories: readArticleCategories(panelRows[offset++]!.results) })
+      if (post) {
+        const saved = await post.read(panelRows.slice(offset, offset + post.queries.length), env)
+        if (saved) content.set(`posts/${encodeURIComponent(postId!)}`, { success: true, post: saved })
+        offset += post.queries.length
+      }
+      if (postLocations) {
+        content.set('post-locations', { success: true, locations: postLocations.read(panelRows.slice(offset, offset + postLocations.queries.length), organization.id).locations })
+        offset += postLocations.queries.length
+      }
+      if (postConnections) {
+        const saved = postConnections.read(panelRows.slice(offset, offset + postConnections.queries.length), organization.id)
+        event.context.dashboardPostScope = { organization_id: organization.id, location_id: saved.location_id }
+        content.set('post-connections', presentSocialConnections(organization.id, { dashboardBase: dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null }) }, saved))
+      }
+      event.context.dashboardWebsite = { settings: wholeWorkspace && website ? website.read(panelRows.slice(0, website.queries.length)) : null, content }
+    }
     setResponseHeader(event, 'cache-control', 'private, no-store')
     await setDashboardSocketScope(event, env, { slug, organizationId: organization.id, sessionId: session.session.id, userId })
     return tenant
   }
+}
+
+function prepareWebsitePanel(organization: { sql: string }, panel: string | undefined, query: Record<string, unknown>, qaId: string | null) {
+  if (panel === 'reviews') {
+    const reviews = prepareOrganizationReviews(organization, { locationId: typeof query.location_id === 'string' ? query.location_id.trim() : null })
+    return { queries: reviews.queries, read: (rows: D1Result[], id: string) => ({ endpoint: 'reviews', value: { reviews: reviews.read(rows, id) } }) }
+  }
+  if (panel === 'blog') {
+    const list = prepareBlogList(organization, null, mcpPageWindow({}, { resource: '' }), null)
+    return { queries: list.queries, read: (rows: D1Result[], id: string) => ({ endpoint: 'blog/posts', value: list.read(rows, { resource: `blog-posts:${id}::` }) }) }
+  }
+  if (panel === 'posts') {
+    const locationId = typeof query.location_id === 'string' && query.location_id.trim() ? query.location_id.trim() : null
+    const list = preparePostList(organization, { locationId }, mcpPageWindow({}, { resource: '' }), BATCH_VIEWER)
+    return { queries: list.queries, read: (rows: D1Result[], id: string) => ({
+      endpoint: 'posts', value: { success: true, ...list.read(rows, { resource: `posts:${id}::${locationId ?? ''}` }) },
+    }) }
+  }
+  if (panel === 'qa' && qaId !== 'new') {
+    const location = typeof query.location_id === 'string' ? query.location_id : null
+    const qa = prepareDashboardQa(location, qaId ? { id: qaId } : { ...query, scopes: '1' })
+    return {
+      queries: qa.queries,
+      read: (rows: D1Result[]) => ({
+        endpoint: location ? `locations/${location}/qa` : 'qa',
+        value: qa.read(rows),
+      }),
+    }
+  }
+  return null
 }
 
 function publicTenantMedia(tenant: Pick<TenantRow, 'media_json'>) {
@@ -563,7 +768,7 @@ function setResolvedTenantContext(
   }
 }
 
-const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/messages", "/api/mcp", "/api/integrations/channex"] as const;
+const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/editor/organizations", "/api/messages", "/api/mcp", "/api/integrations/channex"] as const;
 
 export default defineHandler(async (event) => {
   // Nested self-fetches (i18n/icon/internal API calls during SSR) never carry
@@ -593,7 +798,7 @@ export default defineHandler(async (event) => {
   // preview check before authentication ran: six D1 statements and 100-190 ms
   // on a 401. Nothing on these paths reads the resolved tenant; the one shared
   // helper, resolvePublicOrigin, answers the platform origin without it.
-  if (SESSION_SCOPED_API_PREFIXES.some(prefix => tenantPath === prefix || tenantPath.startsWith(`${prefix}/`))) return;
+  if (tenantPath === '/api/integrations/social-connections' || SESSION_SCOPED_API_PREFIXES.some(prefix => tenantPath === prefix || tenantPath.startsWith(`${prefix}/`))) return;
   // `/api/public/**` used to be skipped here because each of those routes
   // carried its own site id in the path. That id was a second answer to "which
   // tenant", arriving beside the host that already knew — and a route reachable

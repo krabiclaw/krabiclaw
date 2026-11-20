@@ -36,12 +36,14 @@
 <script setup lang="ts">
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import { getErrorMessage } from '~/utils/errors'
-import { isQaDeleted, isQaResponse, type QaRow } from '~/utils/organization-qa'
+import { websiteSettingsKey, type TenantPageListRow } from '~/composables/useTenantPageDraft'
+import { isQaDeleted, isQaResponse, qaIndexKey, qaRecordKey, type QaRow } from '~/utils/organization-qa'
 /** Set when this list is a location's Q&A rather than the site's. */
 // The location the URL scopes this to with `?location_id=`, or none for the whole site.
 const locationScope = useLocationScope()
 
 const dashboardApi = useDashboardApi()
+const realtime = useDashboardInvalidations()
 const level = useRouteLevel()
 const route = useRoute()
 const router = useRouter()
@@ -64,70 +66,29 @@ const qaEndpoint = computed(() => locationScope.value
   ? `/api/editor/organizations/${organizationId}/locations/${locationScope.value}/qa`
   : `/api/editor/organizations/${organizationId}/qa`)
 
-// The three reads are independent, so they are issued together.
-const tenantPagesAsyncData = useAsyncData(
-  () => `dashboard-tenant-pages-${organizationId}`,
-  async () => {
-    if (locationScope.value) return []
-    return await dashboardApi<Array<{ path: string; title: string }>>(
-      `/api/editor/organizations/${organizationId}/tenant-pages`,
-      {
-        validate: (value): value is Array<{ path: string; title: string }> =>
-          Array.isArray(value)
-          && value.every(page =>
-            isRecord(page)
-            && typeof page.path === 'string'
-            && typeof page.title === 'string',
-          ),
-      },
-    )
-  },
-)
-
-const existingQaScopesAsyncData = useAsyncData(
-  () => `dashboard-qa-scopes-${organizationId}`,
-  async () => {
-    if (locationScope.value) return []
-    return await dashboardApi<Array<{ page_path: string | null }>>(
-      `/api/editor/organizations/${organizationId}/qa/scopes`,
-      {
-        validate: (value): value is Array<{ page_path: string | null }> =>
-          Array.isArray(value)
-          && value.every(scope =>
-            isRecord(scope)
-            && (scope.page_path === null || typeof scope.page_path === 'string'),
-          ),
-      },
-    )
-  },
-)
+const { data: website } = useNuxtData<{ pages: TenantPageListRow[] }>(websiteSettingsKey(String(route.params.org_slug)))
 
 const pagePath = computed(() => selectedPagePath.value === 'general' ? null : selectedPagePath.value)
-const qaAsyncData = useAsyncData(
-  () => locationScope.value ? `dashboard-location-qa-${organizationId}-${locationScope.value}` : `dashboard-organization-qa-${organizationId}-${selectedPagePath.value}`,
-  () => dashboardApi<{ qa: QaRow[] }>(qaEndpoint.value, {
-    query: pagePath.value ? { page_path: pagePath.value } : undefined,
-    validate: isQaResponse,
+const { data, refresh, error: qaError } = await useWebsiteIndexData(
+  () => qaIndexKey(organizationId, locationScope.value, pagePath.value),
+  () => dashboardApi(qaEndpoint.value, {
+    query: { ...(pagePath.value ? { page_path: pagePath.value } : {}), ...(!locationScope.value ? { scopes: '1' } : {}) },
+    validate: (value): value is { qa: QaRow[]; page_scopes?: Array<{ page_path: string }> } =>
+      isQaResponse(value) && (locationScope.value !== null || ('page_scopes' in value && Array.isArray(value.page_scopes))),
   }),
 )
-
-const [
-  { data: tenantPages },
-  { data: existingQaScopes },
-  { data, refresh, error: qaError },
-] = await Promise.all([tenantPagesAsyncData, existingQaScopesAsyncData, qaAsyncData])
 
 const pageScopes = computed(() => {
   const scopes = new Map<string, string>()
   scopes.set('general', 'Whole site')
 
-  for (const page of tenantPages.value ?? []) {
+  for (const page of website.value?.pages ?? []) {
     if (page.path && !scopes.has(page.path)) {
       scopes.set(page.path, page.title || page.path)
     }
   }
 
-  for (const scope of existingQaScopes.value ?? []) {
+  for (const scope of data.value?.page_scopes ?? []) {
     if (scope.page_path && !scopes.has(scope.page_path)) {
       scopes.set(scope.page_path, scope.page_path)
     }
@@ -166,6 +127,9 @@ async function removeItem(item: { id: string }) {
       query: pagePath.value ? { page_path: pagePath.value } : undefined,
       validate: isQaDeleted,
     })
+    const key = qaRecordKey(organizationId, locationScope.value, item.id)
+    realtime.held.take(`website:${key}`)
+    clearNuxtData(key)
     await refresh()
   } catch (error) {
     listError.value = error instanceof Error ? error.message : 'Failed to remove question'

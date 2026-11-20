@@ -15,6 +15,7 @@
     :organization-id="organizationId"
     panel-id="organization-blog-post"
     :media-picker-component="MediaPicker"
+    @saved="applyPost"
   >
     <template #actions="{ post: savedPost, saving }">
       <DashboardResourceLocalization
@@ -41,6 +42,7 @@ import BlogPostEditor from '~/lib/components/workspace/blog/BlogPostEditor.vue'
 import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
 import type { BlogEditorBlock, BlogPost } from '~/lib/components/workspace/blog/types'
 import { blankBlogLocalizedText, blogLocalizedTextFields, writeBlogLocalizedText, type BlogLocalizedFieldPath } from '~/utils/blog-editor'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
 // One post. Rendered by `blog.vue`, which owns the frame — this level draws its
@@ -61,15 +63,24 @@ watchEffect(() => {
   if (isNew && level.child.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
 
+const realtime = useDashboardInvalidations()
+
 // ── An existing post ────────────────────────────────────
-const { data: postResource, error: postError } = await useAsyncData(
+const { data: postResource, error: postError } = await useWebsiteIndexData(
   `dashboard-blog-post:${organizationId}:${postId}`,
   () => isNew ? Promise.resolve(null) : dashboardFetch<{ post: BlogPost }>(
-    `/api/editor/organizations/${organizationId}/blog/${postId}`,
+    `/api/editor/organizations/${organizationId}/blog/${encodeURIComponent(postId)}`,
     { orgSlug },
     { validate: isBlogPostResponse },
   ),
 )
+
+function applyPost(post: BlogPost) {
+  const response = { post }
+  if (post.id === postId) postResource.value = response
+  const held = realtime.held.begin(`website:dashboard-blog-post:${organizationId}:${post.id}`, businessChanged)
+  realtime.held.hold(held, response, Date.now() + 30_000, 16)
+}
 
 // A post that is not there is not a page. A request that failed is a state this
 // surface shows, because the post may well still exist.

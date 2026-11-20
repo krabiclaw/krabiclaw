@@ -9,7 +9,7 @@
     <!-- Modals and the command palette teleport here, inside the site's theme scope. -->
     <div id="tenant-portal-root" />
 
-    <AnnouncementBanner />
+    <PublicAnnouncement format="banner" />
 
     <TenantHeader
       :organization="tenantChromeOrganization"
@@ -87,11 +87,6 @@ useHead(() => {
     link: [
       { rel: 'preconnect', href: 'https://imagedelivery.net' },
       { rel: 'preconnect', href: 'https://media.blawby.com' },
-      ...(import.meta.dev ? [] : [{
-        key: 'tenant-surface-stylesheet',
-        rel: 'stylesheet' as const,
-        href: '/_nuxt/surfaces/tenant.css',
-      }]),
     ],
     style: isHome.value ? [{ innerHTML: tenantCriticalCss, tagPriority: 'critical' }] : [],
     meta: shellSearchConsoleVerification.value

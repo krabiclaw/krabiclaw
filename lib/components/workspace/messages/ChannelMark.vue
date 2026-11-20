@@ -1,7 +1,7 @@
 <template>
-  <!-- Where it was booked: the channel's mark in a small circle, at the corner of a person's avatar. -->
+  <!-- Where it was booked: the channel's mark in a small circle, inside a stay bar or (bordered by its caller) at the corner of a person's avatar. -->
   <span
-    class="flex items-center justify-center rounded-full border-2 border-(--ui-bg) text-[10px] font-bold text-white"
+    class="flex shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
     :class="large ? 'size-8' : 'size-[22px]'"
     :style="{ backgroundColor: STAY_CHANNEL_COLORS[channel] }"
     role="img"

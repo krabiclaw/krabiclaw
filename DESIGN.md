@@ -549,6 +549,22 @@ Cancel on the left as a text button, Save on the right as the only filled
 control, pinned to the base of the pane or drawer. Save is disabled until there
 is something to save.
 
+### Data loading and single-batch rule
+
+A CMS screen, index, or editor must resolve its complete initial view in
+**one D1 batch round trip** on first load (`executeBatch` with membership and
+prepared resource queries in `server/utils/dashboard-context.ts` or
+`server/utils/dashboard-editor-resources.ts`).
+
+Never introduce sequential API waterfalls or per-field endpoints:
+- An index or leaf does not fetch its pieces through multiple unbatched
+  `useAsyncData`/`useFetch` calls. Data arrives in the initial document or one
+  batched loader.
+- Avoid speculative cold-load preloading loops; user interactions
+  (`@pointerenter`, `@focus`) handle just-in-time prefetching.
+- Mutations commit in one batch write and broadcast changes via
+  `useDashboardInvalidations`.
+
 ## Editing states
 
 `DashboardListEditor` has three states. Browse: each row is a link to the

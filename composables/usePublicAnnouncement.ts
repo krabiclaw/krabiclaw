@@ -25,15 +25,10 @@ export const isPublicAnnouncement = (value: unknown): value is PublicAnnouncemen
 export async function usePublicAnnouncement() {
   const { id: organizationId } = useTenantOrganization().organization
   const requestEvent = useRequestEvent()
-  const route = useRoute()
-  const isPublicSurface = !route.path.startsWith('/dashboard') && !route.path.startsWith('/api')
-
-  const announcement = useState<PublicAnnouncement | null>(`public-announcement-state:${organizationId}`, () => null)
-
-  if (isPublicSurface && !announcement.value) {
-    const { data, error } = await useAsyncData(
-      `public-announcement:${organizationId}`,
-      () => loadPublicResourcePayload<{ announcement: PublicAnnouncement | null }>({
+  const { data, error } = await useAsyncData(
+    `public-announcement:${organizationId}`,
+    async () => {
+      const payload = await loadPublicResourcePayload<{ announcement: PublicAnnouncement | null }>({
         organizationId,
         resourceKind: 'config',
         url: '/api/public/config',
@@ -43,12 +38,16 @@ export async function usePublicAnnouncement() {
         failureMessage: 'Public site configuration failed',
         validate: (value): value is { announcement: PublicAnnouncement | null } =>
           isRecord(value) && ('announcement' in value) && (value.announcement === null || isPublicAnnouncement(value.announcement)),
-      }),
-      { server: true },
-    )
-    if (error.value) throw createError(error.value)
-    announcement.value = data.value?.announcement ?? null
-  }
+      })
+      return { announcement: payload.announcement }
+    },
+    {
+      dedupe: 'defer',
+      getCachedData: import.meta.server ? (key, app) => app.payload.data[key] : undefined,
+    },
+  )
+  if (error.value) throw createError(error.value)
+  const announcement = computed(() => data.value?.announcement ?? null)
 
   const storageKey = computed(() => {
     if (!announcement.value) return null

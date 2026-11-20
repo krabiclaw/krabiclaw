@@ -6,10 +6,10 @@
 //
 // Usage (in a page):
 //   const { getField, getHero, media, qa_list, ... } = await usePublicPageData()
-import { onMounted, watch } from "vue";
+import { watch } from "vue";
 import {
   usePublicPageRequest,
-  usePublicResourceKey,
+  usePublicPageKey,
   buildPublicPageUrl,
   type PublicPageDataset,
 } from "~/composables/usePublicPageRequest";
@@ -20,15 +20,6 @@ import {
   type PublicLocaleRepresentation,
   type PublicPagePayload,
 } from '~/utils/public-resource-contracts'
-
-interface ContentRow {
-  field: string;
-  content: string | null;
-  hero_title: string | null;
-  hero_subtitle: string | null;
-  media?: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url?: string | null; kind?: string | null }>;
-  [key: string]: unknown;
-}
 
 const throwPublicPageError = (error: unknown): never => {
   const record = typeof error === 'object' && error !== null
@@ -51,25 +42,18 @@ const throwPublicPageError = (error: unknown): never => {
 export const usePublicPageData = async <T = Product>(options: {
   datasets?: readonly PublicPageDataset[]
   validateProduct?: (value: unknown) => value is T
-  server?: boolean
-  lazy?: boolean
-  routeOwned?: boolean
 } = {}) => {
   const { id: organizationId } = useTenantOrganization().organization
   const params = usePublicPageRequest();
   const requestedParams = computed(() => options.datasets
     ? { ...params.value, datasets: [...options.datasets] }
     : { ...params.value, datasets: [...params.value.datasets] })
-  const key = computed(() => usePublicResourceKey('page', organizationId, requestedParams.value));
+  const key = computed(() => usePublicPageKey(organizationId, requestedParams.value));
 
   const url = computed(() => buildPublicPageUrl(requestedParams.value));
 
   const shell = useOrganizationShellState();
   const requestEvent = import.meta.server ? useRequestEvent() : undefined
-  const deferredSupplement = options.routeOwned === false
-    && options.server === false
-    && options.lazy === true;
-
   const asyncData = useAsyncData<PublicPagePayload<T>>(
           key,
           (_nuxtApp, { signal }) => {
@@ -96,27 +80,19 @@ export const usePublicPageData = async <T = Product>(options: {
             })
           },
           {
-            server: options.server ?? true,
-            lazy: deferredSupplement,
             dedupe: 'defer',
             // The root can finish the read before the page itself mounts on the server.
             getCachedData: import.meta.server ? (key, app) => app.payload.data[key] : undefined,
-            immediate: !deferredSupplement,
             watch: [],
           },
         );
-  if (import.meta.client && deferredSupplement && 'execute' in asyncData) {
-    onMounted(() => void asyncData.execute());
-  }
   const { data, error, pending, refresh } = asyncData
   const locale_representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
-  if (options.routeOwned !== false) {
-    watch(
-      () => data.value?.locale_representations,
-      representations => { locale_representations.value = representations ?? [] },
-      { immediate: true },
-    )
-  }
+  watch(
+    () => data.value?.locale_representations,
+    representations => { locale_representations.value = representations ?? [] },
+    { immediate: true },
+  )
 
   // Persistent chrome comes from the stable shell. Route-owned collections
   // come from the keyed page response and change with navigation.
@@ -146,78 +122,47 @@ export const usePublicPageData = async <T = Product>(options: {
 
   const table_policy_summaries = computed(() => data.value?.table_policy_summaries ?? {});
 
-  // ── Content ───────────────────────────────────────────────
-  const contentMap = computed(() => {
-    const rows = (data.value?.content ?? []) as ContentRow[];
-    return rows.reduce<Record<string, ContentRow>>((acc, row) => {
-      acc[row.field] = row;
-      return acc;
-    }, {});
-  });
-
-  const getField = (
-    field: string,
-    defaultValue: string | null = null,
-  ): string | null => {
-    if (
-      ["hero.title", "hero.subtitle", "hero.media"].includes(
-        field,
-      )
-    ) {
-      const heroRow = contentMap.value["hero"];
-      const fieldRow = contentMap.value[field];
-      if (field === "hero.title")
-        return heroRow?.hero_title ?? fieldRow?.content ?? defaultValue;
-      if (field === "hero.subtitle")
-        return heroRow?.hero_subtitle ?? fieldRow?.content ?? defaultValue;
-      if (field === "hero.media")
-        return heroRow?.media?.find(item => item.slot === 'media')?.public_url ?? defaultValue;
+  const blocks = computed(() => {
+    const fields = new Map<string, NonNullable<typeof tenantPage.value>['blocks'][number]>()
+    for (const block of tenantPage.value?.blocks ?? []) {
+      const field = block.type === 'hero' ? 'hero' : block.data.field
+      fields.set(typeof field === 'string' && field.trim() ? field.trim() : `${block.type}.${block.position}`, block)
+      if (block.type === 'hero' && typeof block.data.eyebrow === 'string' && block.data.eyebrow.trim()) fields.set('hero.kicker', block)
     }
-    const row = contentMap.value[field];
-    if (!row) return defaultValue;
-    const mediaValue = row.media?.[0]?.public_url || row.content;
-    const val = row.type === "media" ? mediaValue : row.content;
-    return val && val.trim() !== "" ? val : defaultValue;
-  };
-
-  const getHero = (
-    defaults = { title: "", subtitle: "", image: "", video: "" },
-  ) => {
-    const row = contentMap.value["hero"];
-    const heroMedia = row?.media?.find(item => item.slot === 'media') ?? null;
-    const isVideo = heroMedia?.kind === "video";
+    return fields
+  })
+  const heroMedia = computed(() => blocks.value.get('hero')?.media.find(item => item.slot === 'media'))
+  function getField(field: string, fallback: string | null = null): string | null {
+    const hero = blocks.value.get('hero')?.data
+    if (field === 'hero.media') return heroMedia.value?.public_url ?? fallback
+    if (field === 'hero.title' && typeof hero?.title === 'string') return hero.title
+    if (field === 'hero.subtitle' && typeof hero?.subtitle === 'string') return hero.subtitle
+    const block = blocks.value.get(field)
+    if (!block) return fallback
+    const { type, data, media } = block
+    const value = type === 'hero' ? data.eyebrow : type === 'heading' ? data.text
+      : type === 'markdown' ? data.markdown ?? data.content : type === 'image' || type === 'gallery' ? media[0]?.public_url || data.title : data.title
+    return typeof value === 'string' && value.trim() ? value : fallback
+  }
+  function getHero(defaults = { title: '', subtitle: '', image: '', video: '' }) {
+    const asset = heroMedia.value
+    const isVideo = asset?.kind === 'video'
     return {
-      title:
-        getField("hero.title", row?.hero_title ?? defaults.title) ??
-        defaults.title,
-      subtitle:
-        getField("hero.subtitle", row?.hero_subtitle ?? defaults.subtitle) ??
-        defaults.subtitle,
-      image:
-        (isVideo ? defaults.image : getField("hero.media", heroMedia?.public_url || defaults.image)) ??
-        defaults.image,
-      video:
-        (isVideo ? getField("hero.media", heroMedia?.public_url || defaults.video) : defaults.video) ??
-        defaults.video,
-      thumbnail_url: heroMedia?.thumbnail_url || null,
-      imageKind: isVideo ? "image" : (heroMedia?.kind || "image"),
-      videoKind: isVideo ? "video" : "video",
-    };
-  };
-
-
-  // Register every lifecycle hook above before suspending setup. Route-owned
-  // data is authoritative: navigation completes only after this single request
-  // succeeds, and failures propagate to Nuxt's error boundary.
-  if (!deferredSupplement && 'then' in asyncData) {
-    await asyncData
-    if (asyncData.error.value) throwPublicPageError(asyncData.error.value)
+      title: getField('hero.title', defaults.title) ?? defaults.title,
+      subtitle: getField('hero.subtitle', defaults.subtitle) ?? defaults.subtitle,
+      image: (isVideo ? defaults.image : asset?.public_url) || defaults.image,
+      video: (isVideo ? asset.public_url : defaults.video) || defaults.video,
+      thumbnail_url: asset?.thumbnail_url || null,
+      imageKind: isVideo ? 'image' : (asset?.kind || 'image'),
+      videoKind: 'video',
+    }
   }
-  if (options.routeOwned !== false) {
-    locale_representations.value = data.value?.locale_representations ?? []
-  }
+
+  await asyncData
+  if (error.value) throwPublicPageError(error.value)
+  locale_representations.value = data.value?.locale_representations ?? []
   await shell.ready
-  if (options.routeOwned !== false && shell.error.value) throwPublicPageError(shell.error.value)
+  if (shell.error.value) throwPublicPageError(shell.error.value)
 
   return {
     data,
@@ -239,7 +184,6 @@ export const usePublicPageData = async <T = Product>(options: {
     table_policy_summaries,
     getField,
     getHero,
-    contentMap,
     products,
     collections,
     error,

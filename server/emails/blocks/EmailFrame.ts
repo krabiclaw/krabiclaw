@@ -1,6 +1,6 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { EHtml, EHead, EBody, EPreview, EContainer, ESection, EText, ELink, EImg, EStyle } from '../vue-email'
-import { light, dark, font, layout, type } from '../tokens'
+import { light, dark, font, layout, type, brand } from '../tokens'
 import { appendEmailUtms } from '../utm'
 import { platformLocale } from '~/shared/platform-locales'
 
@@ -68,23 +68,11 @@ export default defineComponent({
                  follows the scheme rather than staying a light band. */
               .email-hero-img, .email-section-img { background-color: ${dark.bg} !important; }
               .email-avatar { background-color: ${dark.bg} !important; }
-              /* The primary button inverts with the scheme, like the
-                 product's: navy on light, white on dark. The label lives in a
-                 span inside the anchor and the generic span rule above sets
-                 that span's colour directly, so the button has to out-specify
-                 it: a class plus universal selector loses to a class plus
-                 element. */
+              /* Primary button uses brand primary accent in all modes: coral with white text. */
               .email-body .email-cta-secondary, .email-body .email-cta-secondary span { border-color: ${dark.border} !important; color: ${dark.text} !important; }
-              .email-body .email-cta-primary { background-color: ${light.surface} !important; }
-              .email-body .email-cta-primary, .email-body .email-cta-primary span { color: ${light.text} !important; }
+              .email-body .email-cta-primary { background-color: ${brand.primary} !important; }
+              .email-body .email-cta-primary, .email-body .email-cta-primary span { color: ${light.surface} !important; -webkit-text-fill-color: ${light.surface} !important; }
             }
-            /* Gmail's apps ignore the query above and recolour on their own:
-               the primary label turns dark while its navy fill stays, so the
-               button reads blank. Gmail puts a u element before the body, and
-               only there do these blends restore the label — black is the
-               blend's identity, never a visible colour. */
-            u + .email-bg .gmail-screen { background: black; mix-blend-mode: screen; }
-            u + .email-bg .gmail-difference { background: black; mix-blend-mode: difference; }
             @media only screen and (max-width: 600px) {
               .email-gutter { padding-left: 20px !important; padding-right: 20px !important; }
               .email-title { font-size: 26px !important; }
