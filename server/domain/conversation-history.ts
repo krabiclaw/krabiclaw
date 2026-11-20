@@ -10,7 +10,7 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { assignedMemberSql, bookingOperationsScope, roleAllows } from '~/server/utils/member-access'
 import {
   conversationAccessDenied, conversationAccessFromRow, conversationAccessQuery, conversationParticipantsSql, guestVisibleSql, isEventMessage, MEMBER_REPLY_EVENT, messageRole,
-  MIRRORED_EVENT, OPENING_EVENT, parseMessagePayload, participantGuard, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, SUPPORT_CONVERSATION_SQL,
+  channelSenderName, MIRRORED_EVENT, OPENING_EVENT, parseMessagePayload, participantGuard, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, SUPPORT_CONVERSATION_SQL,
   type ConversationAccessRow, type ConversationParticipantRow, type ConversationRow, type ConversationWindow, type MessageRow,
 } from './conversations'
 import { conversationDeliveryReceipt, conversationGuestName } from './guest-threads/inbox'
@@ -143,16 +143,15 @@ function presentEntries(
       continue
     }
     const payload = parseMessagePayload(message)
-    const meta = payload.meta && typeof payload.meta === 'object' ? payload.meta : null
     const support = mirrored && isPlatformMessageAuthor(authorKind)
-    const providerName = mirrored && meta ? entryText(Reflect.get(meta, 'name')) : null
+    const providerName = mirrored ? channelSenderName(payload) : null
     const side = authorKind === 'guest' || opening || support ? 'guest' : 'business'
     const authorUserId = guestViewer && (!mine || authorKind !== 'guest') ? null : message.author_user_id
     const author = support ? providerName || 'Airbnb Support'
       : side === 'guest' ? guestViewer && (mine || opening) ? 'You' : providerName || (message.author_user_id !== conversation.user_id && name) || guestName
         : guestViewer ? context.organization_name
           : scheduled ? 'Automatic'
-            : mine || mirrored ? 'You' : name ? (conversation.kind === 'team' ? name : firstName(name)) : isPlatformMessageAuthor(message.author_kind) ? 'Sent automatically' : 'Deleted account'
+            : mine ? 'You' : mirrored ? providerName || context.organization_name : name ? (conversation.kind === 'team' ? name : firstName(name)) : isPlatformMessageAuthor(message.author_kind) ? 'Sent automatically' : 'Deleted account'
     const photos = history.photos.get(message.id)?.length ?? 0
     const links = mirrored && Array.isArray(payload.attachments) ? payload.attachments.length : 0
     const unshownFiles = Math.max(links - photos, 0) + (Array.isArray(payload.unshownFiles) ? payload.unshownFiles.length : 0)

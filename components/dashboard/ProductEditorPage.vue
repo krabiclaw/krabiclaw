@@ -96,7 +96,7 @@
       color="neutral"
       variant="pill"
       class="mb-10 w-full"
-      :ui="{ list: 'rounded-full bg-muted', trigger: 'rounded-full data-[state=active]:text-highlighted', indicator: 'rounded-full bg-default shadow-sm' }"
+      :ui="{ list: 'rounded-full bg-muted p-1', trigger: 'h-10 grow basis-0 rounded-full text-sm font-semibold data-[state=active]:text-highlighted', indicator: 'inset-y-1 rounded-full bg-default shadow-sm' }"
       aria-label="Listing editor sections"
       @update:model-value="changeStayTab"
     />
