@@ -86,6 +86,7 @@ const saving = ref(false)
 const failure = ref('')
 const adding = ref(false)
 const invite = reactive({ name: '', email: '' })
+// A type alone: erased from both bundles.
 let pdf: import('pdfjs-dist').PDFDocumentProxy | null = null
 
 const selectedName = computed(() => nameOf(selected.value))
@@ -114,6 +115,8 @@ async function choose(event: Event) {
   if (!chosen) return
   failure.value = ''
   try {
+    // The PDF renderer is the browser's alone; the server bundle never carries it.
+    if (!import.meta.client) throw new Error('PDFs open in the browser')
     const pdfjs = await import('pdfjs-dist')
     pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
     pdf = await pdfjs.getDocument({ data: new Uint8Array(await chosen.arrayBuffer()) }).promise
