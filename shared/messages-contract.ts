@@ -40,6 +40,8 @@ export interface ConversationMessage {
   id: string
   sequence: number
   author_user_id: string | null
+  /** Who wrote it, as stored: the guest's own words, a member, or Blawby (a booking's opening, a support mirror). `side` is where it is drawn. */
+  author_kind: 'guest' | 'member' | typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number]
   side: 'guest' | 'business'
   author: string
   automatic: boolean
@@ -116,6 +118,8 @@ export interface ConversationPage extends Omit<ConversationEntriesPage, 'convers
   work: { type: 'done'; task_id: string; version: number } | { type: 'review' } | null
   /** The open task each actionable job message represents, keyed by message ID. */
   job_actions?: Record<string, string>
+  /** For whoever creates tasks in a guest conversation: where a guest's report is, to make a maintenance job of it. */
+  maintenance?: { product_id: string | null; location_id: string | null; guest: string }
 }
 
 export interface ConversationDetails {

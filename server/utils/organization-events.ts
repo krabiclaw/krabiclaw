@@ -133,8 +133,15 @@ export async function creationRequestHash(request: unknown): Promise<string> {
  * What an earlier creation under this key recorded: its request hash and the
  * entity it made. Null when the key is new.
  */
+/** The creation record of a key, as a statement for the caller's batch; `creationRecordOf` reads its row. */
+export const creationRecordQuery = (dedupeKey: string): BatchQuery => ({ query: 'SELECT payload_json FROM activity_entries WHERE dedupe_key = ? LIMIT 1', params: [dedupeKey] })
+
 export async function readCreationRecord(db: DbClient, dedupeKey: string): Promise<{ requestHash: string; entityId: string; metadata: Record<string, unknown> } | null> {
-  const row = await queryFirst<{ payload_json: string }>(db, 'SELECT payload_json FROM activity_entries WHERE dedupe_key = ? LIMIT 1', [dedupeKey])
+  const query = creationRecordQuery(dedupeKey)
+  return creationRecordOf(await queryFirst<{ payload_json: string }>(db, query.query, query.params), dedupeKey)
+}
+
+export function creationRecordOf(row: { payload_json: string } | null | undefined, dedupeKey: string): { requestHash: string; entityId: string; metadata: Record<string, unknown> } | null {
   if (!row) return null
   const payload = JSON.parse(row.payload_json) as { entityId?: unknown; metadata?: Record<string, unknown> }
   if (typeof payload.entityId !== 'string' || typeof payload.metadata?.request_hash !== 'string') {

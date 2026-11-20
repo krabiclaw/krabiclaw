@@ -39,14 +39,14 @@
         <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin text-muted" />
       </div>
     </div>
-    <TodayTaskCreate v-if="canCreate && organizationId" v-model:open="createOpen" :organization-id="organizationId" :assignees="business?.assignees ?? []" :claim-options="business?.claim_options ?? null" @created="() => refresh()" />
+    <TaskCreate v-if="canCreate && organizationId" v-model:open="createOpen" :organization-id="organizationId" :assignees="business?.assignees ?? []" :claim-options="business?.claim_options ?? null" @created="() => refresh()" />
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import TodayAgendaCard from './TodayAgendaCard.vue'
 import TodayItemCard from './TodayItemCard.vue'
-import TodayTaskCreate from './TodayTaskCreate.vue'
+import TaskCreate from './TaskCreate.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type BusinessToday, type TodayCard, type TodayFeedPayload, type TodayItem } from '~/shared/dashboard-today'
 import { businessChanged } from '~/composables/useDashboardInvalidations'
