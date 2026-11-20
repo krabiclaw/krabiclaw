@@ -4,7 +4,7 @@ import { loginAs } from './helpers/auth'
 import { seededTenant } from './seed/manifest'
 import { readLocalTenant } from './test-env'
 import { formatMinorAmount } from '../../shared/prices'
-import { LEGACY_PLATFORM_THEME_STORAGE_KEY, PLATFORM_THEME_STORAGE_KEY } from '../../shared/platform-theme'
+import { PLATFORM_THEME_STORAGE_KEY } from '../../shared/platform-theme'
 import { starterPalette } from '../../shared/site-palette'
 import { WEBSITE_ONBOARDING_EXIT_PATH } from '../../shared/onboarding-flow'
 import type { Product } from '../../server/types/products'
@@ -271,11 +271,10 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   expect(placement.status(), await placement.text()).toBe(200)
   // The public menu shows what is published and not the unpublished dish.
   const publicPage = await browser.newPage({ colorScheme: 'light' })
-  await publicPage.addInitScript(key => localStorage.setItem(key, 'dark'), LEGACY_PLATFORM_THEME_STORAGE_KEY)
+  await publicPage.addInitScript(key => localStorage.setItem(key, 'dark'), PLATFORM_THEME_STORAGE_KEY)
   await publicPage.goto(new URL('/menu', publicAddress).href)
   await expect(publicPage.locator('html')).toHaveClass(/(?:^|\s)dark(?:\s|$)/u)
   await expect.poll(() => publicPage.evaluate(key => localStorage.getItem(key), PLATFORM_THEME_STORAGE_KEY)).toBe('dark')
-  expect(await publicPage.evaluate(key => localStorage.getItem(key), LEGACY_PLATFORM_THEME_STORAGE_KEY)).toBeNull()
   await expect(publicPage.getByText('Grilled squid', { exact: true })).toBeVisible()
   await expect(publicPage.getByText(draftDishName, { exact: true })).toHaveCount(0)
   await publicPage.close()

@@ -71,7 +71,6 @@ APNS_BUNDLE_ID = "com.krabiclaw.app"
 # Web push (VAPID). The public key is what browsers subscribe with; VAPID_PRIVATE_KEY is its secret.
 NUXT_PUBLIC_VAPID_PUBLIC_KEY = "BG_WwHiB15TZy0I_b0OUKcTFNZk_7PS1gE2ljDNsC0xrLRltELxY8ZpbHtrPPF28CYu702QYvmutaHvbiy2sdCc"
 CF_PLATFORM_ZONE_ID = "cdde6f2a8040e76dd081c08c18ad41dd"
-CF_LEGACY_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 CF_SAAS_CNAME_TARGET = "customers.blawby.com"
 BETTER_AUTH_URL = "https://blawby.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://blawby.com"
