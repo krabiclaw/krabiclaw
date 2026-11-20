@@ -10,7 +10,7 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { assignedMemberSql, bookingOperationsScope, roleAllows } from '~/server/utils/member-access'
 import {
   conversationAccessDenied, conversationAccessFromRow, conversationAccessQuery, conversationParticipantsSql, guestVisibleSql, isEventMessage, MEMBER_REPLY_EVENT, messageRole,
-  MIRRORED_EVENT, OPENING_EVENT, parseMessagePayload, participantGuard, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, SUPPORT_CONVERSATION_SQL,
+  channelSenderName, MIRRORED_EVENT, OPENING_EVENT, parseMessagePayload, participantGuard, SCHEDULED_MESSAGE_EVENT, SUBMISSION_EVENT, SUPPORT_CONVERSATION_SQL,
   type ConversationAccessRow, type ConversationParticipantRow, type ConversationRow, type ConversationWindow, type MessageRow,
 } from './conversations'
 import { conversationDeliveryReceipt, conversationGuestName } from './guest-threads/inbox'
@@ -143,9 +143,8 @@ function presentEntries(
       continue
     }
     const payload = parseMessagePayload(message)
-    const meta = payload.meta && typeof payload.meta === 'object' ? payload.meta : null
     const support = mirrored && isPlatformMessageAuthor(authorKind)
-    const providerName = mirrored && meta ? entryText(Reflect.get(meta, 'name')) : null
+    const providerName = mirrored ? channelSenderName(payload) : null
     const side = authorKind === 'guest' || opening || support ? 'guest' : 'business'
     const authorUserId = guestViewer && (!mine || authorKind !== 'guest') ? null : message.author_user_id
     const author = support ? providerName || 'Airbnb Support'

@@ -47,7 +47,7 @@
             </div>
 
             <div v-else class="flex min-w-0 max-w-[76%] flex-col gap-0.5" :class="item.mine ? 'items-end self-end' : 'relative items-start self-start pl-10'" :data-message="item.key">
-              <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" /></span>
+              <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :image="imageOf(item.runs[0]!.author_user_id)" :support="thread.kind === 'support'" size="sm" /></span>
               <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
               <div v-for="message in item.runs" :key="settledKeys[message.id] ?? message.id" class="flex min-w-0 flex-col" :class="item.mine ? 'items-end' : 'items-start'" :data-team-message="thread.kind === 'team' ? message.id : undefined" :data-automatic="message.automatic || undefined">
                 <div v-if="message.photos.length" class="grid max-w-sm gap-1" :class="[message.photos.length > 1 ? 'grid-cols-2' : 'grid-cols-1', message.sending ? 'opacity-60' : '']">
@@ -409,6 +409,8 @@ const rows = computed<Row[]>(() => {
 })
 
 const initialOf = (name: string) => [...name.trim()][0]?.toUpperCase() ?? '?'
+// A teammate's run carries their photo, as the participants list has it.
+const imageOf = (userId: string | null) => userId === null ? null : thread.value?.participants.find(person => person.id === userId)?.image ?? null
 
 const viewer = ref<MessagePhotoViewerState | null>(null)
 

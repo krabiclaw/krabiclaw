@@ -72,7 +72,7 @@
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
                   class="relative flex flex-col justify-end border-r border-default px-1.5 text-left text-xs leading-4 tabular-nums outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
                   :class="[
-                    row.home ? 'min-h-19 pb-2 pt-8 sm:min-h-22 sm:pt-10' : 'min-h-16 py-1 sm:min-h-18',
+                    row.home ? 'min-h-22 pb-2 pt-10' : 'min-h-16 py-1 sm:min-h-18',
                     cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted',
                     inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '',
                   ]"
@@ -96,7 +96,7 @@
                 <div
                   v-for="(piece, pieceIndex) in pills(rowIndex)"
                   :key="piece.column"
-                  class="pointer-events-none z-[5] mx-0.5 mt-1 flex h-5 min-w-0 items-center self-start rounded-full sm:mt-1.5 sm:h-7 bg-accented px-2.5 text-xs font-semibold text-highlighted ring-2 ring-inset ring-inverted"
+                  class="pointer-events-none z-[5] mx-0.5 mt-1 flex h-7 min-w-0 items-center self-start rounded-full sm:mt-1.5 bg-accented px-2.5 text-xs font-semibold text-highlighted ring-2 ring-inset ring-inverted"
                   :style="{ gridRow: 1, gridColumn: `${piece.column} / span ${piece.span}` }"
                   :data-testid="`${words.testId}-selection`"
                   aria-hidden="true"
@@ -109,7 +109,7 @@
                   :to="bar.to"
                   :prefetch="Boolean(bar.stayId)"
                   prefetch-on="interaction"
-                  class="z-10 mx-0.5 mt-1 flex h-5 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white sm:mt-1.5 sm:h-7"
+                  class="z-10 mx-0.5 mt-1 flex h-7 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white sm:mt-1.5"
                   :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}`, backgroundColor: STAY_CHANNEL_COLORS[bar.channel ?? 'direct'] }"
                   :title="reservationRead.error.value?.bookingId === bar.stayId ? reservationRead.error.value?.message : bar.title"
                   :data-stay="bar.stayId"
@@ -118,7 +118,7 @@
                   @pointerenter="reservationRead.prefetch(bar.stayId)"
                   @focus="reservationRead.prefetch(bar.stayId)"
                 >
-                  <ChannelMark v-if="bar.channel" :channel="bar.channel" bare />
+                  <ChannelMark v-if="bar.channel" :channel="bar.channel" class="-ml-1.5" />
                   <span class="truncate">{{ bar.label }}</span>
                 </NuxtLink>
               </div>

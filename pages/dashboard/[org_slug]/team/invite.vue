@@ -60,7 +60,8 @@ if (error.value) throw error.value
 const email = ref('')
 const step = ref<'email' | 'role'>('email')
 const validEmail = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim()))
-const role = ref(screen.value?.default_role)
+// No role is chosen for the owner: they pick one on its own step.
+const role = ref<string>()
 const selectedRole = computed(() => screen.value?.roles.find(choice => choice.value === role.value))
 const grants = ref<Record<string, string>>({})
 const inviting = ref(false)
@@ -77,7 +78,7 @@ function next() {
 function resetInvite() {
   email.value = ''
   step.value = 'email'
-  role.value = screen.value?.default_role
+  role.value = undefined
   grants.value = {}
   inviteError.value = ''
   savedInvitation.value = null

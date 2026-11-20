@@ -1,7 +1,7 @@
 import { PLATFORM_MESSAGE_AUTHOR_KINDS_SQL, isPlatformMessageAuthor } from '~/shared/messages-contract'
 import { HTTPError } from 'nitro'
 import { queryFirst, type DbClient } from '~/server/db'
-import { MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, messageHasContentSql, messageRole, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
+import { channelSenderName, MIRRORED_EVENT, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, messageHasContentSql, messageRole, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { readConversationHistory } from '~/server/domain/conversation-history-data'
 import type { GuestRequest } from '~/server/domain/requests'
 import { readConversationEnrichment } from './deliveries'
@@ -42,9 +42,9 @@ export async function guestMessageAlertWindow(db: DbClient, entry: MessageRow, g
  * Blawby alone writes a relayed provider message, an automatic message or
  * an event nobody caused.
  */
-function actorLabel(entry: Pick<MessageRow, 'author_kind' | 'author_user_id' | 'event_name' | 'id'>, role: MessageRow['author_kind'], mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {
-  // The host's Airbnb messages are the business's side, whoever typed them on Airbnb.
-  if (mirrored) return isPlatformMessageAuthor(entry.author_kind) ? 'Airbnb' : entry.author_kind === 'member' ? business : null
+function actorLabel(entry: Pick<MessageRow, 'author_kind' | 'author_user_id' | 'event_name' | 'id' | 'payload_json'>, role: MessageRow['author_kind'], mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {
+  // A host's Airbnb message names whoever typed it on Airbnb; Channex's imported history names only the property, the business.
+  if (mirrored) return isPlatformMessageAuthor(entry.author_kind) ? 'Airbnb' : entry.author_kind === 'member' ? channelSenderName(parseMessagePayload(entry)) ?? business : null
   if (entry.event_name === SCHEDULED_MESSAGE_EVENT) return 'Scheduled message'
   // The booking's own message, written with the record: no one on the team said it.
   if (entry.event_name === OPENING_EVENT) return null

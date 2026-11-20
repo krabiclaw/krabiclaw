@@ -36,7 +36,9 @@ test('the email link returns through normal sign-in and only the invited account
     // The role is its own step, never under the keyboard of the email field.
     await expect(team.getByRole('radio', { name: /^General Staff/ })).toHaveCount(0)
     await team.getByRole('button', { name: 'Next', exact: true }).click()
-    await expect(team.getByRole('radio', { name: /^General Staff/ })).toBeChecked()
+    // Nothing is chosen for the owner: Send waits for a role.
+    await expect(team.getByRole('radio', { name: /^General Staff/ })).not.toBeChecked()
+    await expect(team.getByRole('button', { name: 'Send invite', exact: true })).toBeDisabled()
     await expect(team.getByRole('radio', { name: /^Restaurant Manager/ })).toBeVisible()
     await expect(team.getByRole('radio', { name: /^Cleaner/ })).toHaveCount(0)
     await team.getByRole('radio', { name: /^Kitchen/ }).check()
