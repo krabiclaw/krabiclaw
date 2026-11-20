@@ -18,9 +18,11 @@
                 </span>
                 <span class="col-span-full row-start-2 -mt-2 wrap-anywhere text-xs text-muted">{{ member.user.email }}</span>
               </NuxtLink>
+              <!-- A member holds one or more roles, as Better Auth stores them. -->
               <USelect
                 v-if="member.roleChoices.length"
-                :model-value="member.role"
+                :model-value="heldRoles(member)"
+                multiple
                 :items="member.roleChoices"
                 color="neutral"
                 variant="ghost"
@@ -30,7 +32,7 @@
                 :aria-label="`Role for ${member.user.name || member.user.email}`"
                 :loading="roleUpdatingId === member.id"
                 :disabled="busy"
-                @update:model-value="value => onRoleSelected(member, String(value))"
+                @update:model-value="value => onRoleSelected(member, [value].flat().map(String))"
               >{{ member.roleLabel }}</USelect>
               <span v-else class="col-start-2 row-start-1 text-right text-sm text-muted">{{ member.roleLabel }}</span>
               <UDropdownMenu v-if="member.canRemove" :items="[{ label: 'Remove member', color: 'error', onSelect: () => { removing = member } }]" :content="{ align: 'end' }">
@@ -130,10 +132,14 @@ function confirmRemoval() {
   if (member) void removeMember(member.id)
 }
 
-function onRoleSelected(member: MemberRow, role: string) {
+// The member's roles as Better Auth stores them (comma-separated), in the picker's own values.
+const heldRoles = (member: MemberRow) => member.roleChoices.map(choice => choice.value).filter(value => member.role.split(',').includes(value))
+
+function onRoleSelected(member: MemberRow, roles: string[]) {
   roleUpdateError.value = null
   roleUpdateErrorMemberId.value = null
-  if (busy.value || role === member.role) return
+  const role = roles.join(',')
+  if (busy.value || !roles.length || role === member.role) return
   void submitRoleChange(member, role)
 }
 
@@ -144,7 +150,7 @@ async function submitRoleChange(member: MemberRow, role: string) {
   try {
     const organizationId = dashboard.organization.value?.id
     if (!organizationId) throw new Error('Organization context is unavailable')
-    const result = await authClient.organization.updateMemberRole({ organizationId, memberId: member.id, role })
+    const result = await authClient.organization.updateMemberRole({ organizationId, memberId: member.id, role: role.split(',') })
     if (result.error) throw new Error(result.error.message)
     if (member.isCurrentUser) {
       await dashboard.refresh()

@@ -183,7 +183,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.equal(rows.length, 1)
     // An unbooked Airbnb conversation with no guest name reads as the title Airbnb gave it, on the home it was asked about, with no dates invented.
     // The guest's mirrored words are from someone else, so the conversation is unread until the owner opens it.
-    assert.deepEqual({ ...rows[0]!, time: undefined }, { id: rows[0]!.id, kind: 'guest', title: 'Conversation supplied by Airbnb', avatar_initial: 'C', channel: 'airbnb', home: 'Cabin', when: null,
+    assert.deepEqual({ ...rows[0]!, time: undefined }, { id: rows[0]!.id, kind: 'guest', title: 'Conversation supplied by Airbnb', avatar_initial: 'C', image_url: null, channel: 'airbnb', home: 'Cabin', when: null,
       preview: 'Sent a photo', preview_from: 'Airbnb Support', time: undefined, unread: true })
     assert.deepEqual(await listConversations(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'past' }), [])
     assert.equal(await db.prepare('SELECT product_id FROM channel_threads WHERE conversation_id = ?').bind(rows[0]!.id).first('product_id'), productId)

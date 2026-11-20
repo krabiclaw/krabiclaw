@@ -161,6 +161,7 @@ type ListRow = {
   record_stored_ends_at: string | null
   record_timezone: string | null
   record_title: string | null
+  record_image_url: string | null
   latest_message_id: string | null
   unread: number
   latest_author_kind: string | null
@@ -205,6 +206,12 @@ function conversationListQuery(organizationId: string | null, opts: ListGuestThr
       op.unit AS record_unit, op.starts_at AS record_starts_at, op.stored_ends_at AS record_stored_ends_at, op.timezone AS record_timezone,
       (SELECT COALESCE(sc.internal_name, p.name) FROM products p LEFT JOIN product_stay_configs sc ON sc.organization_id = p.organization_id AND sc.product_id = p.id
         WHERE p.organization_id = gt.organization_id AND p.id = op.product_id) AS record_title,
+      -- The listing's cover, as Airbnb's inbox shows it beside each conversation.
+      (SELECT CASE ma.kind WHEN 'video' THEN ma.thumbnail_url ELSE ma.public_url END FROM media_placements mp
+        JOIN media_assets ma ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
+        WHERE mp.organization_id = gt.organization_id AND mp.owner_type = 'product' AND mp.status = 'active' AND mp.slot IN ('image', 'gallery')
+          AND mp.owner_id = COALESCE(op.product_id, (SELECT channel.product_id FROM channel_threads channel WHERE channel.organization_id = gt.organization_id AND channel.conversation_id = gt.id))
+        ORDER BY mp.slot = 'gallery', mp.sort_order, mp.id LIMIT 1) AS record_image_url,
       (SELECT e.id FROM messages e WHERE e.conversation_id = gt.id${visible} AND ${messageHasContentSql('e')} ORDER BY e.sequence DESC LIMIT 1) AS latest_message_id,
       ${unread.sql} AS unread
     FROM ${scope.from}
@@ -250,7 +257,7 @@ function presentConversationList(rows: ListRow[], opts: ListGuestThreadsOptions,
       const others = (JSON.parse(row.team_people) as { user_id: string; name: string }[]).filter(person => person.user_id !== opts.userId).map(person => person.name)
       const title = row.name ?? row.record_title ?? (others.length ? others.join(', ') : 'You')
       return {
-        id: row.id, ...opts.includeSortKey && { last_message_at: row.last_message_at }, kind: 'team', title, avatar_initial: initial(title), channel: 'direct',
+        id: row.id, ...opts.includeSortKey && { last_message_at: row.last_message_at }, kind: 'team', title, avatar_initial: initial(title), image_url: row.record_image_url, channel: 'direct',
         home: row.record_unit === 'nights' ? row.record_title : row.location_title, when,
         preview: message ? messagePreview(message.text, message.photos) : '',
         preview_from: message ? message.actorUserId === opts.userId ? 'You' : message.actorName ? firstName(message.actorName) : 'Blawby' : null,
@@ -269,6 +276,7 @@ function presentConversationList(rows: ListRow[], opts: ListGuestThreadsOptions,
       kind: support ? 'support' : 'guest',
       title: shownName,
       avatar_initial: initial(shownName),
+      image_url: support ? null : row.record_image_url,
       channel: row.reply_channel === 'airbnb' ? 'airbnb' : 'direct',
       home: row.location_title,
       when: support || traveler ? null : when ?? (inquiry ? formatCalendarRange(inquiry.check_in_date, inquiry.check_out_date, 'en-US') : null),
