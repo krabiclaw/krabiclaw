@@ -14,6 +14,15 @@
           <UButton class="mt-4" label="Add payout method" :to="`/dashboard/${route.params.org_slug}/payments`" />
         </template>
         <template v-else>
+          <section v-if="clearing.length" class="my-6">
+            <h2 class="text-base font-semibold text-highlighted">Stripe balance</h2>
+            <dl class="mt-4 space-y-3">
+              <div v-for="row in clearing" :key="row.currency + row.label" class="flex items-center justify-between gap-4">
+                <dt class="text-sm text-muted">{{ row.label }}</dt>
+                <dd class="font-medium">{{ paymentMoney(row.amount, row.currency) }}</dd>
+              </div>
+            </dl>
+          </section>
           <section v-if="upcoming.length" class="mb-8">
             <h2 class="text-base font-semibold text-highlighted">Upcoming</h2>
             <div class="divide-y divide-default border-b border-default">
@@ -83,6 +92,10 @@ const { data, error } = await useAsyncData(
 // Pages accumulate, as Airbnb's "Show more" does. Watched rather than written in
 // the handler, which does not run again when the server-rendered page hydrates.
 watch(data, (page) => { if (page) loaded.value = after.value ? [...loaded.value, ...page.payouts] : page.payouts }, { immediate: true })
+const clearing = computed(() => [
+  ...(data.value?.balance?.available ?? []).map(row => ({ amount: row.amount, currency: row.currency.toUpperCase(), label: 'Ready to send' })),
+  ...(data.value?.balance?.pending ?? []).map(row => ({ amount: row.amount, currency: row.currency.toUpperCase(), label: 'Clearing' })),
+].filter(row => row.amount !== 0))
 const upcoming = computed(() => loaded.value.filter(row => row.status === 'pending' || row.status === 'in_transit'))
 const paid = computed(() => loaded.value.filter(row => row.status === 'paid'))
 const other = computed(() => loaded.value.filter(row => row.status === 'failed' || row.status === 'canceled'))

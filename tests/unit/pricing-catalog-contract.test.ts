@@ -38,7 +38,7 @@ test('display rename preserves provider identities and metadata selects one cano
 
 // Stripe's own phrasing for each metered price, and which plan carries it.
 const meter = (key: string, overrides: Record<string, unknown> = {}) => ({
-  id: `mtr-${key}`, status: 'active', event_name: BILLING_METERS[key as keyof typeof BILLING_METERS].eventName,
+  id: `mtr-${key}`, status: 'active', event_name: BILLING_METERS[key as keyof typeof BILLING_METERS].replacementEventName,
   default_aggregation: { formula: BILLING_METERS[key as keyof typeof BILLING_METERS].formula }, ...overrides,
 }) as unknown as Stripe.Billing.Meter
 const meteredProduct = (key: string) => ({ id: `prod-${key}`, active: true, metadata: { product_family: key, monthly_price_id: `price-${key}` } }) as unknown as Stripe.Product
@@ -62,12 +62,12 @@ test('each metered price must be the published one on its meter', () => {
     Object.fromEntries(BILLING_METER_KEYS.map(key => [key, `price-${key}`])))
   const replace = (key: string, overrides: Record<string, unknown>) => ({ ...catalog(), prices: catalog().prices.map(row => row.id === `price-${key}` ? meteredPrice(key, overrides) : row) })
   assert.throws(() => selectMeteredPrices({ ...catalog(), products: catalog().products.filter(row => row.id !== 'prod-homes') }), /0 active Home products/)
-  assert.throws(() => selectMeteredPrices(replace('homes', { unit_amount_decimal: '900.000000000000' })), /Home monthly on the krabiclaw_homes meter/)
+  assert.throws(() => selectMeteredPrices(replace('homes', { unit_amount_decimal: '900.000000000000' })), /Home monthly on the blawby_homes meter/)
   // The retired allowance shape, homes included before each further one is billed, is not the published price.
-  assert.throws(() => selectMeteredPrices(replace('homes', { billing_scheme: 'tiered', tiers_mode: 'graduated', unit_amount_decimal: null, tiers: [{ up_to: 2, unit_amount: 0, flat_amount: null }, { up_to: null, unit_amount: 400, flat_amount: null }] })), /Home monthly on the krabiclaw_homes meter/)
+  assert.throws(() => selectMeteredPrices(replace('homes', { billing_scheme: 'tiered', tiers_mode: 'graduated', unit_amount_decimal: null, tiers: [{ up_to: 2, unit_amount: 0, flat_amount: null }, { up_to: null, unit_amount: 400, flat_amount: null }] })), /Home monthly on the blawby_homes meter/)
   assert.throws(() => selectMeteredPrices(replace('captured_volume', { unit_amount_decimal: '0.029' })), /Payments fee monthly/)
   assert.throws(() => selectMeteredPrices(replace('stripe_cost', { recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed', meter: null } })), /Stripe fees monthly/)
-  assert.throws(() => selectMeteredPrices({ ...catalog(), meters: catalog().meters.map(row => row.id === 'mtr-ad_spend' ? meter('ad_spend', { default_aggregation: { formula: 'last' } }) : row) }), /Managed ads monthly on the krabiclaw_ad_spend meter/)
+  assert.throws(() => selectMeteredPrices({ ...catalog(), meters: catalog().meters.map(row => row.id === 'mtr-ad_spend' ? meter('ad_spend', { default_aggregation: { formula: 'last' } }) : row) }), /Managed ads monthly on the blawby_ad_spend meter/)
 })
 
 // While beta spots are left, the Markdown states them and the price that follows them.

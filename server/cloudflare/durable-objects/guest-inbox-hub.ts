@@ -148,7 +148,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     }
 
     if (url.pathname === '/wake' && request.method === 'POST') {
-      const organizationId = request.headers.get('x-krabiclaw-organization-id')
+      const organizationId = request.headers.get('x-blawby-organization-id')
       const body: unknown = await request.json()
       const kind = isRecord(body) ? BUSINESS_WAKE_KINDS.find(value => value === body.kind) : undefined
       if (!organizationId || !kind || !isRecord(body) || typeof body.due_at !== 'number' || !Number.isSafeInteger(body.due_at)) {
@@ -165,10 +165,10 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     // The public Worker verifies the session and scope before creating these
     // headers for the private binding. No client headers are forwarded.
     const attachment = {
-      organizationId: request.headers.get('x-krabiclaw-organization-id'),
-      userId: request.headers.get('x-krabiclaw-user-id'),
-      sessionId: request.headers.get('x-krabiclaw-session-id'),
-      sessionToken: request.headers.get('x-krabiclaw-session-token'),
+      organizationId: request.headers.get('x-blawby-organization-id'),
+      userId: request.headers.get('x-blawby-user-id'),
+      sessionId: request.headers.get('x-blawby-session-id'),
+      sessionToken: request.headers.get('x-blawby-session-token'),
     }
     if (!isSocketAttachment(attachment)) return failure(401, 'UNAUTHORIZED', 'Authentication required', 'session')
     const pair = new WebSocketPair()
@@ -304,13 +304,13 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     } catch {
       return failure(400, 'INVALID_JSON', 'Dashboard invalidation must be valid JSON', 'body')
     }
-    const organizationId = request.headers.get('x-krabiclaw-organization-id')
+    const organizationId = request.headers.get('x-blawby-organization-id')
     if (!organizationId || !isDashboardInvalidation(event) || event.organization_id !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
     // Each recipient's transcript tail is read here; a publication cannot supply one.
     if ('tail' in event) return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'A publication cannot carry transcript entries', 'tail')
-    const accountUserId = request.headers.get('x-krabiclaw-account-user-id')
+    const accountUserId = request.headers.get('x-blawby-account-user-id')
     if (accountUserId !== null) {
       if (!accountUserId || !('conversation_id' in event) || ('scheduled' in event && event.scheduled) || ('team' in event && event.team)
         || ('user_id' in event && event.user_id !== accountUserId)) {
@@ -338,7 +338,7 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
         const recipient = binding.get(binding.idFromName(guestInboxTarget(null, userId)))
         return recipient.fetch('https://guest-inbox.internal/broadcast', {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-krabiclaw-organization-id': organizationId, 'x-krabiclaw-account-user-id': userId },
+          headers: { 'content-type': 'application/json', 'x-blawby-organization-id': organizationId, 'x-blawby-account-user-id': userId },
           body: JSON.stringify(guestEvent),
         })
       }),

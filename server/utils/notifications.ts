@@ -56,7 +56,7 @@ import {
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, destinationUnavailable, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
-import { bookingConversationOrRecordPath } from '~/shared/messages-contract'
+import { PLATFORM_MESSAGE_AUTHOR_KIND, isPlatformMessageAuthor, bookingConversationOrRecordPath } from '~/shared/messages-contract'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome, type DeliverySubject } from '~/server/domain/guest-threads/deliveries'
 import { GUEST_NOTE_EVENT, appendMessage, findMessageByDedupeKey, getMessage, guestConversationMemberSql, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, messagePreview } from '~/server/domain/guest-threads/attachments'
@@ -184,6 +184,8 @@ interface ReviewRequestNotificationInput extends OrganizationContext {
   partySize: string
   partyLabel?: string
   reviewUrl: string
+  productKind?: ProductKind
+  productTitle?: string | null
   /** The account whose preference governs the email, if the booking is linked. */
   userId: string | null
   /** The invitation's message in the visit's conversation, which this email is the receipt of. */
@@ -1093,24 +1095,32 @@ export async function notifyReviewRequest(
     partyLabel: opts.partyLabel,
     reviewUrl: opts.reviewUrl,
     organizationLogoUrl: logoUrl,
+    productKind: opts.productKind,
+    productTitle: opts.productTitle,
   })
   const origin = platformOrigin(env)
   const encodedToken = encodeURIComponent(reviewToken)
-  const unsubscribe = opts.userId
-    ? await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
-    : {
-        pageUrl: `${origin}/unsubscribe?reviewToken=${encodedToken}`,
-        oneClickUrl: `${origin}/api/public/review-requests/opt-out?token=${encodedToken}`,
-      }
-  if (!unsubscribe) throw new Error('Review requests require email unsubscribe links')
-  const email = await renderNotificationEmail(message, { platformDomain, unsubscribeUrl: unsubscribe.pageUrl })
+  const unsubscribe = message.emailPurpose === 'transactional'
+    ? null
+    : opts.userId
+      ? await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
+      : {
+          pageUrl: `${origin}/unsubscribe?reviewToken=${encodedToken}`,
+          oneClickUrl: `${origin}/api/public/review-requests/opt-out?token=${encodedToken}`,
+        }
+  if (message.emailPurpose !== 'transactional' && !unsubscribe) throw new Error('Review requests require email unsubscribe links')
+  const email = await renderNotificationEmail(message, {
+    platformDomain,
+    unsubscribeUrl: unsubscribe?.pageUrl ?? null,
+    preferencesUrl: opts.userId ? `${origin}/dashboard/account/profile/notifications` : null,
+  })
 
   await sendEmailNotification(env, db, {
     ...opts,
     to: opts.email,
     replyAs: { kind: 'guest' },
     template: 'booking_thank_you_review_request',
-    title: `How was your visit to ${restaurant}?`,
+    title: message.title,
     delivery: { conversationId: opts.delivery.conversationId, subject: { messageId: opts.delivery.messageId }, purpose: 'status_update', idempotencyKey: recorded?.id ?? `review-request:${opts.requestId}` },
     payload: {
       request_id: opts.requestId,
@@ -1120,13 +1130,13 @@ export async function notifyReviewRequest(
       visit_at: opts.visitAt,
       party_size: opts.partySize,
       review_url: opts.reviewUrl,
-      unsubscribe_url: unsubscribe.pageUrl,
+      unsubscribe_url: unsubscribe?.pageUrl ?? '',
       organization_name: restaurant,
     },
-    unsubscribeUrl: unsubscribe.pageUrl,
-    unsubscribeOneClickUrl: unsubscribe.oneClickUrl,
+    unsubscribeUrl: unsubscribe?.pageUrl ?? null,
+    unsubscribeOneClickUrl: unsubscribe?.oneClickUrl ?? null,
     email: {
-      subject: `How was your visit to ${restaurant}?`,
+      subject: message.title,
       ...email,
     },
   })
@@ -1469,7 +1479,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
     const guestTitle = `${guestMessage.title} — ${guestMessage.preheader?.split(' · ')[0] ?? home.name}`
     entry = await appendMessage(db, {
-      conversationId: stay.conversation_id, authorKind: 'krabiclaw', authorUserId: null, channel: 'web', body: guestEmail.text,
+      conversationId: stay.conversation_id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, channel: 'web', body: guestEmail.text,
       eventName: `stay.${by}_cancelled`, dedupeKey,
       payload: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id,
         email: { to: stay.guest_email, fromName: studio, html: guestEmail.html, text: guestEmail.text },
@@ -1482,7 +1492,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       },
     })
   }
-  if (entry.conversation_id !== stay.conversation_id || entry.author_kind !== 'krabiclaw' || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different message')
+  if (entry.conversation_id !== stay.conversation_id || !isPlatformMessageAuthor(entry.author_kind) || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different message')
   const stored = parseMessagePayload(entry)
   if (stored?.refund_minor !== refundMinor) throw new Error('Stay cancellation notification differs from its recorded refund')
   // A host cancellation has one required notice. Guest cancellations also
@@ -1778,7 +1788,7 @@ async function alertedMessage(db: DbClient, thread: GuestRequest, entry: Message
 /** Channex marks an Airbnb agent's message with the role AGENT (read from a live thread, 2026-10-23); the mirror records it as Blawby's relay. */
 export function isAirbnbSupportMessage(entry: MessageRow): boolean {
   const meta = entry.channel === 'airbnb' ? parseMessagePayload(entry).meta : null
-  return entry.author_kind === 'krabiclaw' && isRecord(meta) && meta.role === 'AGENT'
+  return isPlatformMessageAuthor(entry.author_kind) && isRecord(meta) && meta.role === 'AGENT'
 }
 
 /** The home a channel conversation belongs to, with the clock its dates are read in. */

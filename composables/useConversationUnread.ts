@@ -10,6 +10,8 @@ export function refreshConversationUnread() {
 /** The Messages dot: whether the reader's Current mailbox holds an unread conversation, read with the inbox's own list. */
 export function useConversationUnread(connection?: DashboardInvalidationConnection) {
   const { organization } = useDashboardMenu()
+  const { state: context } = useDashboardOrganization()
+  let initialContext = useNuxtApp().isHydrating ? context.value : null
   const session = authClient.useSession()
   const reader = computed(() => session.value.data?.user.id)
   const orgId = computed(() => organization.value?.id)
@@ -61,7 +63,16 @@ export function useConversationUnread(connection?: DashboardInvalidationConnecti
     error.value = null
     if (queued) return
     queued = true
-    void nextTick(() => { queued = false; void refresh() })
+    void nextTick(() => {
+      queued = false
+      if (reader.value && initialContext?.organization.userId === reader.value && initialContext === context.value && initialContext.organization.id === orgId.value) {
+        if (!inboxRoute.value) inbox.value = initialContext.has_unread
+        readConnectionEpoch = realtime.reconnectEpoch.value
+        initialContext = null
+        return
+      }
+      void refresh()
+    })
   }, { immediate: true, flush: 'sync' })
 
   watch(realtime.event, event => {

@@ -108,7 +108,7 @@ if (live) {
  * default location differs per platform, and guessing it means the reporter
  * throws ENOENT over the very error it was meant to report.
  */
-const logDirectory = mkdtempSync(join(tmpdir(), 'krabiclaw-wrangler-logs-'))
+const logDirectory = mkdtempSync(join(tmpdir(), 'blawby-wrangler-logs-'))
 
 // Wrangler reports a one-hour signed download URL for the entire source. It
 // belongs only in the private process output, never in shared CI diagnostics.
@@ -211,7 +211,7 @@ async function readLiveDatabase(databaseId: string, path: string): Promise<void>
 // describes, or the payload is written for a schema no deploy will run.
 execFileSync('yarn', ['lint:schema-drift'], { cwd: process.cwd(), stdio: 'inherit' })
 
-const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-snapshot-'))
+const directory = mkdtempSync(join(tmpdir(), 'blawby-snapshot-'))
 try {
   const dumpPath = values.export ? resolve(values.export) : join(directory, 'source.sqlite')
   // The transfer below owns validation, destination signing-key preservation,

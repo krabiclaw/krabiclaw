@@ -132,7 +132,7 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
       annotations: toolDef.annotations,
       _meta: {
         securitySchemes: toolDef.securitySchemes,
-        'krabiclaw/toolInfo': { domain: toolDef.domain, minimumRole: toolDef.minimumRole },
+        'blawby/toolInfo': { domain: toolDef.domain, minimumRole: toolDef.minimumRole },
         ...(toolDef.fileParams?.length ? { 'openai/fileParams': toolDef.fileParams } : {}),
       },
     }, async (rawArgs) => {
@@ -238,7 +238,8 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     // handler (confirmed empirically: request.params arrives as {}). It has
     // to travel outside the validated params object — a request header,
     // which the SDK doesn't touch — instead.
-    const organizationIdHeader = event.req.headers.get("x-krabiclaw-organization-id");
+    const organizationIdHeader = event.req.headers.get("x-blawby-organization-id")
+      ?? event.req.headers.get("x-krabiclaw-organization-id");
     const hasOrganizationIdParam = organizationIdHeader !== null;
     const organizationId = organizationIdHeader?.trim() || null;
     const organizationCtx = organizationId ? await getVisibleOrganizationContext(event, organizationId) : null;
@@ -274,12 +275,12 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     }).map((tool) => {
       const baseTool = {
         name: tool.name, title: tool.title, description: tool.description, inputSchema: tool.inputSchema, _meta: {
-          securitySchemes: tool.securitySchemes, "krabiclaw/toolInfo": {
+          securitySchemes: tool.securitySchemes, "blawby/toolInfo": {
             domain: tool.domain, minimumRole: tool.minimumRole, }, ...(tool.fileParams?.length ? { "openai/fileParams": tool.fileParams } : {}), }, };
       return { ...baseTool, outputSchema: tool.outputSchema, annotations: tool.annotations, securitySchemes: tool.securitySchemes };
     });
 
-    const domains = [...new Set(tools.map((tool) => tool._meta["krabiclaw/toolInfo"].domain))];
+    const domains = [...new Set(tools.map((tool) => tool._meta["blawby/toolInfo"].domain))];
     await logMcpEvent(event, cfEnv, {
       organizationId: organizationCtx?.organizationId ?? null, userId: mcpUser.userId, requestId, method: "tools/list", arguments: { organization_id: organizationIdHeader },
       result: { count: tools.length, domains, instructions, tools: tools.map(tool => ({

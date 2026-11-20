@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { listingGrantSql, listingLevelSql } from '~/server/domain/listing-access'
 import { bookingReviewDueAt, historicalNoShowAtSql } from '~/server/utils/review-requests'
 import { changedTaskIds, publishEvent, type DomainEvent, type EventsEnv } from '~/server/events'
@@ -49,8 +50,8 @@ import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { joinBookingConversationQueries } from '~/server/domain/guest-threads/channel-messages'
 import { toE164 } from '~/utils/phone'
-import { arrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
-import { addStayPhotoRoomPlacementsQuery, buildDeleteOwnerPlacementsQuery, deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { arrangeProductPhotos, productPhotosFromPlacements, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
+import { addStayPhotoRoomPlacementsQuery, buildDeleteOwnerPlacementsQuery, deleteMediaAsset, getMediaAsset, groupMediaPlacements, mediaPlacementsQuery, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
@@ -1292,11 +1293,11 @@ export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInb
 export type StayView<A extends StayAccess> = A extends { manage: true } ? Stay : StayTurnover
 type StayDetailView<A extends StayAccess> = A extends { manage: true } ? StayDetail : StayTurnover
 
-function stayDetailQuery(access: StayAccess, stayId: string): BatchQuery {
+export function stayDetailQuery(access: StayAccess, stayId: string): BatchQuery {
   return stayDetailSelection({ query: '?', params: [access.organizationId] }, stayId, access.manage, visibleHomes(access))
 }
 
-function stayDetailSelection(organization: BatchQuery, stayId: string, manage: boolean, scope: ReturnType<typeof visibleHomes>): BatchQuery {
+export function stayDetailSelection(organization: BatchQuery, stayId: string, manage: boolean, scope: ReturnType<typeof visibleHomes> = { sql: '1 = 1', params: [] }): BatchQuery {
   const paymentColumns = manage ? `,
     (SELECT json_group_array(json_object('id', id, 'booking_id', booking_id, 'amount_minor', amount_minor, 'currency', currency,
       'method', method, 'paid_on', paid_on, 'reference', reference, 'note', note, 'created_at', created_at, 'created_by', created_by))
@@ -1314,7 +1315,7 @@ function stayDetailSelection(organization: BatchQuery, stayId: string, manage: b
   }
 }
 
-function stayDetailFrom<A extends StayAccess>(access: A, row: unknown): StayDetailView<A> {
+export function stayDetailFrom<A extends StayAccess>(access: A, row: unknown): StayDetailView<A> {
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
   const { offline_payments_json: offline, online_payments_json: online, guest_image_url, ...record } = row as Record<string, unknown>
     & Pick<StayDetail, 'guest_image_url'> & { offline_payments_json?: string; online_payments_json?: string }
@@ -2026,7 +2027,7 @@ function versionChanged(results: unknown): boolean {
 /** Dashboard edits load these tenant-scoped rows with booking access in one read batch. */
 export function dashboardStayEditQueries(organization: BatchQuery, stayId: string, checkIn: unknown): BatchQuery[] {
   return [
-    stayDetailSelection(organization, stayId, true, { sql: '1 = 1', params: [] }),
+    stayDetailSelection(organization, stayId, true),
     stayTurnoverHomeQuery(organization, stayId, typeof checkIn === 'string' ? checkIn : null),
   ]
 }
@@ -2382,16 +2383,20 @@ export interface StayReservationHome {
 }
 
 /** The same home and host the reservation shows in both inboxes. */
-export async function readStayReservationHome(db: DbClient, input: {
-  organizationId: string
-  productId: string
+export function prepareStayReservationHome(input: {
+  organizationId: string | { sql: string }
+  productId: string | { sql: string }
   showLocation: boolean
   showArrival: boolean
-}): Promise<StayReservationHome> {
+}) {
   const { organizationId, productId, showLocation, showArrival } = input
-  const [house, photos] = await Promise.all([
-    queryFirst<Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions' | 'wifi_network' | 'wifi_password' | 'directions' | 'house_manual'>
-      & { organization_name: string; listing_slug: string | null; subdomain: string | null; canonical_domain: string | null; contact_phone: string | null; checkout_instructions: string; amenities: string; details_json: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; host_json: string | null; co_hosts_json: string }>(db, `SELECT p.name, c.internal_name, o.name AS organization_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const product = typeof productId === 'string' ? '?' : productId.sql
+  const productParams = typeof productId === 'string' ? [productId] : []
+  type ReservationHomeRow = Pick<StayHome, 'name' | 'internal_name' | 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'check_in_method' | 'check_in_instructions' | 'wifi_network' | 'wifi_password' | 'directions' | 'house_manual'>
+      & { product_id: string; organization_name: string; listing_slug: string | null; subdomain: string | null; canonical_domain: string | null; contact_phone: string | null; checkout_instructions: string; amenities: string; details_json: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; host_json: string | null; co_hosts_json: string }
+  const queries = [
+    { query: `SELECT p.id AS product_id, p.name, c.internal_name, o.name AS organization_name, b.check_in_time, b.check_in_end_time, b.check_out_time,
       c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password, c.directions, c.house_manual, c.checkout_instructions, c.amenities, p.details_json,
       CASE WHEN ${PUBLIC_STAY_SQL} THEN p.slug END AS listing_slug, o.subdomain,
       (SELECT domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS canonical_domain,
@@ -2414,30 +2419,42 @@ export async function readStayReservationHome(db: DbClient, input: {
       LEFT JOIN member m ON m.organizationId = b.organization_id AND m.id = b.assigned_member_id
       LEFT JOIN user u ON u.id = m.userId
       LEFT JOIN member_scheduling ms ON ms.organization_id = b.organization_id AND ms.member_id = b.assigned_member_id
-      WHERE c.organization_id = ? AND c.product_id = ?`, [organizationId, productId]),
-    readProductPhotos(db, { organizationId, productIds: [productId] }),
-  ])
-  if (!house) throw new Error(`The reservation has no home (${productId})`)
-  const details = JSON.parse(house.details_json) as ProductDetails
-  const address = showLocation ? parsePostalAddress(house.address) : null
-  const pinFailure = showLocation ? coordinatesFailure(house) : null
-  if (pinFailure) fail(500, 'INVALID_STORED_LOCATION', pinFailure.error, pinFailure.field)
-  return {
-    name: house.name, internal_name: house.internal_name, organization_name: house.organization_name,
-    check_in_time: house.check_in_time, check_in_end_time: house.check_in_end_time, check_out_time: house.check_out_time,
-    photo_urls: (photos.get(productId) ?? []).map(mediaStillUrl).filter((url): url is string => url !== null),
-    listing: house.listing_slug && house.subdomain ? { slug: house.listing_slug, subdomain: house.subdomain, canonical_domain: house.canonical_domain } : null,
-    contact_phone: showLocation ? house.contact_phone : null,
-    location: showLocation ? { address, latitude: house.latitude, longitude: house.longitude,
-      maps_url: calculateMapUrl({ title: '', address, latitude: house.latitude, longitude: house.longitude, maps_url: house.maps_url }) } : null,
-    arrival_guide: showArrival ? { product_id: productId, check_in_method: house.check_in_method, check_in_instructions: house.check_in_instructions,
-      wifi_network: house.wifi_network, wifi_password: house.wifi_password, directions: house.directions, house_manual: house.house_manual,
-      checkout_instructions: JSON.parse(house.checkout_instructions) as StayCheckoutInstruction[] } : null,
-    house_rules: showLocation ? stayHouseRuleLines(details, value => formatTime(value, 'en')) : [],
-    safety: showLocation ? [...staySafetyLines(details), ...stayAlarmLines(parseStayAmenityAnswers(JSON.parse(house.amenities)), details, { includeUnknown: true })] : [],
-    host: house.host_json === null ? null : JSON.parse(house.host_json) as PublicProvider,
-    co_hosts: JSON.parse(house.co_hosts_json) as PublicProvider[],
+      WHERE c.organization_id = ${organization} AND c.product_id = ${product}`, params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...productParams] },
+    mediaPlacementsQuery({ organizationId, ownerType: 'product', owners: { sql: `SELECT ${product}`, params: productParams } }),
+  ]
+  return { queries, read }
+
+  function read([houseRows, media]: Awaited<ReturnType<typeof executeBatch>>): StayReservationHome {
+    const house = houseRows!.results[0] as ReservationHomeRow | undefined
+    if (!house) throw new Error('The reservation has no home')
+    const productId = house.product_id
+    const photos = productPhotosFromPlacements(groupMediaPlacements(media!.results, [productId]))
+    const details = JSON.parse(house.details_json) as ProductDetails
+    const address = showLocation ? parsePostalAddress(house.address) : null
+    const pinFailure = showLocation ? coordinatesFailure(house) : null
+    if (pinFailure) fail(500, 'INVALID_STORED_LOCATION', pinFailure.error, pinFailure.field)
+    return {
+      name: house.name, internal_name: house.internal_name, organization_name: house.organization_name,
+      check_in_time: house.check_in_time, check_in_end_time: house.check_in_end_time, check_out_time: house.check_out_time,
+      photo_urls: (photos.get(productId) ?? []).map(mediaStillUrl).filter((url): url is string => url !== null),
+      listing: house.listing_slug && house.subdomain ? { slug: house.listing_slug, subdomain: house.subdomain, canonical_domain: house.canonical_domain } : null,
+      contact_phone: showLocation ? house.contact_phone : null,
+      location: showLocation ? { address, latitude: house.latitude, longitude: house.longitude,
+        maps_url: calculateMapUrl({ title: '', address, latitude: house.latitude, longitude: house.longitude, maps_url: house.maps_url }) } : null,
+      arrival_guide: showArrival ? { product_id: productId, check_in_method: house.check_in_method, check_in_instructions: house.check_in_instructions,
+        wifi_network: house.wifi_network, wifi_password: house.wifi_password, directions: house.directions, house_manual: house.house_manual,
+        checkout_instructions: JSON.parse(house.checkout_instructions) as StayCheckoutInstruction[] } : null,
+      house_rules: showLocation ? stayHouseRuleLines(details, value => formatTime(value, 'en')) : [],
+      safety: showLocation ? [...staySafetyLines(details), ...stayAlarmLines(parseStayAmenityAnswers(JSON.parse(house.amenities)), details, { includeUnknown: true })] : [],
+      host: house.host_json === null ? null : JSON.parse(house.host_json) as PublicProvider,
+      co_hosts: JSON.parse(house.co_hosts_json) as PublicProvider[],
+    }
   }
+}
+
+export async function readStayReservationHome(db: DbClient, input: Parameters<typeof prepareStayReservationHome>[0]): Promise<StayReservationHome> {
+  const plan = prepareStayReservationHome(input)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read the reservation home' }))
 }
 
 /** A guest's own stay as their account reads it: the stay, its home and host, and what cancelling returns now. */
@@ -3179,8 +3196,8 @@ export async function readPublicStayHome(db: DbClient, organizationId: string, p
   return publicStayHomeFrom(rows!, prices!)
 }
 
-export function publicStayHomeQueries(organizationId: string, productId: string | BatchQuery) {
-  return stayHomeQueries({ query: '?', params: [organizationId] }, productId, { sql: PUBLIC_STAY_SQL, params: [] })
+export function publicStayHomeQueries(organizationId: string | BatchQuery, productId: string | BatchQuery) {
+  return stayHomeQueries(typeof organizationId === 'string' ? { query: '?', params: [organizationId] } : organizationId, productId, { sql: PUBLIC_STAY_SQL, params: [] })
 }
 
 export function publicStayHomeFrom(rows: D1Result, prices: D1Result) {
@@ -3238,7 +3255,7 @@ export async function readPublicStayCalendar(db: DbClient, organizationId: strin
   return read.calendar(await executeBatch(db, read.queries, { operation: 'Read public stay calendar' }))
 }
 
-export function publicStayCalendarRead(organizationId: string, product: BatchQuery, input: { from: unknown; to: unknown }, now: Date) {
+export function publicStayCalendarRead(organizationId: string | BatchQuery, product: BatchQuery, input: { from: unknown; to: unknown }, now: Date) {
   const utcToday = now.toISOString().slice(0, 10)
   // Read the requested nights inside every possible home-local horizon. Once the
   // home supplies its time zone, trim the result to that home's exact horizon.
@@ -3249,7 +3266,7 @@ export function publicStayCalendarRead(organizationId: string, product: BatchQue
   const start = from && from > earliest ? from : earliest
   const departure = to && to < latest ? to : latest
   const queries = from && to && from < to && start <= departure
-    ? homeNightsQueries({ query: '?', params: [organizationId] }, product, start, addDays(departure, 1), false)
+    ? homeNightsQueries(typeof organizationId === 'string' ? { query: '?', params: [organizationId] } : organizationId, product, start, addDays(departure, 1), false)
     : []
   return {
     queries: [...publicStayHomeQueries(organizationId, product), ...queries],
@@ -3514,7 +3531,7 @@ async function cancelUnpaidStayRequest(db: DbClient, env: StayMutationEnv, organ
     } }),
     ...stayNightReleaseQueries(stay, organizationId, now),
     ...messageQueries({
-      conversationId: stay.conversation_id, authorKind: buyerUserId ? 'guest' : 'krabiclaw', authorUserId: buyerUserId ?? null,
+      conversationId: stay.conversation_id, authorKind: buyerUserId ? 'guest' : PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: buyerUserId ?? null,
       eventName: 'booking.cancel', body: buyerUserId ? 'The guest withdrew their stay request.' : 'The stay request expired.',
       occurredAt: now, dedupeKey: `booking:${stay.id}:${reason}`,
       guard: { sql: "EXISTS (SELECT 1 FROM bookings b WHERE b.id=c.booking_id AND b.organization_id=c.organization_id AND b.version=? AND b.updated_at=? AND b.cancellation_reason=?)",
@@ -3672,13 +3689,13 @@ export async function readCheckoutStay(db: DbClient, organizationId: string, sta
 }
 
 /** Channel reservation values by arrival date. A reservation amount is never a bank-transfer record. */
-export function channelReservationAmountQuery(organizationId: string, from: string, until: string): BatchQuery {
+export function channelReservationAmountQuery(organizationId: string | { sql: string }, from: string, until: string): BatchQuery {
   // The arrival day is read in each home's clock; SQL narrows by instants a day wider either side.
   return {
     query: `SELECT b.channel, b.currency, b.total_minor, b.starts_at, b.timezone
        FROM bookings b
-      WHERE b.organization_id = ? AND b.owner = 'channel' AND b.status = 'confirmed' AND b.product_session_id IS NULL AND b.starts_at >= ? AND b.starts_at < ?`,
-    params: [organizationId, addDays(from, -1), `${addDays(until, 1)}T14:00:00.000Z`],
+      WHERE b.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND b.owner = 'channel' AND b.status = 'confirmed' AND b.product_session_id IS NULL AND b.starts_at >= ? AND b.starts_at < ?`,
+    params: [...(typeof organizationId === 'string' ? [organizationId] : []), addDays(from, -1), `${addDays(until, 1)}T14:00:00.000Z`],
   }
 }
 

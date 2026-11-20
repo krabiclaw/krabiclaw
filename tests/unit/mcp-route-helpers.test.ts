@@ -7,12 +7,12 @@ test('a tool action carries its dashboard destination without unrelated private 
   const result = mcpToolErrorResult('This website language is not published.', {
     code: 'LANGUAGE_NOT_PUBLISHED', dashboard_url: '/dashboard/kanpai/website/preferences/localization',
     credential: 'private-value', customer_email: 'private@example.com',
-  }, 'https://krabiclaw.com')
+  }, 'https://blawby.com')
   assert.equal(result.isError, true)
   assert.equal('structuredContent' in result, false)
   assert.deepEqual(JSON.parse(result.content[0]!.text), {
     code: 'LANGUAGE_NOT_PUBLISHED', message: 'This website language is not published.',
-    dashboard_url: 'https://krabiclaw.com/dashboard/kanpai/website/preferences/localization',
+    dashboard_url: 'https://blawby.com/dashboard/kanpai/website/preferences/localization',
   })
   assert.equal(JSON.stringify(result).includes('private'), false)
 
@@ -25,7 +25,7 @@ test('a tool action carries its dashboard destination without unrelated private 
 
 test('a rejected tool cannot supply an external or escaped dashboard destination', () => {
   for (const dashboard_url of ['https://example.com/dashboard/kanpai', '//example.com/dashboard/kanpai', '/dashboard/../api/auth', '/dashboard/%2e%2e/api/auth']) {
-    const result = mcpToolErrorResult('Blocked', { code: 'PLAN_REQUIRED', dashboard_url }, 'https://krabiclaw.com')
+    const result = mcpToolErrorResult('Blocked', { code: 'PLAN_REQUIRED', dashboard_url }, 'https://blawby.com')
     assert.deepEqual(JSON.parse(result.content[0]!.text), { code: 'PLAN_REQUIRED', message: 'Blocked', dashboard_url_error: 'invalid_destination' })
   }
 })

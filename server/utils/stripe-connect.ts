@@ -208,23 +208,29 @@ const CONNECTED_ACCOUNT_COLUMNS = `id, organization_id, stripe_account_id, count
   card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
   last_error, created_at, updated_at`
 
+export function stripeConnectedAccountQuery(organizationId: string | { sql: string }) {
+  const bound = typeof organizationId === 'string'
+  return { query: `SELECT ${CONNECTED_ACCOUNT_COLUMNS} FROM stripe_connected_accounts
+    WHERE organization_id = ${bound ? '?' : organizationId.sql} LIMIT 1`, params: bound ? [organizationId] : [] }
+}
+
+export function stripeConnectedAccountFromRow(row: unknown): StripeConnectedAccount | null {
+  return row ? mapConnectedAccount(row as StripeConnectedAccountRow) : null
+}
+
 export async function getStripeConnectedAccount(
   db: DbClient,
   organizationId: string,
 ): Promise<StripeConnectedAccount | null> {
-  const row = await queryFirst<StripeConnectedAccountRow>(db, `
-    SELECT ${CONNECTED_ACCOUNT_COLUMNS}
-    FROM stripe_connected_accounts
-    WHERE organization_id = ?
-    LIMIT 1
-  `, [organizationId])
-  return row ? mapConnectedAccount(row) : null
+  const { query, params } = stripeConnectedAccountQuery(organizationId)
+  return stripeConnectedAccountFromRow(await queryFirst(db, query, params))
 }
 
 /** The same account projection for the catalogue and checkout, maintained by Stripe Connect events. */
-export async function readStripeCheckoutSetup(db: DbClient, organizationId: string, env: CloudflareEnv) {
-  const seller = await readCheckoutSeller(db, organizationId)
+export async function readStripeCheckoutSetup(db: DbClient, organizationId: string, env: CloudflareEnv, prepared?: Awaited<ReturnType<typeof readCheckoutSeller>>) {
+  const seller = prepared === undefined ? await readCheckoutSeller(db, organizationId) : prepared
   if (!seller) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  if (seller.organizationId !== organizationId) throw new Error('Checkout seller belongs to another organization')
   const { slug, subdomain, servicing, stripeCustomerId, account, plan, subscription } = seller
   const connected = account ? mapConnectedAccount(account as StripeConnectedAccountRow) : null
   const missing: string[] = []
@@ -408,8 +414,8 @@ async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: str
  * Whether a business takes payment online now, and if not, why, for whoever
  * asks: checkout refuses with the reason, the footer shows no methods.
  */
-async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationId: string) {
-  const setup = await readStripeCheckoutSetup(db, organizationId, env)
+async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationId: string, seller?: Awaited<ReturnType<typeof readCheckoutSeller>>) {
+  const setup = await readStripeCheckoutSetup(db, organizationId, env, seller)
   const handoff = { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(setup.slug)}/payments`, missing: setup.missing }
   if (setup.missing.length) {
     return { ready: false as const, statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409, statusMessage: 'Complete the business’s Payments setup before accepting online payments', handoff }
@@ -449,8 +455,8 @@ export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, o
 }
 
 /** The configured native Stripe account and methods must accept a paid booking before it is offered. */
-export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
-  const readiness = await checkoutReadiness(db, env, organizationId)
+export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string, seller?: Awaited<ReturnType<typeof readCheckoutSeller>>) {
+  const readiness = await checkoutReadiness(db, env, organizationId, seller)
   if (!readiness.ready) throw new HTTPError({ statusCode: readiness.statusCode, statusMessage: readiness.statusMessage, data: readiness.handoff })
   const { stripe, connected, handoff } = readiness
   const stripeAccount = connected.stripe_account_id
@@ -509,7 +515,7 @@ export async function ensureStripeConnectedAccount(
       defaults: {
         responsibilities: { fees_collector: 'application', losses_collector: 'stripe' },
       },
-      metadata: { krabiclaw_organization_id: input.organizationId },
+      metadata: { blawby_organization_id: input.organizationId },
       include: STRIPE_CONNECT_ACCOUNT_INCLUDE,
     }, { idempotencyKey: `krabiclaw-connect-account:express-managed-risk:${input.organizationId}` })
   } catch (error) {

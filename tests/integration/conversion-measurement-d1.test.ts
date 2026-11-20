@@ -358,12 +358,12 @@ test('a completed onboarding emails each operator once, with a link to that cust
     return Response.json({ id: `email-${sent.length}` })
   })
   try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'Blawby', 'krabiclaw', 'www', ?, 'active', 'USD', 'Asia/Bangkok')`).bind(PLATFORM_SITE.themeId).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'Blawby', 'platform', 'www', ?, 'active', 'USD', 'Asia/Bangkok')`).bind(PLATFORM_SITE.themeId).run()
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status, default_currency, timezone) VALUES ('org-customer', 'Clay Corner', 'clay-corner', 'clay-corner', 'active', 'USD', 'Asia/Bangkok')`).run()
-    await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-1', 'org-customer', 'clay-corner.krabiclaw.com', 'system', 'canonical', 'active')`).run()
+    await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-1', 'org-customer', 'clay-corner.blawby.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO user (id, name, email) VALUES ('user-owner', 'Mina Park', 'mina@clay-corner.com')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-owner', 'org-customer', 'user-owner', 'owner')`).run()
-    const env = { DB: db, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_operator', EMAIL_FROM: 'Blawby <hello@blawby.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.com', PLATFORM_OWNER_EMAILS: 'ops@blawby.com, OPS@Blawby.com ' } as unknown as Parameters<typeof completeOnboarding>[0]
+    const env = { DB: db, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 're_test_operator', EMAIL_FROM: 'Blawby <hello@blawby.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.com', PLATFORM_OWNER_EMAILS: 'ops@blawby.com, OPS@Blawby.com ' } as unknown as Parameters<typeof completeOnboarding>[0]
 
     const completion = await completeOnboarding(env, db, 'org-customer', null)
     assert.deepEqual(completion.operator_email, { status: 'sent' })
@@ -375,7 +375,7 @@ test('a completed onboarding emails each operator once, with a link to that cust
     assert.ok(ownerMail)
     assert.deepEqual(operatorMail!.body.to, ['ops@blawby.com'])
     assert.equal(operatorMail!.idempotencyKey, `onboarding-complete:org-customer:${hashEmail('ops@blawby.com')}`)
-    assert.ok(operatorMail!.body.html.includes('https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=user-owner&amp;organization=org-customer'), 'the operator email links to that customer')
+    assert.ok(operatorMail!.body.html.includes('https://blawby.com/dashboard/platform/platform-accounts?user=user-owner&amp;organization=org-customer'), 'the operator email links to that customer')
     assert.deepEqual(ownerMail!.body.to, ['mina@clay-corner.com'])
     assert.equal(ownerMail!.idempotencyKey, `onboarding-welcome:org-customer:${hashEmail('mina@clay-corner.com')}`)
     // The conversion is recorded on its own path, once per organization.
@@ -388,7 +388,7 @@ test('a completed onboarding emails each operator once, with a link to that cust
 
     // An unconfigured operator address fails visibly and does not stop the owner welcome email or measurement.
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status, default_currency, timezone) VALUES ('org-second', 'Second', 'second', 'second', 'active', 'USD', 'Asia/Bangkok')`).run()
-    await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-2', 'org-second', 'second.krabiclaw.com', 'system', 'canonical', 'active')`).run()
+    await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-2', 'org-second', 'second.blawby.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-second', 'org-second', 'user-owner', 'owner')`).run()
     const unconfigured = await completeOnboarding({ ...env, PLATFORM_OWNER_EMAILS: '' }, db, 'org-second', null)
     assert.deepEqual(unconfigured.operator_email, { status: 'failed', reason: 'PLATFORM_OWNER_EMAILS is not configured' })

@@ -548,7 +548,7 @@
 }
 
 /* The business-site container. It lives here, not in tenant.css, because
-   krabiclaw.com renders shared sections (page blocks, social posts, the
+   blawby.com renders shared sections (page blocks, social posts, the
    announcement banner) that use it too. */
 .tenant-container {
   margin-inline: auto;

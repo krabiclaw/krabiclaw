@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND, PLATFORM_MESSAGE_AUTHOR_KINDS_SQL } from '~/shared/messages-contract'
 import { CHANNEX_PROPERTY_HOME } from '~/server/integrations/channex/listing-mappings'
 import { initialConversationParticipants, initialListingParticipants, reconcileGuestListingParticipants } from '~/server/domain/conversation-participants'
 import { HTTPError } from 'nitro'
@@ -40,7 +41,9 @@ export type GuestThreadChannelRow = Omit<ChannelThreadMapping, 'product_id' | 'e
 }
 
 /** Channel routing and the home used to present this conversation come from the same join. */
-export function guestThreadChannelQuery(conversationId: string, organizationId: string): BatchQuery {
+export function guestThreadChannelQuery(conversationId: string | { sql: string }, organizationId: string | { sql: string }): BatchQuery {
+  const conversation = typeof conversationId === 'string' ? '?' : conversationId.sql
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
   return { query: `
     SELECT c.organization_id, c.id AS conversation_id, ct.external_thread_id, ct.external_booking_id, ct.moved_from_thread_id,
       ct.product_id AS mapped_product_id, COALESCE(ct.product_id, CASE WHEN b.owner = 'channel' THEN b.product_id END) AS product_id,
@@ -50,7 +53,8 @@ export function guestThreadChannelQuery(conversationId: string, organizationId: 
     FROM conversations c
     LEFT JOIN channel_threads ct ON ct.organization_id = c.organization_id AND ct.conversation_id = c.id
     LEFT JOIN bookings b ON b.organization_id = c.organization_id AND b.id = c.booking_id AND c.kind = 'booking'
-    WHERE c.id = ? AND c.organization_id = ?`, params: [conversationId, organizationId] }
+    WHERE c.id = ${conversation} AND c.organization_id = ${organization}`,
+    params: [...(typeof conversationId === 'string' ? [conversationId] : []), ...(typeof organizationId === 'string' ? [organizationId] : [])] }
 }
 
 export function parseGuestThreadChannel(row: GuestThreadChannelRow) {
@@ -159,7 +163,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
   const joining = mapped && stay && mapped.conversation_id !== stay.conversation_id ? stay : null
   // Nobody has written in it: no one's words, only what Blawby recorded about the booking.
   if (joining && !await queryFirst(db, `SELECT 1 FROM conversations opened WHERE opened.id = ? AND opened.booking_id = ?
-      AND NOT EXISTS (SELECT 1 FROM messages written WHERE written.conversation_id = opened.id AND (written.author_kind <> 'krabiclaw' OR written.event_name IN ('${MIRRORED_EVENT}', '${SCHEDULED_MESSAGE_EVENT}')))
+      AND NOT EXISTS (SELECT 1 FROM messages written WHERE written.conversation_id = opened.id AND (written.author_kind NOT IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) OR written.event_name IN ('${MIRRORED_EVENT}', '${SCHEDULED_MESSAGE_EVENT}')))
       AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE conversation_id = opened.id)`, [joining.conversation_id, joining.id])) {
     fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The inquiry and stay already have separate conversations; reconcile them without discarding either timeline', 'conversation_id')
   }
@@ -217,7 +221,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
     return true
   }
   if (await alreadySent()) return
-  const authorKind = message.sender === 'guest' ? 'guest' : message.sender === 'property' ? 'member' : 'krabiclaw'
+  const authorKind = message.sender === 'guest' ? 'guest' : message.sender === 'property' ? 'member' : PLATFORM_MESSAGE_AUTHOR_KIND
   // A moved conversation's new account delivers its Airbnb history again under
   // new ids: the same sender, Airbnb timestamp, text and attachment count is a
   // message the conversation already has.

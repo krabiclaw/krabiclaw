@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { CHANNEX_PROPERTY_HOME } from '~/server/integrations/channex/listing-mappings'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
@@ -15,7 +16,7 @@ import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { formatCalendarDate } from '~/utils/timezone'
-import { appendMessage, conversationAccessSql, findMessageByDedupeKey, getMessage, type MessageRow } from '~/server/domain/conversations'
+import { appendMessage, conversationMemberSql, findMessageByDedupeKey, getMessage, type MessageRow } from '~/server/domain/conversations'
 import { mirrorChannexThread } from './channel-messages'
 import { conversationTaskQueries } from './repository'
 import type { GuestThreadRow } from './types'
@@ -64,7 +65,7 @@ const ANSWERS: Record<Outcome, { event: string; host: string; guest: string; air
 async function recordOutcome(db: DbClient, entry: MessageRow, proposal: Proposal, outcome: Outcome, actorUserId: string | null): Promise<MessageRow> {
   const answer = ANSWERS[outcome]
   return appendMessage(db, {
-    conversationId: entry.conversation_id, authorKind: 'krabiclaw', authorUserId: actorUserId, channel: 'airbnb',
+    conversationId: entry.conversation_id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: actorUserId, channel: 'airbnb',
     eventName: answer.event, dedupeKey: `booking-change-decision:${entry.id}`,
     body: actorUserId ? answer.host : proposal.initiated_by === 'guest' ? answer.guest : answer.airbnb,
     payload: { requestId: entry.id, outcome },
@@ -152,7 +153,7 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
     const guest = request.initiatedBy === 'guest'
     // The guest's own request names their account; a host's proposal on Airbnb is Blawby's to relay.
     entry = await appendMessage(db, {
-      conversationId: threadId, authorKind: 'krabiclaw', authorUserId: guest ? stay.guest_user_id : null, channel: 'airbnb', eventName: 'booking_change.requested', dedupeKey,
+      conversationId: threadId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: guest ? stay.guest_user_id : null, channel: 'airbnb', eventName: 'booking_change.requested', dedupeKey,
       body: `${guest ? 'Asked' : 'Proposed'} on Airbnb to change the stay to ${nightsLabel(request.after, 'en')} for ${request.after.adults + request.after.children} guests (${formatMinorAmount(request.after.total_minor, request.after.currency, 'en-US')}).`,
       payload: proposal,
     }, conversationTaskQueries(threadId, new Date().toISOString()))
@@ -247,20 +248,41 @@ export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, i
 }
 
 /** A channel decides when its request closes. Until its recorded answer arrives, show it on the authorized stay. */
-export async function pendingStayChanges(db: DbClient, input: { bookingId: string; conversationId: string; organizationId: string; userId: string }) {
-  const access = conversationAccessSql('c', input)
-  const entries = await queryAll<Pick<MessageRow, 'id' | 'payload_json'>>(db, `SELECT proposal.id, proposal.payload_json
+export function pendingStayChangesQuery(input: {
+  bookingId: string
+  conversationId: string | { sql: string }
+  organizationId: string | { sql: string }
+  userId: string | { sql: string }
+}) {
+  const { bookingId, conversationId, organizationId, userId } = input
+  const conversation = typeof conversationId === 'string' ? '?' : conversationId.sql
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const user = typeof userId === 'string' ? '?' : userId.sql
+  return { query: `SELECT proposal.id, proposal.payload_json
     FROM conversations c JOIN messages proposal ON proposal.conversation_id = c.id
-    WHERE c.id = ? AND c.organization_id = ? AND c.booking_id = ? AND ${access.sql}
+    WHERE c.id = ${conversation} AND c.organization_id = ${organization} AND c.booking_id = ? AND ${conversationMemberSql('c', user)}
       AND proposal.event_name = 'booking_change.requested' AND proposal.dedupe_key GLOB ?
       AND NOT EXISTS (SELECT 1 FROM messages decision WHERE decision.conversation_id = c.id AND decision.dedupe_key = 'booking-change-decision:' || proposal.id)
-    ORDER BY proposal.sequence DESC`, [input.conversationId, input.organizationId, input.bookingId, ...access.params, `${PREFIX}*`])
+    ORDER BY proposal.sequence DESC`, params: [
+    ...(typeof conversationId === 'string' ? [conversationId] : []), ...(typeof organizationId === 'string' ? [organizationId] : []),
+    bookingId, ...(typeof userId === 'string' ? [userId] : []), `${PREFIX}*`,
+  ] }
+}
+
+export async function pendingStayChanges(db: DbClient, input: { bookingId: string; conversationId: string; organizationId: string; userId: string }) {
+  const { query, params } = pendingStayChangesQuery(input)
+  const entries = await queryAll<Pick<MessageRow, 'id' | 'payload_json'>>(db, query, params)
   if (!entries.length) return []
   const { locale } = await getPersistedSourceLocale(db, input.organizationId)
+  return pendingStayChangesFromRows(entries, input.bookingId, locale)
+}
+
+export function pendingStayChangesFromRows(rows: unknown[], bookingId: string, locale: string) {
+  const entries = rows as Pick<MessageRow, 'id' | 'payload_json'>[]
   const side = (terms: Terms) => ({ dates: nightsLabel(terms, locale), guests: terms.adults + terms.children, total: formatMinorAmount(terms.total_minor, terms.currency, locale) })
   return entries.map(entry => {
     const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
-    if (proposal.stay_id !== input.bookingId) throw new Error(`Change request ${entry.id} does not match its stay`)
+    if (proposal.stay_id !== bookingId) throw new Error(`Change request ${entry.id} does not match its stay`)
     return { id: entry.id, requested_by: proposal.initiated_by, before: side(proposal.before), after: side(proposal.after) }
   })
 }

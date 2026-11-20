@@ -5,7 +5,7 @@ import type { MessagePhotoInput } from './guest-threads/attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryProvider, GuestThreadDeliveryPurpose } from './guest-threads/types'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
-import type { ConversationParticipant } from '~/shared/messages-contract'
+import { PLATFORM_MESSAGE_AUTHOR_KIND, type PLATFORM_MESSAGE_AUTHOR_KINDS, PLATFORM_MESSAGE_AUTHOR_KINDS_SQL, isPlatformMessageAuthor, type ConversationParticipant } from '~/shared/messages-contract'
 import { PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
 import { listingGrantSql } from '~/server/domain/listing-access'
 import { assignedOperationsRoles, roleMatchesSql, workspaceGuestMessagingRoles } from '~/utils/organization-access'
@@ -23,7 +23,7 @@ import { assignedOperationsRoles, roleMatchesSql, workspaceGuestMessagingRoles }
  */
 
 export type ConversationKind = 'contact' | 'booking' | 'team'
-export type MessageAuthorKind = 'guest' | 'member' | 'krabiclaw'
+export type MessageAuthorKind = 'guest' | 'member' | typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number]
 export type MessageChannel = 'web' | 'email' | 'whatsapp' | 'airbnb'
 
 export type ConversationParticipantRow = Omit<ConversationParticipant, 'can_remove' | 'invitation_id'> & { invitation_id: string | null }
@@ -94,11 +94,11 @@ export const SUBMISSION_EVENT = 'thread.submission'
 /** A booking guest's note, written with the booking as their own message. */
 export const GUEST_NOTE_EVENT = 'thread.guest_note'
 /** Blawby's messages that are words to read, not events about the booking. */
-const KRABICLAW_WORDS = new Set<string | null>([null, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, MIRRORED_EVENT])
+const PLATFORM_MESSAGE_TEXT_EVENTS = new Set<string | null>([null, OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, MIRRORED_EVENT])
 
 /** An event Blawby recorded (a cancellation, a change, a payment), as opposed to words someone wrote. */
 export function isEventMessage(message: Pick<MessageRow, 'author_kind' | 'event_name'>): boolean {
-  return message.author_kind === 'krabiclaw' && !KRABICLAW_WORDS.has(message.event_name)
+  return isPlatformMessageAuthor(message.author_kind) && !PLATFORM_MESSAGE_TEXT_EVENTS.has(message.event_name)
 }
 
 /**
@@ -108,7 +108,7 @@ export function isEventMessage(message: Pick<MessageRow, 'author_kind' | 'event_
  */
 export function messageRole(message: Pick<MessageRow, 'author_kind' | 'author_user_id' | 'event_name'>, guestUserId: string | null): MessageAuthorKind {
   if (!isEventMessage(message)) return message.author_kind
-  if (message.author_user_id === null) return 'krabiclaw'
+  if (message.author_user_id === null) return PLATFORM_MESSAGE_AUTHOR_KIND
   return message.author_user_id === guestUserId ? 'guest' : 'member'
 }
 
@@ -117,14 +117,14 @@ export function guestVisibleSql(message: string, bookingOwner: string): string {
   const guestWords = `(${message}.author_kind = 'guest' AND ${message}.channel IN ('web', 'email', 'whatsapp'))`
   return `((${guestWords} AND ${message}.event_name IS NULL)
     OR (${message}.author_kind = 'member' AND ${message}.event_name = '${MEMBER_REPLY_EVENT}')
-    OR (${message}.author_kind = 'krabiclaw' AND ${message}.event_name = '${SCHEDULED_MESSAGE_EVENT}')
-    OR (${bookingOwner} AND (${guestWords} OR (${message}.author_kind = 'krabiclaw'
+    OR (${message}.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) AND ${message}.event_name = '${SCHEDULED_MESSAGE_EVENT}')
+    OR (${bookingOwner} AND (${guestWords} OR (${message}.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL})
       AND ${message}.event_name IN ('${OPENING_EVENT}', ${GUEST_VISIBLE_EVENTS.map(event => `'${event}'`).join(', ')})))))`
 }
 
-function viewerMessageVisibility(message: string, conversation: string): string {
+function viewerMessageVisibility(message: string, conversation: string, user = '?'): string {
   return `NOT EXISTS (SELECT 1 FROM conversation_participants audience
-    WHERE audience.conversation_id = ${conversation}.id AND audience.user_id = ? AND audience.role = 'guest'
+    WHERE audience.conversation_id = ${conversation}.id AND audience.user_id = ${user} AND audience.role = 'guest'
       AND NOT COALESCE(${guestVisibleSql(message, `${conversation}.user_id = audience.user_id`)}, 0))`
 }
 
@@ -135,19 +135,21 @@ function viewerMessageVisibility(message: string, conversation: string): string 
  * see them. A guest counts only what they can see. Every list row, the Unread filter, the
  * filter counts, the nav count, the app badge and MCP read this.
  */
-export function unreadSql(conversation: string, viewer: string, readThrough?: number | null): { sql: string; params: (string | number)[] } {
+export function unreadSql(conversation: string, viewer: string | { sql: string }, readThrough?: number | null): { sql: string; params: (string | number)[] } {
+  const user = typeof viewer === 'string' ? '?' : viewer.sql
+  const parameters = typeof viewer === 'string' ? [viewer] : []
   const sequence = readThrough === undefined
     ? { sql: `COALESCE((SELECT read_message.sequence FROM conversation_participants reader
           JOIN messages read_message ON read_message.id = reader.last_read_message_id
-          WHERE reader.conversation_id = ${conversation}.id AND reader.user_id = ?), 0)`, param: viewer }
-    : { sql: '?', param: readThrough ?? 0 }
+          WHERE reader.conversation_id = ${conversation}.id AND reader.user_id = ${user}), 0)`, params: parameters }
+    : { sql: '?', params: [readThrough ?? 0] }
   return {
     sql: `EXISTS (SELECT 1 FROM messages unread_message
       WHERE unread_message.conversation_id = ${conversation}.id
-        AND unread_message.author_user_id IS NOT ?
-        AND ${viewerMessageVisibility('unread_message', conversation)}
+        AND unread_message.author_user_id IS NOT ${user}
+        AND ${viewerMessageVisibility('unread_message', conversation, user)}
         AND unread_message.sequence > ${sequence.sql})`,
-    params: [viewer, viewer, sequence.param],
+    params: [...parameters, ...parameters, ...sequence.params],
   }
 }
 
@@ -245,7 +247,7 @@ export function messageQueries(input: MessageInput): { id: string; dedupeKey: st
       SELECT ?, c.organization_id, c.id, COALESCE((SELECT MAX(prior.sequence) FROM messages prior WHERE prior.conversation_id = c.id), 0) + 1, ?, ?, ?, ?, ?, ?, ?, ?, ?
         FROM conversations c WHERE c.id = ?${input.guard ? ` AND (${input.guard.sql})` : ''}
       ON CONFLICT (dedupe_key) DO NOTHING`,
-    params: [id, input.authorKind, input.authorUserId, input.channel ?? null, input.body ?? null, input.eventName ?? null,
+    params: [id, isPlatformMessageAuthor(input.authorKind) ? PLATFORM_MESSAGE_AUTHOR_KIND : input.authorKind, input.authorUserId, input.channel ?? null, input.body ?? null, input.eventName ?? null,
       JSON.stringify(input.payload ?? {}), dedupeKey, occurredAt, createdAt, input.conversationId, ...(input.guard?.params ?? [])],
   }, {
     query: `UPDATE conversations SET last_message_at = max(last_message_at, ?) WHERE id = ? AND ${written}`,
@@ -254,7 +256,7 @@ export function messageQueries(input: MessageInput): { id: string; dedupeKey: st
     query: `UPDATE conversation_participants SET archived_at = NULL WHERE conversation_id = ? AND archived_at IS NOT NULL AND user_id IS NOT ? AND ${written}`,
     params: [input.conversationId, input.authorUserId, id],
   }]
-  if (input.authorUserId && input.authorKind !== 'krabiclaw') {
+  if (input.authorUserId && !isPlatformMessageAuthor(input.authorKind)) {
     queries.push({
       query: `INSERT INTO conversation_participants (conversation_id, organization_id, user_id, last_read_message_id)
         SELECT conversation_id, organization_id, ?, id FROM messages WHERE id = ?
@@ -290,7 +292,7 @@ export function parseTranscriptWindow(query: URLSearchParams): ConversationWindo
 /** A message already under this key is this message, or the key was given to a different one. */
 function sameMessage(existing: MessageRow, input: MessageInput): MessageRow {
   const matches = existing.conversation_id === input.conversationId
-    && existing.author_kind === input.authorKind
+    && (existing.author_kind === input.authorKind || isPlatformMessageAuthor(existing.author_kind) && isPlatformMessageAuthor(input.authorKind))
     && existing.author_user_id === (input.authorUserId ?? null)
     && existing.channel === (input.channel ?? null)
     && existing.body === (input.body ?? null)
@@ -517,14 +519,16 @@ export function conversationMemberSql(conversation: string, userExpression: stri
           AND seat.user_id = staff.userId AND seat.role = 'member'))))`
 }
 
-export function participantGuard(alias: string, userId: string, role?: ParticipantRole): { sql: string; params: string[] } {
+export function participantGuard(alias: string, userId: string | { sql: string }, role?: ParticipantRole): { sql: string; params: string[] } {
+  const user = typeof userId === 'string' ? '?' : userId.sql
+  const params = typeof userId === 'string' ? [userId] : []
   const guest = `(${alias}.kind <> 'team' AND EXISTS (SELECT 1 FROM conversation_participants seat
     WHERE seat.conversation_id = ${alias}.id AND seat.organization_id = ${alias}.organization_id
-      AND seat.user_id = ? AND seat.role = 'guest'))`
-  if (role === 'guest') return { sql: guest, params: [userId] }
-  const member = conversationMemberSql(alias, '?')
-  if (role === 'member') return { sql: member, params: [userId] }
-  return { sql: `(${guest} OR ${member})`, params: [userId, userId] }
+      AND seat.user_id = ${user} AND seat.role = 'guest'))`
+  if (role === 'guest') return { sql: guest, params }
+  const member = conversationMemberSql(alias, user)
+  if (role === 'member') return { sql: member, params }
+  return { sql: `(${guest} OR ${member})`, params: [...params, ...params] }
 }
 
 export function conversationAccessSql(alias: string, principal: Pick<MemberAccessPrincipal, 'userId'>): ConversationGuard {
@@ -592,7 +596,7 @@ export async function assertConversationAccess(db: DbClient, principal: MemberAc
 }
 
 /** An Airbnb Support case: Airbnb's agents wrote and no guest did. */
-export const SUPPORT_CONVERSATION_SQL = (alias: string) => `(${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM messages support_message WHERE support_message.conversation_id = ${alias}.id AND support_message.author_kind = 'krabiclaw' AND support_message.event_name = '${MIRRORED_EVENT}')
+export const SUPPORT_CONVERSATION_SQL = (alias: string) => `(${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM messages support_message WHERE support_message.conversation_id = ${alias}.id AND support_message.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) AND support_message.event_name = '${MIRRORED_EVENT}')
   AND NOT EXISTS (SELECT 1 FROM messages guest_message WHERE guest_message.conversation_id = ${alias}.id AND guest_message.author_kind = 'guest'))`
 
 export async function listUnreadIds(db: DbClient, conversationIds: string[], userId: string): Promise<Set<string>> {

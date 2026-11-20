@@ -1,4 +1,5 @@
 import { readPublicSourceLocale } from '~/server/utils/localization'
+import { publicTenantRedirectQuery, type PublicTenantRedirect } from '~/server/utils/public-redirects'
 import { defineHandler, HTTPError, type H3Event } from 'nitro';
 import {    redirect, setResponseHeader } from 'nitro/h3';
 import { queryFirst } from '~/server/db'
@@ -55,7 +56,7 @@ function articlePathWithoutCategory(pathname: string): string | null {
   return match ? `/${match[1]}/${match[2]}` : null
 }
 
-// Platform-domain-only (krabiclaw.com bare host) paths Google Search Console
+// Platform-domain-only paths Google Search Console
 // keeps recrawling with no current or planned replacement (see issue #317).
 // A plain 404 lets Google keep retrying indefinitely; 410 Gone is a stronger,
 // faster de-index signal. `/posts` is not one of them: Blawby's own site
@@ -111,28 +112,10 @@ async function resolveTenantRedirectForRequest(event: H3Event) {
   if (!db) throw new HTTPError({ statusCode: 500, statusMessage: 'Database not available' })
   const url = event.url
   const path = url.pathname === '/' ? '/' : url.pathname.replace(/\/$/, '')
-  const firstSegment = path.split('/')[1] || ''
-  const { locale: sourceLocale } = await readPublicSourceLocale(event, db, organizationId)
-  const localized = firstSegment && firstSegment !== sourceLocale
-    ? await queryFirst<{ locale: string } | null>(db, `
-        SELECT locale FROM organization_locales
-         WHERE organization_id = ? AND locale = ? AND is_source = 0 AND status = 'published'
-         LIMIT 1
-      `, [organizationId, firstSegment])
-    : null
-  const locale = localized?.locale ?? sourceLocale
-  const tenantPagePath = localized ? (path.slice(locale.length + 1) || '/') : path
-
-  return queryFirst<{ toPath: string | null; statusCode: number | null; behavior: string }>(db, `
-    SELECT to_path AS toPath, status_code AS statusCode, behavior
-      FROM organization_redirects
-     WHERE organization_id = ? AND locale = ? AND from_path = ?
-       AND NOT EXISTS (
-         SELECT 1 FROM content_documents
-          WHERE kind = 'page' AND row_role IN ('root','representation') AND organization_id = ? AND locale = ? AND path = ?
-       )
-     LIMIT 1
-  `, [organizationId, locale, path, organizationId, locale, tenantPagePath])
+  await readPublicSourceLocale(event, db, organizationId)
+  if (event.context.tenantRedirect !== undefined) return event.context.tenantRedirect as PublicTenantRedirect | null
+  const { query, params } = publicTenantRedirectQuery(organizationId, path)
+  return queryFirst<PublicTenantRedirect>(db, query, params)
 }
 
 export default defineHandler(async (event) => {
@@ -184,11 +167,13 @@ export default defineHandler(async (event) => {
     return redirect(targetWithParams, 301)
   }
 
-  const tenantRedirect = (event.context.tenantRedirect as {
-    toPath: string | null
-    statusCode: number | null
-    behavior: string
-  } | null | undefined) ?? await resolveTenantRedirectForRequest(event)
+  if (event.context.tenantType === TENANT_TYPES.PLATFORM
+    && (normalizedPathname === '/dashboard' || normalizedPathname.startsWith('/dashboard/'))) {
+    markTranscriptMiddlewareComplete(event)
+    return
+  }
+
+  const tenantRedirect = await resolveTenantRedirectForRequest(event)
   if (event.context.tenantType === TENANT_TYPES.TENANT && tenantRedirect) {
     if (tenantRedirect.behavior === 'gone') {
       throw new HTTPError({ statusCode: 410, statusMessage: 'Gone' })

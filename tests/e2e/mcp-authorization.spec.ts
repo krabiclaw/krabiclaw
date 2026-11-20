@@ -17,12 +17,14 @@ test.describe('stateless MCP server', () => {
 
     // A blank header is not "no tenant selected": it names a tenant that
     // resolves to nothing, and must fail closed the same way.
-    const blankOrgTools = await mcpRequest(request, baseURL!, {
-      method: 'tools/list',
-      extraHeaders: { 'x-krabiclaw-organization-id': '   ' },
-    })
-    expect(blankOrgTools.status()).toBe(200)
-    expect(((await blankOrgTools.json()) as { result: { tools: unknown[] } }).result.tools).toEqual([])
+    for (const header of ['x-blawby-organization-id', 'x-krabiclaw-organization-id']) {
+      const blankOrgTools = await mcpRequest(request, baseURL!, {
+        method: 'tools/list',
+        extraHeaders: { [header]: '   ' },
+      })
+      expect(blankOrgTools.status()).toBe(200)
+      expect(((await blankOrgTools.json()) as { result: { tools: unknown[] } }).result.tools).toEqual([])
+    }
 
     const wrongOrg = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
@@ -79,7 +81,11 @@ test('Google Ads diagnostics are read-only tools for the selected Growth tenant'
   const { result } = await catalog.json()
   const diagnostics = result.tools.filter((tool: { name: string }) => toolNames.includes(tool.name))
   expect(diagnostics.map((tool: { name: string }) => tool.name).sort()).toEqual(toolNames.sort())
-  for (const tool of diagnostics) expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false })
+  expect(result._meta['blawby/catalogFingerprint']).toMatch(/^sha256:[0-9a-f]{64}$/)
+  for (const tool of diagnostics) {
+    expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false })
+    expect(tool._meta['blawby/toolInfo']).toMatchObject({ domain: expect.any(String), minimumRole: expect.any(String) })
+  }
 
   const response = await mcpRequest(request, baseURL!, {
     method: 'tools/call', toolName: 'list_conversion_actions', args: { organization_id: tenant.organizationId },

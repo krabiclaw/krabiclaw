@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import { OPEN_TERMS, OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import assert from 'node:assert/strict'
@@ -39,13 +40,14 @@ import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, requirePayment } from '../../server/domain/payments/index.ts'
 import { paymentTransactionDestination } from '../../server/domain/payments/earnings.ts'
-import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
+import { completePaymentReturn, reviewPayment, confirmPayment, paymentHandoff, preparePaymentReturn, requireClaimedPayment } from '../../server/domain/payments/intent.ts'
 import { reconcilePaymentIntent, processPaymentEvent } from '../../server/domain/payments/events.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
 import { NOT_HANDLED } from '../../server/utils/mcp-tools/execution.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
 import { getRequestDataMetrics, instrumentD1 } from '../../server/utils/request-metrics.ts'
+import { openPaymentReturnDocument, paymentReturnDocumentGuard, sealPaymentReturnDocument } from '../../server/utils/payment-return-document.ts'
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { applySchema } from './support/schema.ts'
@@ -57,7 +59,7 @@ async function boot(){
  await applySchema(db)
  // A business taking payments is billed for them on its plan's Stripe customer, and the platform site records what it billed.
  await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone, "stripeCustomerId") VALUES(?,'Payments','payments','payments','{}','theme','USD','active','complete','flat','experience',?, 'America/New_York','cus_operating')`).bind(ORG,NOW).run()
- await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','Blawby','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
+ await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','Blawby','platform','blawby','{}','blawby-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
  await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('payments-en',?,'en',1,'published')").bind(ORG).run()
  for(const id of ['guest','verified','other'])await db.prepare("INSERT INTO user(id,name,email,emailVerified,isAnonymous) VALUES(?,?,?,1,?)").bind(id,id,`${id}@example.com`,Number(id==='guest')).run()
  await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','product',?,'Consultation','consultation','guest','guest')").bind(ORG).run()
@@ -518,7 +520,7 @@ test('Checkout proof attaches ownership without exposing merchant financial data
   // Another business's site cannot complete this business's payment.
   await assert.rejects(()=>completePaymentReturn(db,env,'another-org','claim',token,async()=>'verified'),error=>error instanceof HTTPError&&error.statusCode===404)
   // An anonymous checkout's purchase passes to the account that proves it.
-  await db.prepare("INSERT INTO user(id,name,email,isAnonymous) VALUES('anon-buyer','Guest','anon-buyer@customers.krabiclaw.local',1)").run()
+  await db.prepare("INSERT INTO user(id,name,email,isAnonymous) VALUES('anon-buyer','Guest','anon-buyer@customers.blawby.test',1)").run()
   await db.prepare("UPDATE payments SET buyer_user_id='anon-buyer' WHERE id='claim'").run()
   assert.deepEqual(await claimCheckoutReturn(db,'verified',token),{payment_id:'claim',claimed:true})
   const originalClaim=await db.prepare('SELECT return_token_hash,return_expires_at AS expires_at,claimed_at,claimed_user_id FROM payments WHERE return_token_hash=?').bind(hash).first()
@@ -643,10 +645,10 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   await db.batch(opening.map(write=>db.prepare(write.query).bind(...write.params)))
   const question=(await db.prepare("SELECT id FROM messages WHERE conversation_id='buyer-conversation' AND event_name='thread.submission'").first<string>('id'))!
   const publicReply=await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'member',authorUserId:'other',channel:'web',eventName:'thread.member_reply',body:'Public host reply',payload:{provider_secret:'private-diagnostic'},dedupeKey:'public-host-reply'})
-  const capture=await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'krabiclaw',authorUserId:null,eventName:'payment.payment_captured',body:'Payment received',payload:{stripe_charge_id:'private-charge'},dedupeKey:'public-capture'})
+  const capture=await appendMessage(db,{conversationId:'buyer-conversation',authorKind:PLATFORM_MESSAGE_AUTHOR_KIND,authorUserId:null,eventName:'payment.payment_captured',body:'Payment received',payload:{stripe_charge_id:'private-charge'},dedupeKey:'public-capture'})
   // A member's words that are not a reply to the guest, and a dispute: the business's alone.
   await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'member',authorUserId:'other',body:'Internal staff note',dedupeKey:'internal-note'})
-  await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'krabiclaw',authorUserId:null,eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payload:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
+  await appendMessage(db,{conversationId:'buyer-conversation',authorKind:PLATFORM_MESSAGE_AUTHOR_KIND,authorUserId:null,eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payload:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
   // A member archived it for themselves; the guest's own view does not change.
   await archiveConversation(db,{organizationId:ORG,conversationId:'buyer-conversation',userId:'other',archived:true})
   const secrets=['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic']
@@ -951,7 +953,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
           amount: 10000,
           currency: 'usd',
           livemode: false,
-          metadata: { krabiclaw_payment_id: 'ach-payment' },
+          metadata: { blawby_payment_id: 'ach-payment' },
           amount_details: {
             surcharge: {
               status: 'unavailable',
@@ -982,7 +984,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
           amount: 10000,
           currency: 'usd',
           livemode: false,
-          metadata: { krabiclaw_payment_id: 'ach-payment' },
+          metadata: { blawby_payment_id: 'ach-payment' },
           payment_method: 'pm_achproof123',
         })
       }
@@ -990,7 +992,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
         assert.equal(new Headers(init?.headers).get('idempotency-key'), 'krabiclaw-failed:ach-payment')
         achIntentStatus = 'canceled'
         return Response.json({ id: 'pi_ach-payment', object: 'payment_intent', status: achIntentStatus, amount: 10000, currency: 'usd', livemode: false,
-          cancellation_reason: 'abandoned', metadata: { krabiclaw_payment_id: 'ach-payment' } })
+          cancellation_reason: 'abandoned', metadata: { blawby_payment_id: 'ach-payment' } })
       }
       if (url.pathname === '/v1/payment_intents/pi_ach-payment/confirm' && init?.method === 'POST') {
         // A method that leaves the site comes back to the business's own pay page, never the platform.
@@ -1005,7 +1007,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
           client_secret: 'pi_ach-payment_secret',
           payment_method: { id: 'pm_achproof123', type: 'us_bank_account' },
           livemode: false,
-          metadata: { krabiclaw_payment_id: 'ach-payment' },
+          metadata: { blawby_payment_id: 'ach-payment' },
         })
       }
       throw new Error(`Unexpected Stripe request: ${init?.method} ${url.pathname}`)
@@ -1019,7 +1021,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
     // A confirmation decline leaves the purchase open for another method.
     const declinedIntent = {
       id: 'pi_ach-payment', livemode: false, currency: 'usd',
-      metadata: { krabiclaw_payment_id: 'ach-payment' },
+      metadata: { blawby_payment_id: 'ach-payment' },
       status: 'requires_payment_method', amount: 10000,
       last_payment_error: { type: 'card_error', code: 'card_declined' },
     } as Stripe.PaymentIntent
@@ -1051,7 +1053,7 @@ test('ACH review shows bank details and no surcharge, and payment failure frees 
 
     // The bank can fail long after the checkout expires. The financial event cancels the booking.
     const failedIntent = {
-      id: 'pi_ach-payment', livemode: false, currency: 'usd', metadata: { krabiclaw_payment_id: 'ach-payment' },
+      id: 'pi_ach-payment', livemode: false, currency: 'usd', metadata: { blawby_payment_id: 'ach-payment' },
       status: 'requires_payment_method', amount: 10000,
       last_payment_error: { code: 'bank_account_unusable', message: 'The bank payment failed' },
     } as unknown as Stripe.PaymentIntent
@@ -1093,14 +1095,14 @@ test('a business registered for Stripe Tax has tax calculated by Stripe from the
       }
       if (url.pathname === '/v1/payment_intents/pi_taxed' && init?.method === 'POST') {
         sent.update = body
-        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: Number(body.get('amount')), currency: 'usd', livemode: false, metadata: { krabiclaw_payment_id: 'taxed' }, payment_method: 'pm_cardUS', amount_details: { surcharge: { status: 'available', maximum_amount: 330 } } })
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: Number(body.get('amount')), currency: 'usd', livemode: false, metadata: { blawby_payment_id: 'taxed' }, payment_method: 'pm_cardUS', amount_details: { surcharge: { status: 'available', maximum_amount: 330 } } })
       }
       if (url.pathname === '/v1/payment_intents/pi_taxed' && init?.method === 'GET') {
-        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: 11025, currency: 'usd', livemode: false, metadata: { krabiclaw_payment_id: 'taxed' }, payment_method: 'pm_cardUS' })
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: 11025, currency: 'usd', livemode: false, metadata: { blawby_payment_id: 'taxed' }, payment_method: 'pm_cardUS' })
       }
       if (url.pathname === '/v1/payment_intents/pi_taxed/confirm' && init?.method === 'POST') {
         sent.confirm = body
-        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'processing', amount: 11355, currency: 'usd', client_secret: 'pi_taxed_secret', payment_method: 'pm_cardUS', livemode: false, metadata: { krabiclaw_payment_id: 'taxed' } })
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'processing', amount: 11355, currency: 'usd', client_secret: 'pi_taxed_secret', payment_method: 'pm_cardUS', livemode: false, metadata: { blawby_payment_id: 'taxed' } })
       }
       throw new Error(`Unexpected Stripe request: ${init?.method} ${url.pathname}`)
     })
@@ -1145,7 +1147,7 @@ async function confirmable(db: D1Database, id: string, holdExpires: string, chec
  const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: `checkout-${id}`, fingerprint: `fingerprint-${id}`, guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'pending' as const, followups_completed: false }
  const threadId = `request-${id}`
  const cancellation = await createReplayableReservationCancelToken(CHECKOUT_REPLY_SECRET, threadId)
- const opening = { id: threadId, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@krabiclaw-proof.com' }), provenance,
+ const opening = { id: threadId, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@mail-fixture.blawby.com' }), provenance,
   cancellation: { token_hash: await hashReservationCancelToken(cancellation.token), expires_at: cancellation.expiresAt, used_at: null } }, created_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
  await db.prepare("UPDATE payments SET return_token_hash=?,return_expires_at='2099-01-01T00:00:00.000Z',review_json=? WHERE id=?").bind(await tokenHash(claim), JSON.stringify({ payment_method_id: 'pm_proof', subtotal: 10000, tax: 0, tax_included: 0, surcharge: 0, total: 10000, reviewed_at: NOW }), id).run()
@@ -1173,7 +1175,7 @@ function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undef
   const [, , resource, id, action] = url.pathname.split('/')
   const paymentId = id?.replace(/^(pi|ch)_/u, '')
   const charge = { id: `ch_${paymentId}`, object: 'charge', livemode: false, amount: 10000, currency: 'usd', created: 1_790_000_000,
-   payment_intent: `pi_${paymentId}`, receipt_url: 'https://pay.stripe.com/receipts/proof', billing_details: { email: 'buyer@krabiclaw-proof.com' } }
+   payment_intent: `pi_${paymentId}`, receipt_url: 'https://pay.stripe.com/receipts/proof', billing_details: { email: 'buyer@mail-fixture.blawby.com' } }
   const intent = () => ({ id: `pi_${paymentId}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000,
    amount_received: statuses[paymentId!] === 'succeeded' ? 10000 : 0, status: statuses[paymentId!], client_secret: `pi_${paymentId}_secret`,
    payment_method: 'pm_proof', latest_charge: ['succeeded', 'requires_capture'].includes(statuses[paymentId!]!) ? charge : null,
@@ -1217,7 +1219,7 @@ function resendOutbox(t: TestContext): string[] {
 /** The business's owner and administrator, who hear about its payouts and plan; its member does not. */
 async function ownersAndAdmins(db: D1Database) {
  for (const role of ['owner', 'admin']) {
-  await db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(role, role, `${role}@krabiclaw-proof.com`).run()
+  await db.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').bind(role, role, `${role}@mail-fixture.blawby.com`).run()
   await db.prepare('INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,?,?,1)').bind(`${role}-member`, ORG, role, role).run()
  }
 }
@@ -1317,9 +1319,18 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
 
   // Stripe sends the guest back before the success webhook arrives.
   statuses.redirect = 'succeeded'
-  const receipt = await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest')
+  const trace = new H3Event(new Request(origin + '/api/public/payments/redirect/return'))
+  const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
+  const returnPayment = (client: typeof requestDb) => completePaymentReturn(client, { ...env, DB: client }, ORG, 'redirect', claim,
+   async () => 'guest', undefined, async () => ({ locale: 'en', source: true }), async () => 'guest')
+  const receipt = await returnPayment(requestDb)
   assert.equal(receipt.state, 'paid')
   if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  assert.equal(receipt.booking?.status, 'confirmed')
+  assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
+  const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
+  // This provider session reads the attorney's availability and its older purchase reads two attribution rows.
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 4 })
   const response = await request('/api/public/booking-requests/' + receipt.conversation_id, { headers: { authorization: `Bearer ${receipt.cancellation_token}` } })
   assert.equal(response.status, 200)
   const { booking } = await response.json() as { booking: { status: string } }
@@ -1328,10 +1339,11 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
   const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.succeeded', account: 'acct_seller', livemode: false,
    data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
   await deliver('redirect')
-  assert.deepEqual(await completePaymentReturn(db, env, ORG, 'redirect', claim, async () => 'guest'), receipt)
+  assert.deepEqual(await returnPayment(db), receipt)
   const booked = await requirePayment(db, ORG, 'redirect')
   assert.ok(booked.subject_id)
   assert.equal(booked.captured_amount, 10000)
+  assert.equal(booked.claimed_user_id, 'guest')
 
   const capture = events.take('payment.captured')
   assert.ok(capture, 'a settled redirect queues the captured payment')
@@ -1356,6 +1368,60 @@ test('a redirect that Stripe captures returns to the guest site and settles one 
  } finally { await runtime.dispose() }
 })
 
+test('the checkout return reuses a booking the webhook saved while Stripe was responding', { timeout: 120_000 }, async t => {
+ const { db, runtime, env: bootEnv, events } = await boot()
+ try {
+  const env = stripeEnv(bootEnv)
+  await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+  const claim = await confirmable(db, 'webhook-wins', inMinutes(15))
+  const host = 'payments.localhost'
+  const language = { locale: 'en', source: true }
+  const plan = await preparePaymentReturn({ query: '?', params: [ORG] }, 'webhook-wins', claim)
+  const row = await db.prepare(plan.query).bind(...plan.params).first()
+  const sealed = await sealPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, claim, row, language)
+  assert.ok(sealed)
+  assert.equal(await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, 'other.localhost', 'webhook-wins', claim, sealed), null)
+  const document = await openPaymentReturnDocument(env.BETTER_AUTH_SECRET, host, 'webhook-wins', claim, sealed)
+  assert.ok(document)
+  const tenant = { query: "SELECT id FROM organization WHERE subdomain=? AND status='active'", params: ['payments'] }
+  const unauthorized = paymentReturnDocumentGuard({ ...tenant, params: ['blawby'] }, document)
+  await assert.rejects(db.batch([db.prepare(unauthorized.query).bind(...unauthorized.params ?? [])]), /PAYMENT_RETURN_DOCUMENT_STALE/)
+  const trace = new H3Event(new Request('http://payments.localhost/api/public/payments/webhook-wins/return'))
+  const requestDb = instrumentD1(trace, db.withSession('first-primary'), db)
+  let webhook: Promise<void> | undefined
+  const calls = fakeStripe(t, async (url, init) => {
+   if (!webhook && init?.method === 'GET' && url.pathname === '/v1/payment_intents/pi_webhook-wins') {
+    webhook = processPaymentEvent(db, stripe, { id: 'evt_webhook_wins', type: 'payment_intent.succeeded', account: 'acct_seller',
+     livemode: false, data: { object: { id: 'pi_webhook-wins', metadata: { blawby_payment_id: 'webhook-wins' } } } } as unknown as Stripe.Event, env)
+    await webhook
+   }
+   return null
+  }, { 'webhook-wins': 'succeeded' })
+  const stripe = getStripe(env)
+  const receipt = await completePaymentReturn(requestDb, { ...env, DB: requestDb }, ORG, 'webhook-wins', claim,
+   async () => 'guest', undefined, async () => language, async () => 'guest',
+   { ...document, userId: 'guest', guard: paymentReturnDocumentGuard(tenant, document) })
+  assert.ok(webhook)
+  await webhook
+  assert.equal(receipt.state, 'paid')
+  if (receipt.state !== 'paid' || receipt.kind !== 'booking') throw new Error('Expected a booking receipt')
+  assert.equal(receipt.booking?.status, 'confirmed')
+  assert.deepEqual(receipt.booking?.paid, { amount: 10000, currency: 'USD' })
+  const result = await db.prepare(`SELECT b.status,p.captured_amount,p.claimed_user_id FROM bookings b
+    JOIN conversations c ON c.booking_id=b.id AND c.organization_id=b.organization_id
+    JOIN payments p ON p.subject_id=b.id AND p.organization_id=b.organization_id WHERE c.id=?`).bind(receipt.conversation_id).first()
+  assert.deepEqual(result, { status: 'confirmed', captured_amount: 10000, claimed_user_id: 'guest' })
+  assert.equal((await holdOf(db, 'webhook-wins'))?.status, 'converted')
+  assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
+  assert.deepEqual(calls.refund, [])
+  assert.ok(events.take('payment.captured'))
+  assert.equal(events.take('payment.captured'), undefined)
+  const { batchRoundTrips, singleStatementRoundTrips } = getRequestDataMetrics(trace)
+  // This fixture reads the provider and legacy attribution while preparing the guarded batch.
+  assert.deepEqual({ batchRoundTrips, singleStatementRoundTrips }, { batchRoundTrips: 1, singleStatementRoundTrips: 3 })
+ } finally { await runtime.dispose() }
+})
+
 test('an authorization that lost its capacity is cancelled and never charged; capture failures are settled against the booking that exists', { timeout: 120_000 }, async t => {
  const { db, runtime, env: bootEnv, events } = await boot()
  try {
@@ -1367,7 +1433,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
    return null
   }, statuses)
   const stripe = getStripe(env)
-  const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
+  const deliver = (id: string, event = `evt_${id}`) => processPaymentEvent(db, stripe, { id: event, type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { blawby_payment_id: id } } } } as unknown as Stripe.Event, env)
   const bookingsOf = (id: string) => db.prepare('SELECT count(*) n FROM bookings b JOIN payment_checkout_holds h ON h.converted_booking_id=b.id WHERE h.payment_id=?').bind(id).first('n')
 
   // Someone booked the last seat while this purchase was authorizing.
@@ -1391,7 +1457,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   await assert.rejects(() => deliver('voided'))
   assert.equal(await bookingsOf('voided'), 1)
   statuses.voided = 'canceled'
-  await processPaymentEvent(db, stripe, { id: 'evt_voided_canceled', type: 'payment_intent.canceled', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_voided', metadata: { krabiclaw_payment_id: 'voided' } } } } as unknown as Stripe.Event, env)
+  await processPaymentEvent(db, stripe, { id: 'evt_voided_canceled', type: 'payment_intent.canceled', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_voided', metadata: { blawby_payment_id: 'voided' } } } } as unknown as Stripe.Event, env)
   await events.runNext(env, 'payment.financial')
   assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE conversation_id='request-voided' AND event_name='payment.payment_failed'").first('n'), 1)
   assert.equal(await bookingsOf('voided'), 1)
@@ -1415,11 +1481,11 @@ test('a bank debit that loses its seat is cancelled, and a clearing retry record
    }
    if (statuses[id] !== 'processing') return null
    return Response.json({ id: `pi_${id}`, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000,
-    status: 'processing', payment_method: { id: 'pm_proof', type: 'us_bank_account' }, metadata: { krabiclaw_payment_id: id } })
+    status: 'processing', payment_method: { id: 'pm_proof', type: 'us_bank_account' }, metadata: { blawby_payment_id: id } })
   }, statuses)
   const stripe = getStripe(env)
   const deliver = (id: string, event: string, type: string) => processPaymentEvent(db, stripe, { id: event, type, account: 'acct_seller', livemode: false,
-   data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as unknown as Stripe.Event, env)
+   data: { object: { id: `pi_${id}`, metadata: { blawby_payment_id: id } } } } as unknown as Stripe.Event, env)
 
   await confirmable(db, 'taken', inMinutes(30))
   const seat = await claimSessionCapacity(db, { websiteSource: null, policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
@@ -1540,8 +1606,8 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
   await deliver('paid')
   const mail = sentMail(emails)
   assert.deepEqual(mail.map(sent => [sent.subject, String(sent.to)]).sort(), [
-   ['Payout failed', 'admin@krabiclaw-proof.com'], ['Payout failed', 'owner@krabiclaw-proof.com'],
-   ['Payout paid', 'admin@krabiclaw-proof.com'], ['Payout paid', 'owner@krabiclaw-proof.com'],
+   ['Payout failed', 'admin@mail-fixture.blawby.com'], ['Payout failed', 'owner@mail-fixture.blawby.com'],
+   ['Payout paid', 'admin@mail-fixture.blawby.com'], ['Payout paid', 'owner@mail-fixture.blawby.com'],
   ], 'owners and admins hear; the business\'s member does not')
   for (const sent of mail) {
    assert.match(sent.html, /\$250\.00 USD/u)
@@ -1552,11 +1618,30 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
   // Each send is recorded as sent by Resend, to the person it went to.
   const receipts = (await db.prepare("SELECT provider, status, json_extract(email_json, '$.message.subject') subject, json_extract(email_json, '$.message.to') recipient FROM guest_thread_deliveries WHERE channel = 'email' ORDER BY subject, recipient").all()).results
   assert.deepEqual(receipts, [
-   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'admin@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'owner@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@krabiclaw-proof.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@krabiclaw-proof.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'admin@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'owner@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@mail-fixture.blawby.com' },
   ])
+ } finally { await runtime.dispose() }
+})
+
+test('Better Auth trusts billing and connection callbacks from either registered app scheme', async t => {
+ const { runtime, env } = await boot()
+ try {
+  const fetchNetwork = globalThis.fetch
+  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+   const url = new URL(request instanceof Request ? request.url : String(request))
+   return (url.hostname === 'api.stripe.com' && publishedCatalogResponse(url)) || fetchNetwork(request, init)
+  })
+  const auth = await createAuth(stripeEnv(env)).$context
+  for (const scheme of ['blawby', 'krabiclaw']) {
+   assert.equal(auth.isTrustedOrigin(`${scheme}://billing/success`), true)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://connections/google-calendar`), true)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://invitation?id=example`), false)
+   assert.equal(auth.isTrustedOrigin(`${scheme}://billing.example/success`), false)
+  }
+  assert.equal(auth.isTrustedOrigin('https://appleid.apple.com'), true)
  } finally { await runtime.dispose() }
 })
 
@@ -1585,7 +1670,7 @@ test('the Stripe renewal closes the old meter before delivering usage held for i
   t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
    const url = new URL(request instanceof Request ? request.url : String(request))
    if (url.hostname !== 'api.stripe.com') return realFetch(request, init)
-   const catalog = publishedCatalogResponse(url)
+   const catalog = publishedCatalogResponse(url, 'legacy')
    if (catalog) {
     const list = await catalog.json() as { data: Array<{ id: string; event_name?: string; recurring?: { meter: string } }> }
     const additional = url.pathname === '/v1/prices'
@@ -1682,7 +1767,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
    const url = new URL(request instanceof Request ? request.url : String(request))
    if (url.hostname === 'api.resend.com' && init?.method === 'POST') {
     const mail = JSON.parse(String(init.body)) as { subject: string; to: string[] }
-    if (refuseEndingOwnerEmail && mail.subject === 'Your Business plan will not renew' && mail.to.includes('owner@krabiclaw-proof.com')) {
+    if (refuseEndingOwnerEmail && mail.subject === 'Your Business plan will not renew' && mail.to.includes('owner@mail-fixture.blawby.com')) {
      refuseEndingOwnerEmail = false
      return Response.json({ name: 'internal_server_error', message: 'Plan email temporarily unavailable' }, { status: 500 })
     }
@@ -1713,7 +1798,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   await deliver({ id: 'evt_checkout_created', type: 'customer.subscription.created', data: { object: trialing } })
   assert.equal(emails.length, 0, 'the Checkout subscription has one start notice on completion')
   await deliver({ id: 'evt_checkout', type: 'checkout.session.completed', data: { object: { id: 'cs_plan', object: 'checkout.session', mode: 'subscription', subscription: 'sub_plan', client_reference_id: ORG, metadata: { subscriptionId: 'sub-row', referenceId: ORG } } } })
-  assert.deepEqual(subjects(), [['Your new plan: Growth', 'admin@krabiclaw-proof.com'], ['Your new plan: Growth', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(subjects(), [['Your new plan: Growth', 'admin@mail-fixture.blawby.com'], ['Your new plan: Growth', 'owner@mail-fixture.blawby.com']])
   const started = sentMail(emails)[0]!.html
   assert.match(started, /Payments is on Growth\./u)
   assert.match(started, /Free trial ends/u)
@@ -1727,7 +1812,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   // A renewal changes the subscription without changing its plan.
   await deliver({ id: 'evt_renewed', type: 'customer.subscription.updated', data: { object: subscription('business'), previous_attributes: { latest_invoice: 'in_previous' } } })
   assert.equal(emails.length, 4)
-  assert.deepEqual(subjects().slice(2), [['Your plan changed to Business', 'admin@krabiclaw-proof.com'], ['Your plan changed to Business', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(subjects().slice(2), [['Your plan changed to Business', 'admin@mail-fixture.blawby.com'], ['Your plan changed to Business', 'owner@mail-fixture.blawby.com']])
   assert.match(sentMail(emails)[2]!.html, /Payments moved from Growth to Business\./u)
 
   // A trial set to end sends a notice too. Stripe retries only the failed delivery.
@@ -1739,7 +1824,7 @@ test('Better Auth Stripe tells the business its new plan, its change of plan and
   await deliver(ending)
   assert.equal(emails.length, 6)
   const notRenewing = sentMail(emails).slice(4)
-  assert.deepEqual(notRenewing.map(sent => [sent.subject, String(sent.to)]).sort(), [['Your Business plan will not renew', 'admin@krabiclaw-proof.com'], ['Your Business plan will not renew', 'owner@krabiclaw-proof.com']])
+  assert.deepEqual(notRenewing.map(sent => [sent.subject, String(sent.to)]).sort(), [['Your Business plan will not renew', 'admin@mail-fixture.blawby.com'], ['Your Business plan will not renew', 'owner@mail-fixture.blawby.com']])
   assert.match(notRenewing[0]!.html, /Business stays on until Oct 21, 2026\. After that, Payments is on Basic\./u)
 
   // Read back apart from the sends: Better Auth's subscription, and each email Resend accepted.

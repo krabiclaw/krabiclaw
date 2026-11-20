@@ -1,5 +1,13 @@
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxPhoto, InboxThreadKind } from '~/server/domain/guest-threads/types'
 
+export const PLATFORM_MESSAGE_AUTHOR_KIND = 'blawby'
+export const PLATFORM_MESSAGE_AUTHOR_KINDS = [PLATFORM_MESSAGE_AUTHOR_KIND, 'krabiclaw'] as const
+export const PLATFORM_MESSAGE_AUTHOR_KINDS_SQL = PLATFORM_MESSAGE_AUTHOR_KINDS.map(value => `'${value}'`).join(', ')
+
+export function isPlatformMessageAuthor(value: string): value is typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number] {
+  return PLATFORM_MESSAGE_AUTHOR_KINDS.some(author => author === value)
+}
+
 export type ConversationViewerRole = 'guest' | 'member'
 
 export function guestConversationPath(orgSlug: string, conversationId: string): string {
@@ -33,7 +41,7 @@ export interface ConversationMessage {
   sequence: number
   author_user_id: string | null
   /** Who wrote it, as stored: the guest's own words, a member, or Blawby (a booking's opening, a support mirror). `side` is where it is drawn. */
-  author_kind: 'guest' | 'member' | 'krabiclaw'
+  author_kind: 'guest' | 'member' | typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number]
   side: 'guest' | 'business'
   author: string
   automatic: boolean

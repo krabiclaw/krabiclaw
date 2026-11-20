@@ -86,7 +86,7 @@ useHead(() => {
     htmlAttrs: { lang: activeLocale.value },
     link: [
       { rel: 'preconnect', href: 'https://imagedelivery.net' },
-      { rel: 'preconnect', href: 'https://media.krabiclaw.com' },
+      { rel: 'preconnect', href: 'https://media.blawby.com' },
       ...(import.meta.dev ? [] : [{
         key: 'tenant-surface-stylesheet',
         rel: 'stylesheet' as const,

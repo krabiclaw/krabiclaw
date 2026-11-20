@@ -28,6 +28,19 @@ test('unknown sites render an unbranded 404 while resolved tenant errors retain 
   expect(errors).toEqual([])
 })
 
+test('old public logo URLs redirect to the renamed PNG assets', async ({ request, baseURL }) => {
+  for (const asset of ['logo', 'logo-192', 'maskable-192', 'maskable-512']) {
+    const target = `/blawby-${asset}.png`
+    const legacy = await request.get(`/krabi-claw-${asset}.png`, { maxRedirects: 0 })
+    expect(legacy.status()).toBe(301)
+    expect(new URL(legacy.headers().location!, baseURL).pathname).toBe(target)
+    const image = await request.get(target)
+    expect(image.status()).toBe(200)
+    expect(image.headers()['content-type']).toContain('image/png')
+    expect((await image.body()).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
+  }
+})
+
 test('the platform publishes its localized homepage and includes its canonical URL in the sitemap', async ({ page, request, baseURL }) => {
   const translations = [
     ['ja', 'ウェブサイトを数分で公開'],
@@ -59,6 +72,7 @@ test('tenant blog search opens an article from its body and excludes another ten
   const articleTitle = 'Preparing for your legal consultation'
   await openTenantPage(page, new URL('/blog', seededSiteURL('legal')).href, seededSiteHeaders('legal'))
   await waitForNuxtHydration(page)
+  await expect(page.locator('link[rel=preconnect][href="https://media.blawby.com"]')).toHaveCount(1)
   await page.getByRole('button', { name: /search/i }).filter({ visible: true }).first().click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('textbox').fill('relevant documents')
@@ -273,11 +287,11 @@ test('dashboard search opens the signed-in business’s record', async ({ page, 
   expect(otherSite.status(), await otherSite.text()).toBe(404)
 })
 
-test('ChowBot uses Blawby’s domain setup guidance to answer a paraphrased question', async ({ page }) => {
+test('Blawby Support uses Blawby’s domain setup guidance to answer a paraphrased question', async ({ page }) => {
   test.slow()
   await page.goto('/help')
   await waitForNuxtHydration(page)
-  await page.getByPlaceholder('Ask ChowBot anything...').fill('What DNS records do I need to point my domain at my site?')
+  await page.getByPlaceholder('Ask Blawby Support…').fill('What DNS records do I need to point my domain at my site?')
   const response = page.waitForResponse(result => result.url().endsWith('/api/public/help/agent'))
   await page.getByRole('button', { name: 'Send message' }).click()
   const answer = await response
@@ -289,4 +303,40 @@ test('ChowBot uses Blawby’s domain setup guidance to answer a paraphrased ques
   })]))
   expect(body.reply).toMatch(/DNS/i)
   await expect(page.locator('.prose').filter({ hasText: /DNS/i })).toBeVisible()
+})
+
+test('Blawby Support sends an escalated chat to the platform inbox', async ({ page, browser, baseURL }) => {
+  test.slow()
+  const message = 'I cannot access my account and would like to open a support case.'
+  await page.goto('/help')
+  await waitForNuxtHydration(page)
+  await expect(page.getByRole('heading', { name: 'Blawby Support', exact: true })).toBeVisible()
+  await expect(page.getByText(/Hi, I’m Blawby Support/)).toBeVisible()
+  await page.getByPlaceholder('Ask Blawby Support…').fill(message)
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await page.getByRole('button', { name: 'Create support case', exact: true }).click()
+
+  const form = page.getByRole('dialog', { name: 'Support case' })
+  await expect(form.getByRole('textbox', { name: 'Topic' })).not.toHaveValue('')
+  await expect(form.getByRole('textbox', { name: 'Message' })).toHaveValue(new RegExp(message.replace(/\./g, '\\.')))
+  await form.getByRole('textbox', { name: 'Name' }).fill('Support Journey')
+  await form.getByRole('textbox', { name: 'Email' }).fill('support-journey@playwright.example')
+  await form.getByRole('checkbox', { name: /I consent/ }).check()
+
+  const submission = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/contact' && response.request().method() === 'POST')
+  await form.getByRole('button', { name: 'Send support request' }).click()
+  const sent = await submission
+  expect(sent.status(), await sent.text()).toBe(201)
+  const { conversation_id } = await sent.json() as { conversation_id: string }
+  await expect(page.getByText('Thanks. Your support request is on its way and the team will follow up by email.')).toBeVisible()
+
+  const owner = await browser.newContext()
+  try {
+    await loginAs(owner.request, baseURL!)
+    const inbox = await owner.newPage()
+    await openTenantPage(inbox, new URL(`/dashboard/platform/messages/${conversation_id}`, baseURL).href, {})
+    await expect(inbox.locator('[data-message]').first()).toContainText(message)
+  } finally {
+    await owner.close()
+  }
 })

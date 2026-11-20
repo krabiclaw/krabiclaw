@@ -73,20 +73,28 @@ for (const row of rows) {
   if (!row.stripeCustomerId) throw new Error(`Subscription ${row.id} has no Stripe customer`)
   // The plan's metered prices, as its Checkout adds them; what they bill is reported to their meters.
   const lineItems = (plan.lineItems ?? []).map(item => ({ price: item.price as string }))
-  const source = { krabiclaw_source_customer: row.stripeCustomerId, krabiclaw_organization: row.referenceId }
+  const source = { blawby_source_customer: row.stripeCustomerId, blawby_organization: row.referenceId }
   // Invoice billing needs an address; example.com receives nothing.
   const email = `test-mode-billing+${row.referenceId.toLowerCase().replace(/[^a-z0-9-]/g, '')}@example.com`
-  const found = (await stripe.customers.search({ query: `metadata['krabiclaw_source_customer']:'${row.stripeCustomerId}'` })).data[0]
+  const customers = await stripe.customers.search({
+    query: `metadata['blawby_source_customer']:'${row.stripeCustomerId}' OR metadata['krabiclaw_source_customer']:'${row.stripeCustomerId}'`,
+  })
+  if (customers.has_more || customers.data.length > 1) throw new Error(`Multiple test-mode customers match ${row.referenceId}'s source customer`)
+  const found = customers.data[0]
   const customer = found
     ? (found.email ? found : await stripe.customers.update(found.id, { email }))
     : await stripe.customers.create({ name: row.name ?? row.referenceId, email, metadata: source }, { idempotencyKey: `test-mode-billing:customer:v2:${row.stripeCustomerId}` })
-  const subscription = (await stripe.subscriptions.search({ query: `metadata['krabiclaw_source_subscription']:'${row.stripeSubscriptionId}'` })).data.find(found => found.status !== 'canceled')
-    ?? await stripe.subscriptions.create({
+  const subscriptions = await stripe.subscriptions.search({
+    query: `metadata['blawby_source_subscription']:'${row.stripeSubscriptionId}' OR metadata['krabiclaw_source_subscription']:'${row.stripeSubscriptionId}'`,
+  })
+  const active = subscriptions.data.filter(found => found.status !== 'canceled')
+  if (subscriptions.has_more || active.length > 1) throw new Error(`Multiple test-mode subscriptions match ${row.referenceId}'s source subscription`)
+  const subscription = active[0] ?? await stripe.subscriptions.create({
       customer: customer.id,
       items: [{ price: planPrice, quantity: 1 }, ...lineItems],
       collection_method: 'send_invoice',
       days_until_due: 30,
-      metadata: { ...source, krabiclaw_source_subscription: row.stripeSubscriptionId!, referenceId: row.referenceId, plan: row.plan },
+      metadata: { ...source, blawby_source_subscription: row.stripeSubscriptionId!, referenceId: row.referenceId, plan: row.plan },
     }, { idempotencyKey: `test-mode-billing:subscription:v4:${row.stripeSubscriptionId}` })
   // A subscription found by its source ID is used only if it is the one made for this row.
   if (customerOf(subscription) !== customer.id || subscription.metadata.referenceId !== row.referenceId || subscription.metadata.plan !== row.plan || !['active', 'trialing', 'past_due'].includes(subscription.status)) {

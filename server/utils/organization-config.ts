@@ -130,26 +130,31 @@ export const deleteConfig = async (
   if (result.meta?.changes !== 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Organization ownership changed. Reload before saving.' })
 }
 
+export const PUBLIC_CONFIG_COLUMNS = `${CONFIG_COLUMNS},
+  json_extract(o.settings_json, '$.config.announcement') AS announcement_json,
+  (SELECT ma.public_url FROM media_placements mp
+    JOIN media_assets ma ON ma.id = mp.asset_id AND ma.status = 'active'
+    WHERE mp.organization_id = o.id AND mp.owner_type = 'organization' AND mp.owner_id = o.id
+      AND mp.slot = 'announcement' AND mp.sort_order = 0 AND mp.status = 'active' LIMIT 1) AS announcement_public_url`
+
+export type PublicConfigRow = ConfigRow & {
+  default_currency: string | null
+  announcement_json: string | null
+  announcement_public_url: string | null
+}
+
 /** Canonical public site settings and announcement, shared by API and SSR. */
 export async function getPublicConfig(db: DbClient, organizationId: string, options: { previewAuthorized?: boolean } = {}) {
-  const organization = await queryFirst<ConfigRow & {
-    default_currency: string
-    announcement_json: string | null
-    announcement_public_url: string | null
-  }>(db, `
-    SELECT ${CONFIG_COLUMNS}, o.default_currency,
-           json_extract(o.settings_json, '$.config.announcement') AS announcement_json,
-           ama.public_url AS announcement_public_url
-      FROM organization o
-      LEFT JOIN media_placements amp ON amp.organization_id = o.id AND amp.owner_type = 'organization'
-        AND amp.owner_id = o.id AND amp.slot = 'announcement' AND amp.sort_order = 0 AND amp.status = 'active'
-      LEFT JOIN media_assets ama ON ama.id = amp.asset_id AND ama.status = 'active'
+  const organization = await queryFirst<PublicConfigRow>(db, `
+    SELECT ${PUBLIC_CONFIG_COLUMNS}, o.default_currency FROM organization o
      WHERE o.id = ? AND ${publicTenantVisibilitySql('o', options.previewAuthorized)}
      LIMIT 1
   `, [organizationId])
-
   if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  return publicConfigFromRow(organization)
+}
 
+export function publicConfigFromRow(organization: PublicConfigRow) {
   const parsedAnnouncement = organization.announcement_json ? JSON.parse(organization.announcement_json) : null
   const announcement = parsedAnnouncement && parsedAnnouncement.enabled === true
     ? {

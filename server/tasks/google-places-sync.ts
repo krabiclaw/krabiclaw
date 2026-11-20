@@ -89,7 +89,7 @@ export default defineScheduledTask({
         organizationId: loc.organization_id,
         resource: 'scheduled_task',
         source: 'google_places_sync',
-        provider: 'krabiclaw',
+        provider: 'blawby',
         channel: 'google_places',
         quantity: 1,
         unit: 'location_sync',

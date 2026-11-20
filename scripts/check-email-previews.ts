@@ -20,10 +20,10 @@ for (const entry of NOTIFICATION_CATALOG) {
   try {
     const unsubscribeUrl = entry.message.category === 'product_news'
       ? '{{{RESEND_UNSUBSCRIBE_URL}}}'
-      : 'https://krabiclaw.com/unsubscribe?x=preview'
+      : 'https://blawby.com/unsubscribe?x=preview'
     const { html, text } = await renderNotificationEmail(entry.message, {
-      platformDomain: 'krabiclaw.com',
-      preferencesUrl: 'https://krabiclaw.com/dashboard/account/profile/notifications',
+      platformDomain: 'blawby.com',
+      preferencesUrl: 'https://blawby.com/dashboard/account/profile/notifications',
       // Supplying this to every purpose proves the renderer itself keeps
       // transactional mail free of unsubscribe controls.
       unsubscribeUrl,
@@ -36,6 +36,10 @@ for (const entry of NOTIFICATION_CATALOG) {
     if (tenant && html.includes('/platform/blawby-512.png')) failures.push(`${entry.id} is ${tenant}'s mail and carries Blawby's mark`)
     if (tenant && entry.message.organizationLogoUrl && !html.includes(entry.message.organizationLogoUrl)) {
       failures.push(`${entry.id} is ${tenant}'s mail and does not carry its logo`)
+    }
+    const isPublicAction = entry.message.primaryAction && !entry.message.primaryAction.url.includes('/dashboard/')
+    if (isPublicAction && !html.includes('utm_content=primary_cta')) {
+      failures.push(`${entry.id} does not tag primaryAction with utm_content=primary_cta`)
     }
     const heroImages = [...html.matchAll(/<img\b[^>]*\bclass="[^"]*\bemail-hero-img\b[^"]*"[^>]*>/gi)]
     if (heroImages.length !== (entry.message.hero ? 1 : 0)) {

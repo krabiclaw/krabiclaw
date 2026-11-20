@@ -12,7 +12,7 @@ test('accepts loopback HTTP origins on arbitrary development ports', () => {
 })
 
 test('E2E auth rate-limit bypass requires the enabled environment and matching secret', () => {
-  const request2 = (secret?: string) => new Request('https://staging.krabiclaw.com/api/auth/sign-in/email', {
+  const request2 = (secret?: string) => new Request('https://staging.blawby.com/api/auth/sign-in/email', {
     headers: secret ? { 'x-dev-route-secret': secret } : {},
   })
 

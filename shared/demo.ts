@@ -20,6 +20,9 @@ export const DEMO_SUBDOMAINS = new Set([
 ])
 
 export const DEMO_HOSTS = new Set([
+  'demo.blawby.com',
+  'saltleaf-stays-demo.blawby.com',
+  'cedar-legal.blawby.com',
   'demo.krabiclaw.com',
   'demo.localhost',
   'cedar-legal.krabiclaw.com',

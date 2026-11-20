@@ -17,6 +17,7 @@ import { approvedStayBooking, assertMinorAmount, type ApprovedStayBooking, type 
 import { isCurrencyCode } from '~/shared/currencies'
 import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
 import type { CheckoutStay, StayQuote } from '~/server/domain/stays'
+import type { readCheckoutSeller } from '~/server/utils/billing-access'
 import { createWithStripeMetadata } from './stripe-metadata'
 
 interface CheckoutInputBase {
@@ -29,6 +30,7 @@ interface CheckoutInputBase {
   quantity: number
   idempotencyKey: string
   previous: CheckoutAttempt | undefined
+  seller?: Awaited<ReturnType<typeof readCheckoutSeller>>
   following: (paymentId: string) => BatchQuery[]
   /**
    * The guest's own browser request and the pageview it came from, which say
@@ -203,7 +205,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     // The terms the guest booked under are frozen with the purchase, as a session booking's are.
     policy = input.terms.policy
   }
-  const acceptance = previous ? null : await requireStripeCheckoutAcceptance(db, env, input.organizationId)
+  const acceptance = previous ? null : await requireStripeCheckoutAcceptance(db, env, input.organizationId, input.seller)
   if (acceptance) {
     connected = acceptance.connected
     methodConfigurationId = acceptance.methodConfigurationId

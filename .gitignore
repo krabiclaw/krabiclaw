@@ -37,21 +37,20 @@ pr_body.txt
 
 # Installed agent skills (npx skills add …) — only the in-house ones are tracked
 /.agents/skills/*
-!/.agents/skills/krabiclaw-marketing/
-/.agents/skills/krabiclaw-marketing/*
-!/.agents/skills/krabiclaw-marketing/SKILL.md
-!/.agents/skills/krabiclaw-marketing/product-profile.md
-!/.agents/skills/krabiclaw-marketing/recording/
-!/.agents/skills/krabiclaw-marketing/film/
+!/.agents/skills/blawby-marketing/
+/.agents/skills/blawby-marketing/*
+!/.agents/skills/blawby-marketing/SKILL.md
+!/.agents/skills/blawby-marketing/product-profile.md
+!/.agents/skills/blawby-marketing/recording/
+!/.agents/skills/blawby-marketing/film/
 !/.agents/skills/write-help-docs/
-!/.agents/skills/krabiclaw-publishing/
-/.agents/skills/krabiclaw-publishing/*
-!/.agents/skills/krabiclaw-publishing/SKILL.md
+!/.agents/skills/blawby-publishing/
+/.agents/skills/blawby-publishing/*
+!/.agents/skills/blawby-publishing/SKILL.md
 /.claude/worktrees/
 .codex/*
 !.codex/config.toml
 !.codex/hooks/
-!.codex/hooks/block_prod_krabiclaw.py
 
 # Playwright browser binaries (installed locally, not committed)
 .playwright/

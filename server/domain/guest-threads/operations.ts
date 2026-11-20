@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent } from '~/server/events'
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
@@ -192,7 +193,7 @@ async function operationEntryQueries(
       ${inventory ? `AND ${inventory.query}` : ''}`
     : `src.product_session_id IS NOT NULL AND src.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')`
   return messageQueries({
-    id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId,
+    id: entryId, conversationId: context.thread.id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: input.actorUserId,
     body: null, eventName: `${plan.kind}.${plan.action}`, dedupeKey, occurredAt: now,
     payload: {
       action: plan.action, beforeStatus: plan.beforeStatus, afterStatus: plan.afterStatus,
@@ -542,7 +543,7 @@ export async function deliverGuestReply(db: DbClient, input: ReplyInput, append:
   const guestEmail = destination.channel === 'email' || destination.channel === 'account' ? destination.email : null
   const messageChannel = recorded?.channel ?? (channel ? 'airbnb' : guestEmail ? 'email' : 'web')
   const commit = () => append(db, {
-    conversation: thread, role: 'member', authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: recordedAuthor,
+    conversation: thread, role: 'member', authorKind: actorUserId === null ? PLATFORM_MESSAGE_AUTHOR_KIND : 'member', authorUserId: recordedAuthor,
     channel: messageChannel, body: messageChannel === 'airbnb' ? body : body || null, eventName, payload: { request_hash: requestHash }, dedupeKey,
   }, {
     env: input.env, photos: photoInput, uploaderUserId: actorUserId, recorded, retryMessageId,
@@ -643,7 +644,7 @@ export type GuestReplyDestination =
   | { channel: 'account'; email: string | null }
   | { channel: null; reason: string }
 
-type GuestReplyAccount = { email: string | null; readable: number }
+export type GuestReplyAccount = { email: string | null; readable: number }
 /**
  * The one rule for whether, and where, a member can reply to a guest. The reply
  * operation sends by it and refuses before any send when it says nowhere; the
@@ -654,10 +655,16 @@ type GuestReplyAccount = { email: string | null; readable: number }
  * (a direct stay's current contact), or their Blawby account inbox, also
  * emailed when that account has a verified email.
  */
+export function guestReplyAccountQuery(user: BatchQuery): BatchQuery {
+  return { query: `SELECT CASE WHEN "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0 THEN email END AS email,
+      COALESCE("isAnonymous", 0) = 0 OR EXISTS (SELECT 1 FROM session WHERE session."userId" = user.id) AS readable FROM user WHERE id IN (${user.query})`, params: user.params }
+}
+
 export async function guestReplyDestination(
   db: DbClient,
   thread: Pick<GuestRequest, 'id' | 'organization_id' | 'user_id' | 'payload'>,
   channelFacts?: Awaited<ReturnType<typeof guestThreadChannel>>,
+  knownAccount?: GuestReplyAccount | null,
 ): Promise<GuestReplyDestination> {
   const facts = channelFacts === undefined ? await guestThreadChannel(db, thread.id, thread.organization_id) : channelFacts
   if (!facts) throw new Error(`Conversation ${thread.id} has no channel facts`)
@@ -669,8 +676,8 @@ export async function guestReplyDestination(
   if (thread.user_id === null) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
   // An account inbox is read by whoever signs in to it: a named account, or an anonymous guest's browser while it is signed in.
   // The anonymous user a host or a channel gave a guest has never been signed in to, so nobody reads it.
-  const account = await queryFirst<GuestReplyAccount>(db, `SELECT CASE WHEN "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0 THEN email END AS email,
-      COALESCE("isAnonymous", 0) = 0 OR EXISTS (SELECT 1 FROM session WHERE session."userId" = user.id) AS readable FROM user WHERE id = ?`, [thread.user_id])
+  const { query, params } = guestReplyAccountQuery({ query: 'SELECT ?', params: [thread.user_id] })
+  const account = knownAccount === undefined ? await queryFirst<GuestReplyAccount>(db, query, params) : knownAccount
   if (!account?.readable) return { channel: null, reason: GUEST_UNREACHABLE_MESSAGE }
   return { channel: 'account', email: account.email }
 }

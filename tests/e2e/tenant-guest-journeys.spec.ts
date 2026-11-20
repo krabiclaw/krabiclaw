@@ -247,6 +247,23 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     }
   })
 
+  test('Messages preserves a saved suggested replies preference when the storage key changes', async ({ page }) => {
+    const user = 'user-e2e-pottery-owner'
+    const organization = seededTenant('experience')
+    const legacyKey = `krabiclaw.suggested-replies.${user}.${organization.organizationId}`
+    const key = `blawby.suggested-replies.${user}.${organization.organizationId}`
+    await loginAs(page.request, testBaseUrl(), user)
+    await page.addInitScript(previousKey => localStorage.setItem(previousKey, 'false'), legacyKey)
+    await openTenantPage(page, `${testBaseUrl()}/dashboard/${organization.slug}/messages`, {})
+    await page.getByRole('button', { name: 'Messaging settings' }).click()
+    const setting = page.getByRole('switch', { name: 'Suggested replies' })
+    await expect(setting).toHaveAttribute('aria-checked', 'false')
+    expect(await page.evaluate(storageKey => localStorage.getItem(storageKey), legacyKey)).toBeNull()
+    expect(await page.evaluate(storageKey => localStorage.getItem(storageKey), key)).toBe('false')
+    await setting.click()
+    await expect.poll(() => page.evaluate(storageKey => localStorage.getItem(storageKey), key)).toBe('true')
+  })
+
   test('Clayhouse Studio contact persists and creates an owner notification', async ({ page, request, browser }) => {
     const since = new Date().toISOString()
     const email = `pottery-contact-${Date.now()}@playwright.example`

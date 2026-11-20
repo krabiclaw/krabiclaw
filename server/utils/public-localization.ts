@@ -9,8 +9,8 @@ import {
 } from '~/server/utils/localization-registry'
 import { PRODUCT_DETAIL_FIELDS, projectStayAlarmDetails, type ProductKind } from '~/shared/product-details'
 import { isStayAmenityAnswers } from '~/shared/stay-listing'
-import { HTTPError } from 'nitro'
-import { queryAll, type DbClient } from '~/server/db'
+import { HTTPError, type H3Event } from 'nitro'
+import { queryAll, type BatchQuery, type DbClient } from '~/server/db'
 import { assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { isRecord } from '~/server/utils/type-guards'
 import { formQuestionLocalizationSchema, localizeFormQuestions, type FormQuestion } from '~/shared/form-questions'
@@ -40,14 +40,25 @@ export async function loadExactPublicLocalizations(
 ): Promise<ExactPublicLocalization[]> {
   const language = await assertPublicOrganizationLanguage(db, organizationId, locale)
   if (language.source) throw new HTTPError({ statusCode: 404, statusMessage: 'Primary-language routes are unprefixed' })
-  const rows = await queryAll<StoredPublicLocalizationRow>(db, `
+  const { query, params } = publicLocalizationsQuery(organizationId, locale)
+  return indexStoredPublicLocalizations(await queryAll<StoredPublicLocalizationRow>(db, query, params))
+}
+
+export function publicLocalizationsQuery(organizationId: string | { sql: string }, locale: string, shell = false): BatchQuery {
+  const organization = typeof organizationId === 'string' ? '?' : organizationId.sql
+  return { query: `
     SELECT rl.resource_type, rl.resource_id, rl.locale, rl.values_json, rl.route_path, p.kind AS product_kind
       FROM ${RESOURCE_LOCALIZATIONS_SQL} rl
       LEFT JOIN products p ON rl.resource_type = 'product' AND p.id = rl.resource_id AND p.organization_id = rl.organization_id
-     WHERE rl.organization_id = ?  AND rl.locale = ?
+     WHERE rl.organization_id = ${organization} AND rl.locale = ?
+       ${shell ? "AND rl.resource_type IN ('organization', 'business_location')" : ''}
      ORDER BY rl.resource_type, rl.resource_id
-  `, [organizationId, locale])
-  return indexStoredPublicLocalizations(rows)
+  `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), locale] }
+}
+
+export function preloadedPublicLocalizations(event: H3Event, organizationId: string, locale: string) {
+  const stored = event.context.publicDocumentLocalizations as { organizationId: string; locale: string; rows: StoredPublicLocalizationRow[] } | undefined
+  if (stored?.organizationId === organizationId && stored.locale === locale) return stored.rows
 }
 
 function localizedSlug(routePath: string | null): string | null {

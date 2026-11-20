@@ -1,7 +1,7 @@
 import { createWithStripeMetadata, stripeMetadataId } from './stripe-metadata'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
-import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -28,9 +28,19 @@ export function approvedStayBooking(snapshot: Record<string, unknown>): Approved
 
 /** What a guest paid on the site for one booking, net of refunds; null when it was not paid online. */
 export async function paidOnline(db: DbClient, organizationId: string, bookingId: string): Promise<{ amount: number; currency: CurrencyCode } | null> {
-  const rows = await queryAll<{ amount: number; currency: string }>(db, "SELECT SUM(captured_amount - refunded_amount) AS amount, currency FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>0 GROUP BY currency", [organizationId, bookingId])
+  const { query, params } = paidOnlineQuery({ query: '?', params: [organizationId] }, { query: '?', params: [bookingId] })
+  return paidOnlineFromRows(await queryAll(db, query, params))
+}
+
+export function paidOnlineQuery(organization: BatchQuery, booking: BatchQuery): BatchQuery {
+  return { query: `SELECT SUM(captured_amount - refunded_amount) AS amount, currency FROM payments
+    WHERE organization_id=${organization.query} AND subject_type='booking' AND subject_id=${booking.query} AND captured_amount>0 GROUP BY currency`,
+    params: [...organization.params ?? [], ...booking.params ?? []] }
+}
+
+export function paidOnlineFromRows(rows: unknown[]): { amount: number; currency: CurrencyCode } | null {
   if (rows.length > 1) throw new Error('Payments for one booking are in more than one currency')
-  const row = rows[0]
+  const row = rows[0] as { amount: number; currency: string } | undefined
   if (!row) return null
   if (!isCurrencyCode(row.currency)) throw new Error('Paid payment has an unsupported currency')
   return { amount: row.amount, currency: row.currency }
@@ -125,17 +135,27 @@ function mergeRefunds(rows: RecordedRefund[], provider: Stripe.Refund[] | undefi
 }
 
 /** The receipt fields shown for an authorized booking or standalone purchase. */
-export async function readPaymentReceipts(db: DbClient, env: CloudflareEnv, organizationId: string, scope: { bookingId: string } | { paymentId: string }, buyerUserId?: string) {
+export function paymentReceiptsQuery(organizationId: string | { sql: string }, scope: { bookingId: string | { sql: string } } | { paymentId: string }, buyerUserId?: string) {
   const booking = 'bookingId' in scope
-  const rows = await queryAll<StripeReceiptScope & { refunds_json: string }>(db, `
+  const id = booking ? scope.bookingId : scope.paymentId
+  return { query: `
     SELECT p.id, p.currency, p.captured_amount, p.refunded_amount, p.surcharge_amount, p.receipt_url,
            p.stripe_account_id, p.livemode, p.stripe_payment_intent_id, p.stripe_charge_id,
            (SELECT json_group_array(json_object('id', f.id, 'amount', f.amount, 'status', f.status,
                'stripe_refund_id', f.stripe_refund_id, 'note', f.note))
             FROM payment_refunds f WHERE f.payment_id = p.id) AS refunds_json
-    FROM payments p WHERE p.organization_id = ? AND ${booking ? "p.subject_type = 'booking' AND p.subject_id" : 'p.id'} = ?
+    FROM payments p WHERE p.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql}
+      AND ${booking ? "p.subject_type = 'booking' AND p.subject_id" : 'p.id'} = ${typeof id === 'string' ? '?' : id.sql}
       ${buyerUserId === undefined ? '' : 'AND p.buyer_user_id = ?'}
-    ORDER BY p.created_at, p.id`, [organizationId, booking ? scope.bookingId : scope.paymentId, ...(buyerUserId === undefined ? [] : [buyerUserId])])
+    ORDER BY p.created_at, p.id`, params: [
+      ...(typeof organizationId === 'string' ? [organizationId] : []),
+      ...(typeof id === 'string' ? [id] : []),
+      ...(buyerUserId === undefined ? [] : [buyerUserId]),
+    ] }
+}
+
+export function paymentReceiptsFromRows(env: CloudflareEnv, results: unknown[]) {
+  const rows = results as (StripeReceiptScope & { refunds_json: string })[]
   return Promise.all(rows.map(async row => {
     const facts = await stripePaymentFacts(env, row, false)
     return {
@@ -143,6 +163,11 @@ export async function readPaymentReceipts(db: DbClient, env: CloudflareEnv, orga
       refunds: paymentRefundsDisplay(mergeRefunds(JSON.parse(row.refunds_json) as RecordedRefund[], facts?.refunds)),
     }
   }))
+}
+
+export async function readPaymentReceipts(db: DbClient, env: CloudflareEnv, organizationId: string, scope: { bookingId: string } | { paymentId: string }, buyerUserId?: string) {
+  const { query, params } = paymentReceiptsQuery(organizationId, scope, buyerUserId)
+  return paymentReceiptsFromRows(env, await queryAll(db, query, params))
 }
 
 /** Full merchant detail; callers must authorize before reading or projecting it. */

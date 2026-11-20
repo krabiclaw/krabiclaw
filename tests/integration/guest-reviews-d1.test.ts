@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test, { mock } from 'node:test'
 import { H3 } from 'nitro/h3'
@@ -12,6 +13,7 @@ import { readInsightsPage } from '../../server/domain/insights.ts'
 import { listOrganizationReviews, setReviewStatus } from '../../server/utils/organization-reviews.ts'
 import validateRoute from '../../server/api/public/review-requests/validate.get.ts'
 import submitRoute from '../../server/api/public/review-requests/submit.post.ts'
+import googleClickRoute from '../../server/api/public/review-requests/google-click.post.ts'
 import { localDateAt, localDateTimeToInstant } from '../../utils/timezone.ts'
 import { captureEvents } from './support/events.ts'
 import { applySchema } from './support/schema.ts'
@@ -81,7 +83,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       "INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
       "INSERT INTO product_stay_configs (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
       "INSERT INTO product_booking_configs (organization_id, product_id, unit, scheduling_mode, online_payment_required, check_in_time, check_out_time, default_capacity, min_nights, created_by, updated_by) VALUES ('org', 'home', 'nights', 'business', 1, '15:00', '11:00', 4, 1, 'owner', 'owner')",
-      ...['g-dinner', 'g-early', 'g-cancelled', 'g-old', 'g-absent', 'g-consult', 'g-class', 'g-stay'].map(id => `INSERT INTO user (id, name, email, isAnonymous) VALUES ('${id}', 'Anonymous', 'anon-${id}@customers.krabiclaw.local', 1)`),
+      ...['g-dinner', 'g-early', 'g-cancelled', 'g-old', 'g-absent', 'g-consult', 'g-class', 'g-stay'].map(id => `INSERT INTO user (id, name, email, isAnonymous) VALUES ('${id}', 'Anonymous', 'anon-${id}@customers.blawby.test', 1)`),
     ]) await db.prepare(statement).run().catch((error: unknown) => { throw new Error(`${statement}: ${String(error)}`) })
 
     const now = at(0)
@@ -198,7 +200,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       return Response.json({ id: key })
     })
     try {
-      const providerEnv = { ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Proof <hello@krabiclaw.com>' }
+      const providerEnv = { ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Proof <hello@blawby.com>' }
       const send = () => sendReviewRequestForBooking(providerEnv, db, 'retry-metadata-record')
       // Resend's answer with the email id sends the invitation; a sent invitation is not due again.
       const first = await send()
@@ -214,18 +216,19 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     // A historic no-show still disqualifies an invitation already on record.
     const lessonToken = await tokenFor('lesson')
     assert.ok(await getReviewRequestByToken(db, lessonToken))
-    await appendMessage(db, { conversationId: T.lesson!, authorKind: 'krabiclaw', authorUserId: 'owner',
+    await appendMessage(db, { conversationId: T.lesson!, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: 'owner',
       eventName: 'booking.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
     assert.equal(await getReviewRequestByToken(db, lessonToken), null)
     const stayToken = await tokenFor('cottage')
     assert.ok(await getReviewRequestByToken(db, stayToken))
-    await appendMessage(db, { conversationId: T.cottage!, authorKind: 'krabiclaw', authorUserId: 'owner',
+    await appendMessage(db, { conversationId: T.cottage!, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: 'owner',
       eventName: 'stay.no_show', body: 'Marked as a no-show', occurredAt: at(-HOUR) })
     assert.equal(await getReviewRequestByToken(db, stayToken), null)
 
     const app = new H3()
     app.get('/api/public/review-requests/validate', validateRoute)
     app.post('/api/public/review-requests/submit', submitRoute)
+    app.post('/api/public/review-requests/google-click', googleClickRoute)
     const call = async (method: 'GET' | 'POST', path: string, body?: unknown) => {
       const response = await app.request(Object.assign(new Request(`https://proof-house.example${path}`, {
         method, headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.9' }, body: body === undefined ? undefined : JSON.stringify(body),
@@ -238,6 +241,13 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     assert.equal(opened.status, 200, JSON.stringify(opened.body))
     assert.deepEqual((opened.body.questions as Array<{ key: string }>).map(question => question.key), ['food', 'service', 'atmosphere'])
     assert.deepEqual(opened.body.display_names, ['Guest', 'Guest dinner'])
+
+    // Outbound click to Google Maps is recorded on the booking conversation
+    const googleClick = await call('POST', '/api/public/review-requests/google-click', { token: dinnerToken })
+    assert.equal(googleClick.status, 200)
+    assert.equal(googleClick.body.recorded, true)
+    const googleEvent = await db.prepare("SELECT event_name, body FROM messages WHERE conversation_id = ? AND event_name = 'review.google_clicked'").bind(T.dinner!).first()
+    assert.deepEqual(googleEvent, { event_name: 'review.google_clicked', body: 'Opened Google Maps to review' })
     assert.equal((await call('GET', `/api/public/review-requests/validate?token=${encodeURIComponent(lessonToken)}`)).status, 404, 'a revoked link is not available')
 
     // Refusals: a question this visit was not asked, public text without consent, consent without text.

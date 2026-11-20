@@ -61,8 +61,10 @@ async function expectTenantDocument(page: Page, tenant: Tenant) {
   // Authored media has to arrive, not merely be referenced: a placement that
   // lost its asset still renders an <img> with a src that 404s.
   const media = page.locator([
-    'img[src*="media.krabiclaw.com"]',
-    'video[src*="media.krabiclaw.com"]',
+    'img[src^="https://media.blawby.com/"]',
+    'video[src^="https://media.blawby.com/"]',
+    'img[src^="https://media.krabiclaw.com/"]',
+    'video[src^="https://media.krabiclaw.com/"]',
     'img[src*="imagedelivery.net"]',
     'video[src*="imagedelivery.net"]',
   ].join(', ')).first()

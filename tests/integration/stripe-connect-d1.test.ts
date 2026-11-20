@@ -64,21 +64,21 @@ test('connected account reservation is organization-scoped and claimed by one st
 
 test('Connect callback URLs are built only from the configured platform origin and organization slug', () => {
   assert.deepEqual(
-    buildStripeConnectOnboardingUrls('https://krabiclaw.com', 'sun-and-sea', true),
+    buildStripeConnectOnboardingUrls('https://blawby.com', 'sun-and-sea', true),
     {
-      returnUrl: 'https://krabiclaw.com/dashboard/sun-and-sea/payments?tab=payouts&stripe_connect=returned',
-      refreshUrl: 'https://krabiclaw.com/api/dashboard/connect/refresh?org=sun-and-sea',
+      returnUrl: 'https://blawby.com/dashboard/sun-and-sea/payments?tab=payouts&stripe_connect=returned',
+      refreshUrl: 'https://blawby.com/api/dashboard/connect/refresh?org=sun-and-sea',
     },
   )
-  assert.throws(() => buildStripeConnectOnboardingUrls('http://krabiclaw.com', 'sun-and-sea', false), /HTTPS/)
+  assert.throws(() => buildStripeConnectOnboardingUrls('http://blawby.com', 'sun-and-sea', false), /HTTPS/)
   assert.throws(() => buildStripeConnectOnboardingUrls('http://localhost:3000', 'sun-and-sea', true), /HTTPS/)
   assert.equal(new URL(buildStripeConnectOnboardingUrls('http://localhost:3000', 'sun-and-sea', false).returnUrl).origin, 'http://localhost:3000')
-  assert.throws(() => buildStripeConnectOnboardingUrls('https://krabiclaw.com/path', 'sun-and-sea', true), /origin/)
-  assert.deepEqual(buildAppPayoutsOnboardingUrls('https://krabiclaw.com'), {
-    returnUrl: 'https://krabiclaw.com/app/return/payouts?outcome=done',
-    refreshUrl: 'https://krabiclaw.com/app/return/payouts?outcome=refresh',
+  assert.throws(() => buildStripeConnectOnboardingUrls('https://blawby.com/path', 'sun-and-sea', true), /origin/)
+  assert.deepEqual(buildAppPayoutsOnboardingUrls('https://blawby.com'), {
+    returnUrl: 'https://blawby.com/app/return/payouts?outcome=done',
+    refreshUrl: 'https://blawby.com/app/return/payouts?outcome=refresh',
   })
-  assert.throws(() => buildAppPayoutsOnboardingUrls('http://krabiclaw.com'), /HTTPS/)
+  assert.throws(() => buildAppPayoutsOnboardingUrls('http://blawby.com'), /HTTPS/)
 })
 
 test('Today suggests Stripe setup until the account is ready, and a price for each experience booked here', async t => {
@@ -93,7 +93,7 @@ test('Today suggests Stripe setup until the account is ready, and a price for ea
     await applySchema(db)
     const env = {
       ...await runtime.getBindings<CloudflareEnv>(), DB: db, EVENTS: captureEvents().binding, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth',
-      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', STRIPE_SECRET_KEY: 'sk_test_payouts', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_payouts', STRIPE_PAYMENTS_METHOD_CONFIGURATION: 'pmc_payouts', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://blawby.test', STRIPE_SECRET_KEY: 'sk_test_payouts', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_payouts', STRIPE_PAYMENTS_METHOD_CONFIGURATION: 'pmc_payouts', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     } as CloudflareEnv
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES ('org', 'Cliff Classes', 'cliff', 'cliff', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'experience', '2026-10-15T00:00:00.000Z', 'UTC')`).run()
@@ -159,6 +159,7 @@ test('Today suggests Stripe setup until the account is ready, and a price for ea
         assert.equal(created, false, 'Stripe is asked to create the account once')
         const input = JSON.parse(String(request instanceof Request ? await request.text() : init?.body))
         assert.equal(input.identity.country, 'US', 'Stripe receives the country the merchant selected')
+        assert.deepEqual(input.metadata, { blawby_organization_id: 'org' })
         created = true
         creating()
         await createReleased
@@ -209,12 +210,12 @@ test('Today suggests Stripe setup until the account is ready, and a price for ea
       // Stripe takes only https returns, so the app's are a platform page that hands back to krabiclaw://payouts/<outcome>.
       assert.deepEqual((links[0]!.use_case as { account_onboarding: Record<string, unknown> }).account_onboarding, {
         collection_options: { fields: 'eventually_due', future_requirements: 'include' },
-        return_url: 'https://krabiclaw.test/app/return/payouts?outcome=done',
-        refresh_url: 'https://krabiclaw.test/app/return/payouts?outcome=refresh',
+        return_url: 'https://blawby.test/app/return/payouts?outcome=done',
+        refresh_url: 'https://blawby.test/app/return/payouts?outcome=refresh',
       })
       // The dashboard, same-origin with its cookie, keeps returning to Payments.
       assert.equal((await call('', { cookie, origin: 'https://proof.example' })).status, 200)
-      assert.equal((links[1]!.use_case as { account_onboarding: { return_url: string } }).account_onboarding.return_url, 'https://krabiclaw.test/dashboard/cliff/payments?tab=payouts&stripe_connect=returned')
+      assert.equal((links[1]!.use_case as { account_onboarding: { return_url: string } }).account_onboarding.return_url, 'https://blawby.test/dashboard/cliff/payments?tab=payouts&stripe_connect=returned')
       const status = await call('/status', app_)
       assert.equal(status.status, 200)
       assert.deepEqual((status.body.account as { requirements: unknown }).requirements, [{ awaiting_action_from: 'user', deadline_status: 'currently_due', description: 'Provide a bank account for payouts', errors: [] }])

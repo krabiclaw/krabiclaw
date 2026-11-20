@@ -24,4 +24,5 @@ export function zarazConsentModalIntroHtml(platformOrigin: string) {
  * pageview action fires on a trigger that matches exactly this event and on nothing else, so Google
  * Analytics never records a page view the native record did not accept.
  */
-export const NATIVE_PAGEVIEW_ZARAZ_EVENT = 'krabiclaw_native_pageview'
+export const NATIVE_PAGEVIEW_ZARAZ_EVENT = 'blawby_native_pageview'
+export const LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT = 'krabiclaw_native_pageview'

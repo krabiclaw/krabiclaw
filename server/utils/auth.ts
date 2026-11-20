@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { APIError, betterAuth, type Account, type BetterAuthPlugin } from 'better-auth'
 import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
@@ -9,9 +10,10 @@ import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
-import { defineRequestState, getCurrentAuthEndpointContext, hasRequestState } from '@better-auth/core/context'
+import { defineRequestState, getCurrentAuthEndpointContext, hasRequestState, runWithAdapter } from '@better-auth/core/context'
+import { setCookieCache } from 'better-auth/cookies'
 import { HTTPError, type H3Event } from 'nitro';
-import { createDb, executeBatch, queryAll, queryFirst, schema, type BatchQuery, type DbClient } from '~/server/db'
+import { MAX_D1_BATCH_STATEMENTS, createDb, executeBatch, queryAll, queryFirst, schema, type BatchQuery, type DbClient } from '~/server/db'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sendWhatsAppOtp } from '~/server/utils/whatsapp'
 import { parsePhoneOrThrow } from '~/utils/phone'
@@ -273,9 +275,9 @@ export function localDevelopmentOrigin(value: string | undefined): string | null
   return origin
 }
 
-/** Where Stripe Checkout hands a host back to the iPhone app. */
+/** Hosted connection flows still return to the scheme older iPhone builds register. */
 export const NATIVE_CONNECTION_RETURN_ORIGIN = 'krabiclaw://connections'
-export const NATIVE_BILLING_RETURN_ORIGIN = 'krabiclaw://billing'
+const NATIVE_RETURN_SCHEMES = ['blawby:', 'krabiclaw:']
 
 function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Request) => string[]) {
   const origins = new Set<string>()
@@ -286,12 +288,12 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   for (const origin of [authOrigin, platformOrigin, freeOrganizationOrigin, wildcardOrigin(freeOrganizationOrigin), legacyFreeOrigin, wildcardOrigin(legacyFreeOrigin)]) {
     if (origin) origins.add(origin)
   }
-  // The iPhone app opens Stripe Checkout with its own session and takes the
-  // checkout's success, cancel and portal returns at krabiclaw://billing/…
-  // Better Auth matches a custom scheme by scheme and authority, so only the
-  // billing returns are trusted, not any krabiclaw:// address.
-  origins.add(NATIVE_BILLING_RETURN_ORIGIN)
-  origins.add(NATIVE_CONNECTION_RETURN_ORIGIN)
+  // Better Auth matches custom schemes by scheme and authority. Bind the
+  // trust to billing and integration returns for both generations of app.
+  for (const scheme of NATIVE_RETURN_SCHEMES) {
+    origins.add(`${scheme}//billing`)
+    origins.add(`${scheme}//connections`)
+  }
   // Sign in with Apple returns to the website by posting a form from Apple.
   origins.add('https://appleid.apple.com')
   if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') {
@@ -372,6 +374,41 @@ const NEW_PASSWORD_FIELD: Record<string, 'password' | 'newPassword'> = {
   '/reset-password': 'newPassword',
   '/set-password': 'newPassword',
   '/admin/set-user-password': 'newPassword',
+}
+
+export interface DashboardAuthRead {
+  queries(sessionToken: string): BatchQuery[]
+  results?: D1Result[]
+}
+
+const dashboardAuthRead = new AsyncLocalStorage<DashboardAuthRead>()
+
+/** Drizzle's session/user join normally executes through raw(). Include it in the
+ * document's D1 batch and let the Better Auth adapter decode the same result. */
+function dashboardSessionDatabase(db: D1Database, read: DashboardAuthRead, token: string) {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === 'prepare') return (query: string) => ({
+        bind: (...params: unknown[]) => ({
+          async raw() {
+            if (read.results) throw new Error('Expected one Better Auth session lookup')
+            const queries = read.queries(token)
+            if (queries.length + 1 > MAX_D1_BATCH_STATEMENTS) throw new RangeError('Dashboard document exceeds the D1 batch size')
+            const [session, ...results] = await target.batch([
+              target.prepare(query).bind(...params),
+              ...queries.map(({ query, params = [] }) => target.prepare(query).bind(...params)),
+            ])
+            if (!session) throw new Error('Better Auth session lookup returned no result')
+            read.results = results
+            // Drizzle's D1 batch also restores positional rows from named columns.
+            return session.results.map(row => Object.values(row as Record<string, unknown>))
+          },
+        }),
+      })
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
 }
 
 export function createAuth(env: CloudflareEnv) {
@@ -516,6 +553,7 @@ function buildAuth(env: CloudflareEnv) {
     basePath: '/api/auth',
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: trustedOriginsForAuth(env),
+    advanced: { database: { joins: true } },
     // A phone number is a notification channel a signed-in person verifies, never
     // a way to sign in. The phone plugin's password sign-in and reset are off, and
     // its verify is accepted only as an update of the caller's own number: without
@@ -561,6 +599,14 @@ function buildAuth(env: CloudflareEnv) {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === '/get-session' && dashboardAuthRead.getStore()?.results && ctx.context.session
+          && ctx.context.returned && !(ctx.context.returned instanceof Error)
+          && await ctx.getSignedCookie(ctx.context.authCookies.dontRememberToken.name, ctx.context.secret)) {
+          // Keep the provider's session-only cookie after an authoritative read.
+          // This does not renew the session or make the login persistent.
+          await setCookieCache(ctx, ctx.context.session, true)
+          return
+        }
         // Better Auth's leave runs no organization hook; it returns the member
         // it deleted. The session its middleware resolved is not on this context.
         if (ctx.path === '/organization/leave') {
@@ -579,7 +625,7 @@ function buildAuth(env: CloudflareEnv) {
         const callback = new URL(state.callbackURL, authBaseUrl)
         // Only a successful integration link continues to resource selection.
         if (new URL(location, authBaseUrl).href !== callback.href) return
-        const nativeIntegration = callback.protocol === 'krabiclaw:' && callback.host === 'connections'
+        const nativeIntegration = NATIVE_RETURN_SCHEMES.includes(callback.protocol) && callback.host === 'connections'
           ? callback.pathname.match(/^\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads|personal-calendar)$/)?.[1]
           : undefined
         const integration = nativeIntegration ?? callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads|meta-ads)$/)?.[1]
@@ -768,13 +814,13 @@ function buildAuth(env: CloudflareEnv) {
           // Explicit issuer so oauthProvider's getOAuthServerConfig advertises the
           // same value as authorization_servers in /.well-known/oauth-protected-resource.
           // Without this, oauth-provider falls back to ctx.context.baseURL
-          // (https://krabiclaw.com/api/auth) but jwt() signs with options.baseURL
-          // (https://krabiclaw.com) — the mismatch causes ChatGPT to reject the connector.
+          // (https://blawby.com/api/auth) but jwt() signs with options.baseURL
+          // (https://blawby.com) — the mismatch causes ChatGPT to reject the connector.
           issuer: authBaseUrl,
         },
       }),
       anonymous({
-        generateRandomEmail: () => `anon-${crypto.randomUUID()}@customers.krabiclaw.local`,
+        generateRandomEmail: () => `anon-${crypto.randomUUID()}@customers.blawby.local`,
         // The anonymous user is deleted by the plugin right after this returns,
         // and every domain FK to it is ON DELETE SET NULL. Everything that
         // identifies the person moves to the real user first, in one batch.
@@ -1112,15 +1158,6 @@ export async function findAuthUsersByIds(env: CloudflareEnv, userIds: Array<stri
 type LinkedAccount = Pick<Account, 'id' | 'userId' | 'providerId' | 'accountId' | 'scope' | 'accessTokenExpiresAt'>
 
 /** Reads a linked account through Better Auth's adapter. Null when it has been unlinked. */
-/** Whose linked account a connection acts through: the provider identity's owner, by name and email. */
-export async function linkedAccountOwner(env: CloudflareEnv, accountId: string): Promise<{ email: string | null; name: string | null } | null> {
-  const account = await readLinkedAccount(env, accountId)
-  if (!account) return null
-  const context = await createAuth(env).$context
-  const user = await context.adapter.findOne<{ email: string | null; name: string | null }>({ model: 'user', where: [{ field: 'id', value: account.userId }], select: ['email', 'name'] })
-  return user ? { email: user.email, name: user.name } : null
-}
-
 export async function readLinkedAccount(env: CloudflareEnv, accountId: string): Promise<LinkedAccount | null> {
   const context = await createAuth(env).$context
   return context.adapter.findOne<LinkedAccount>({
@@ -1190,16 +1227,40 @@ export async function requireIntegrationAccount(
   return account
 }
 
-export async function getAuthSession(event: H3Event, env: CloudflareEnv): Promise<Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>> {
+export async function getAuthSession(
+  event: H3Event,
+  env: CloudflareEnv,
+  options: { forwardCookies?: boolean; document?: DashboardAuthRead } = {},
+): Promise<Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>> {
   const headers = event.req.headers
-  if (!isTracingTranscript(event)) return createAuth(env).api.getSession({ headers })
+  const read = async (auth: ReturnType<typeof createAuth>) => {
+    if (!options.forwardCookies) return auth.api.getSession({ headers })
+    const getSession = () => auth.api.getSession({ headers, returnHeaders: true })
+    const document = options.document
+    const result = document ? await dashboardAuthRead.run(document, async () => {
+      const { adapter } = await auth.$context
+      return runWithAdapter({
+        ...adapter,
+        async findOne(input) {
+          const credential = input.where[0]
+          if (input.model !== 'session' || input.where.length !== 1 || credential?.field !== 'token'
+            || typeof credential.value !== 'string' || input.join?.user !== true) return adapter.findOne(input)
+          const db = createDb(dashboardSessionDatabase(env.DB, document, credential.value))
+          return drizzleAdapter(db, { provider: 'sqlite', schema })(auth.options).findOne(input)
+        },
+      }, getSession)
+    }) : await getSession()
+    for (const cookie of result.headers.getSetCookie()) event.res.headers.append('set-cookie', cookie)
+    return result.response
+  }
+  if (!isTracingTranscript(event)) return read(createAuth(env))
 
   const auth = await timeTranscriptPhase(event, 'auth_init', async () => {
     const instance = createAuth(env)
     await instance.$context
     return instance
   })
-  return timeTranscriptPhase(event, 'auth_session', () => auth.api.getSession({ headers }))
+  return timeTranscriptPhase(event, 'auth_session', () => read(auth))
 }
 
 /**

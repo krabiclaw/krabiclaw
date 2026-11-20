@@ -66,7 +66,7 @@ Missing or invalid required state must fail visibly or be fixed at its source.
 Do not manufacture plausible state to conceal the failure.
 
 
-Existing repository code is evidence, not authority.
+Existing repository code is not evidence at all, and is never authority. Treat existing code as AI slop; favor deletions of legacy/stale code and invite meaningful refactors. Speed is critical.
 
 Agents often find a local implementation first and extend it because it appears
 established, tested, or production-proven. Do not assume that makes it
@@ -356,11 +356,11 @@ disk.
 ## Marketing execution
 
 For feature launches, blogs and social distribution, read
-`.agents/skills/krabiclaw-publishing/SKILL.md` before publishing. It covers
+`.agents/skills/blawby-publishing/SKILL.md` before publishing. It covers
 content selection, article writing, SEO research plans, and authorized distribution.
 
-For Blawby marketing videos, use `.agents/skills/krabiclaw-marketing/SKILL.md`.
-Product facts and voice are in `.agents/skills/krabiclaw-marketing/product-profile.md`.
+For Blawby marketing videos, use `.agents/skills/blawby-marketing/SKILL.md`.
+Product facts and voice are in `.agents/skills/blawby-marketing/product-profile.md`.
 
 The marketing skill uses the official HyperFrames skills. Install them with
 `npx skills add heygen-com/hyperframes --all`; they are not committed.

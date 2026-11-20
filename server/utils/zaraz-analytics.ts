@@ -1,7 +1,7 @@
 import { execute, queryAll, queryFirst } from '~/server/db'
-import { PLATFORM_THEME_ID } from '~/utils/site-routing'
+import { isPlatformSite } from '~/utils/site-routing'
 import { customHostnameZone, type DomainEnv } from '~/server/utils/domains'
-import { NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME, zarazConsentModalIntroHtml } from '~/utils/zaraz-consent'
+import { LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT, NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME, zarazConsentModalIntroHtml } from '~/utils/zaraz-consent'
 
 export interface ZarazEnv extends DomainEnv {
   CLOUDFLARE_API_TOKEN?: string
@@ -80,7 +80,11 @@ const LOCK_STALE_MS = 60_000
 const LOCK_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000]
 const TENANT_KEY_PREFIX = 'ga-tenant-'
 // Not under TENANT_KEY_PREFIX: it is shared by every GA4 tool and outlives any one tenant's.
-const NATIVE_PAGEVIEW_TRIGGER_KEY = 'krabiclaw-native-pageview'
+const NATIVE_PAGEVIEW_TRIGGER_KEY = 'blawby-native-pageview'
+// Active tabs and older Worker versions may still send the legacy event.
+const NATIVE_PAGEVIEW_EVENT_PATTERN = `^(?:${NATIVE_PAGEVIEW_ZARAZ_EVENT}|${LEGACY_NATIVE_PAGEVIEW_ZARAZ_EVENT})$`
+const nativePageviewRule = { id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'MATCH_REGEX', value: NATIVE_PAGEVIEW_EVENT_PATTERN }
+const excludeNativePageviewRule = { ...nativePageviewRule, id: 'kc-exclude-native-pageview', op: 'NOT_MATCH_REGEX' }
 const GOOGLE_VENDOR_NAME = 'Google Analytics'
 const GOOGLE_VENDOR_POLICY_URL = 'https://policies.google.com/privacy'
 
@@ -187,7 +191,7 @@ function makeTenantPageviewTrigger(name: string, hostnames: string[]): ZarazTrig
     name,
     description: 'Fires when the Blawby collector reports a recorded native pageview on matching hosts',
     loadRules: [
-      { id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'EQUALS', value: NATIVE_PAGEVIEW_ZARAZ_EVENT },
+      { ...nativePageviewRule },
       { id: 'kc-tenant-hostname', match: '{{ system.page.url.hostname }}', op: 'MATCH_REGEX', value: tenantPageLocationRegex(hostnames) },
     ],
     excludeRules: [],
@@ -201,7 +205,7 @@ function makeTenantTracksTrigger(name: string, hostnames: string[], baseAllTrack
         { id: 'rul1', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^__zaraz.*' },
         { id: 'rul2', match: '{{ client.__zarazEcommerce }}', op: 'NOT_MATCH_REGEX', value: 'true' },
         { id: 'pgv2', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: '^Pageview$' },
-        { id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: `^${NATIVE_PAGEVIEW_ZARAZ_EVENT}$` },
+        { ...excludeNativePageviewRule },
       ]
   return {
     name,
@@ -304,12 +308,15 @@ function upsertTenantZarazAnalytics(
   config.triggers[NATIVE_PAGEVIEW_TRIGGER_KEY] = {
     name: 'Native pageview accepted',
     description: 'Fires when the Blawby collector reports a recorded native pageview',
-    loadRules: [{ id: 'kc-native-pageview', match: '{{ client.__zarazTrack }}', op: 'EQUALS', value: NATIVE_PAGEVIEW_ZARAZ_EVENT }],
+    loadRules: [{ ...nativePageviewRule }],
     excludeRules: [],
   }
   const allTracks = config.triggers.AllTracks as ZarazTrigger | undefined
-  if (allTracks && !allTracks.loadRules.some(rule => rule.id === 'kc-exclude-native-pageview')) {
-    allTracks.loadRules.push({ id: 'kc-exclude-native-pageview', match: '{{ client.__zarazTrack }}', op: 'NOT_MATCH_REGEX', value: `^${NATIVE_PAGEVIEW_ZARAZ_EVENT}$` })
+  if (allTracks) {
+    allTracks.loadRules = [
+      ...allTracks.loadRules.filter(rule => rule.id !== excludeNativePageviewRule.id),
+      { ...excludeNativePageviewRule },
+    ]
   }
   const key = tenantKey(input.organizationId)
   const tracksKey = `${key}-tracks`
@@ -399,6 +406,21 @@ export function reconcileZarazAnalyticsConfig(
   config.triggers ||= {}
   config.tools ||= {}
   const before = stableStringify(config)
+  const legacyPageviewKey = 'krabiclaw-native-pageview'
+  const { [legacyPageviewKey]: legacyPageviewTrigger, ...currentTriggers } = config.triggers
+  if (legacyPageviewTrigger) {
+    config.triggers = { ...currentTriggers, [NATIVE_PAGEVIEW_TRIGGER_KEY]: currentTriggers[NATIVE_PAGEVIEW_TRIGGER_KEY] ?? legacyPageviewTrigger }
+    for (const tool of Object.values(config.tools)) {
+      for (const action of Object.values(tool.actions ?? {})) {
+        if (action.firingTriggers) {
+          action.firingTriggers = action.firingTriggers.map(key => key === legacyPageviewKey ? NATIVE_PAGEVIEW_TRIGGER_KEY : key)
+        }
+        if (action.blockingTriggers) {
+          action.blockingTriggers = action.blockingTriggers.map(key => key === legacyPageviewKey ? NATIVE_PAGEVIEW_TRIGGER_KEY : key)
+        }
+      }
+    }
+  }
   const desiredToolKeys = new Set(input.tenants.map(tenant => tenantKey(tenant.organizationId)))
   const desiredTriggerKeys = new Set(input.tenants.flatMap(tenant => {
     const k = tenantKey(tenant.organizationId)
@@ -494,7 +516,7 @@ export async function reconcileZarazAnalytics(
       zones[0]!.tenants = selectHosts(hostname => !hostedByPlatformZone(hostname))
       zones.push({ id: platformZone, tenants: platformTenants })
     }
-    const platformIds = new Set(rows.filter(row => row.theme_id === PLATFORM_THEME_ID).map(row => row.organization_id))
+    const platformIds = new Set(rows.filter(row => isPlatformSite({ themeId: row.theme_id })).map(row => row.organization_id))
     if (platformIds.size > 1) throw new Error('More than one linked organization runs the platform site')
     const platformId = [...platformIds][0]
     const analytics = platformId ? tenants.get(platformId) : undefined
