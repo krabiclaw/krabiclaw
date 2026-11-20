@@ -25,12 +25,19 @@ function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
 
 export function verifyEmailMessage(input: { verificationUrl: string }): NotificationMessage {
   return {
+    subject: 'Verify your email address',
     title: 'Verify your email',
     preheader: 'Confirm your address to finish setting up your Blawby account.',
     hero: null,
     intro: 'Confirm your email address to finish setting up your account and keep your sign-in secure.',
     facts: [],
     primaryAction: { url: input.verificationUrl, label: 'Verify email' },
+    sections: [
+      {
+        title: 'Security notice',
+        body: "This verification link is intended only for you. If you didn't create an account, you can safely ignore this email.",
+      },
+    ],
     finePrint: 'If you did not create this account, you can ignore this email.',
     emailPurpose: 'transactional',
     emailReason: 'You received this email because this address was used to create a Blawby account.',
@@ -40,12 +47,19 @@ export function verifyEmailMessage(input: { verificationUrl: string }): Notifica
 
 export function resetPasswordMessage(input: { resetUrl: string }): NotificationMessage {
   return {
+    subject: 'Reset your password',
     title: 'Reset your password',
     preheader: 'Choose a new Blawby password.',
     hero: null,
     intro: 'We received a request to reset your password. The link below is secure and single-use.',
     facts: [],
     primaryAction: { url: input.resetUrl, label: 'Choose a new password' },
+    sections: [
+      {
+        title: 'Security notice',
+        body: "If you didn't request a password reset, no changes have been made to your account. You can safely ignore this email.",
+      },
+    ],
     finePrint: 'If you did not request this, you can ignore this email — your password stays as it is.',
     emailPurpose: 'transactional',
     emailReason: 'You received this email because a password reset was requested for your Blawby account.',
@@ -76,6 +90,30 @@ export function organizationInviteMessage(input: {
     emailPurpose: 'transactional',
     emailReason: `You received this email because ${input.inviterName} invited you to join ${input.organizationName} on Blawby.`,
     category: 'account_security',
+  }
+}
+
+export function organizationInvitationAcceptedMessage(input: {
+  organizationName: string
+  inviteeEmail: string
+  teamSettingsUrl: string
+}): NotificationMessage {
+  return {
+    subject: `${input.inviteeEmail} has accepted your invitation to join "${input.organizationName}" on Blawby`,
+    title: `${input.inviteeEmail} has accepted your invitation`,
+    preheader: 'Visit your Team and security settings to review access',
+    hero: null,
+    intro: `This is a notification that ${input.inviteeEmail} has accepted your invitation to join ${input.organizationName} on Blawby.`,
+    body: `Visit your [Team and security settings](${input.teamSettingsUrl}) at any time to review your team's access to your account. If this was not expected or if you have any questions, please reach out to Blawby Support.\n\n— The Blawby team`,
+    facts: facts(
+      fact('member', 'Member', input.inviteeEmail),
+      fact('organization', 'Organization', input.organizationName),
+    ),
+    primaryAction: { url: input.teamSettingsUrl, label: 'View team settings' },
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you manage team members for ${input.organizationName}.`,
+    category: 'account_security',
+    organizationName: input.organizationName,
   }
 }
 

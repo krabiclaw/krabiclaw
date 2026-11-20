@@ -33,6 +33,7 @@ import {
   guestThreadReplyMessage,
   guestThreadStatusMessage,
   organizationInviteMessage,
+  organizationInvitationAcceptedMessage,
   resetPasswordMessage,
   reviewRequestMessage,
   verifyEmailMessage,
@@ -165,11 +166,56 @@ const ownerPayments: PaymentNotificationEvent[] = [
 ]
 
 const guestPayments: GuestPaymentNotificationEvent[] = [
-  { ...payment, kind: 'payment_captured', action: { url: 'https://pay.stripe.com/receipts/preview', label: 'View receipt' } },
-  ...(['payment_failed', 'refund_pending', 'refund_succeeded', 'refund_failed', 'refund_canceled'] as const).map(kind => ({
-    ...payment, kind, amount: kind === 'payment_failed' ? payment.amount : 5000,
+  {
+    ...payment,
+    kind: 'payment_captured',
+    receiptNumber: '2927-2776',
+    paymentMethod: 'American Express - 2008',
+    paidAt: 'May 5, 2026',
+    supportEmail: 'billing@railway.com',
+    action: { url: 'https://pay.stripe.com/receipts/preview', label: 'View receipt' },
+  },
+  {
+    ...payment,
+    kind: 'payment_failed',
+    amount: payment.amount,
+    paymentMethod: 'American Express - 2008',
+    supportEmail: 'support@blawby.com',
     action: { url: 'https://blawby.com/account', label: 'View purchase' },
-  })),
+  },
+  {
+    ...payment,
+    kind: 'refund_pending',
+    amount: 5000,
+    receiptNumber: '3817-5980',
+    paymentMethod: 'American Express - 2008',
+    paidAt: 'June 4, 2025',
+    supportEmail: 'ar@vercel.com',
+    action: { url: 'https://blawby.com/account', label: 'View purchase' },
+  },
+  {
+    ...payment,
+    kind: 'refund_succeeded',
+    amount: 5000,
+    receiptNumber: '3817-5980',
+    paymentMethod: 'American Express - 2008',
+    paidAt: 'June 4, 2025',
+    supportEmail: 'ar@vercel.com',
+    action: { url: 'https://blawby.com/account', label: 'View purchase' },
+  },
+  {
+    ...payment,
+    kind: 'refund_failed',
+    amount: 5000,
+    supportEmail: 'support@blawby.com',
+    action: { url: 'https://blawby.com/account', label: 'View purchase' },
+  },
+  {
+    ...payment,
+    kind: 'refund_canceled',
+    amount: 5000,
+    action: { url: 'https://blawby.com/account', label: 'View purchase' },
+  },
 ]
 
 export const NOTIFICATION_CATALOG: CatalogEntry[] = [
@@ -464,6 +510,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'auth-verify', audience: 'guest', title: 'Sign-up — verify your email', message: verifyEmailMessage({ verificationUrl: 'https://blawby.com/api/auth/verify-email?token=preview' }) },
   { id: 'auth-reset', audience: 'guest', title: 'Sign-in — reset your password', message: resetPasswordMessage({ resetUrl: 'https://blawby.com/reset-password?token=preview' }) },
   { id: 'organization-invite', audience: 'guest', title: 'Invitee — organization invitation', message: organizationInviteMessage({ organizationName: studio, inviterName: 'Priya Shah', role: 'Admin', inviteUrl: 'https://blawby.com/accept-invitation/preview', expires: 'Nov 8, 2026, 2:00 PM UTC' }) },
+  { id: 'organization-invite-accepted', audience: 'owner', title: 'Inviter — organization invitation accepted', message: organizationInvitationAcceptedMessage({ organizationName: studio, inviteeEmail: 'writemail2gitesh@gmail.com', teamSettingsUrl: 'https://blawby.com/team' }) },
   { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — table reservation confirmed', message: guestBookingReceivedMessage({ ...guestVisit, productTitle: 'Main Dining Room table', status: 'confirmed', wording: 'reservation' }) },
   { id: 'guest-reservation-cancelled', audience: 'guest', title: 'Guest — table reservation cancelled', message: guestBookingCancelledMessage({ ...guestVisit, productTitle: 'Main Dining Room table', wasConfirmed: true, wording: 'reservation' }) },
   { id: 'guest-booking-received', audience: 'guest', title: 'Guest — booking request sent', message: guestBookingReceivedMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM', status: 'pending', wording: 'booking' }) },

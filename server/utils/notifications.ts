@@ -32,6 +32,7 @@ import {
   guestContactReceivedMessage,
   guestStayConfirmedMessage,
   organizationInviteMessage,
+  organizationInvitationAcceptedMessage,
   reviewRequestMessage,
 } from '~/server/notifications/guest-events'
 import type { BookingChangeAssignment, BookingChangeEventInput, ConversationRecord } from '~/server/notifications/events'
@@ -595,9 +596,9 @@ function memberNotificationSends(
       })
       // Only an email that says it can be answered carries a reply address: an alert about a new booking or cancellation does not send the member's reply to the guest.
       await sendEmailNotification(env, db, {
-        ...input, to, title: input.message.title,
+        ...input, to, title: input.message.subject ?? input.message.title,
         ...(input.message.finePrint === REPLY_NOTE ? { replyAs: { kind: 'member' as const, userId: recipient.userId } } : {}),
-        email: { subject: sanitizeEmailHeaderValue(input.message.title), ...rendered },
+        email: { subject: sanitizeEmailHeaderValue(input.message.subject ?? input.message.title), ...rendered },
         unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
         delivery: threadDelivery(input.context, 'owner_alert', 'email', input.template, to, input.eventKey),
       })
@@ -872,7 +873,8 @@ export async function notifyOwner(
     await sendEmailNotification(env, db, {
       ...opts,
       to,
-      email: { subject: sanitizeEmailHeaderValue(message.title), ...rendered },
+      title: message.subject ?? message.title,
+      email: { subject: sanitizeEmailHeaderValue(message.subject ?? message.title), ...rendered },
       delivery: threadDelivery(deliveryContext, 'owner_alert', 'email', opts.template, to, opts.deliveryEventKey),
     })
   }))
@@ -916,7 +918,7 @@ export async function notifyFinancialNotification(
       organizationId: input.organizationId,
       organizationName: input.ownerMessage.organizationName,
       template: input.eventKey,
-      title: input.ownerMessage.title,
+      title: input.ownerMessage.subject ?? input.ownerMessage.title,
       payload: { deep_link: input.deepLink ?? input.ownerMessage.primaryAction.url },
       message: input.ownerMessage,
       source: input.source ?? undefined,
@@ -935,8 +937,8 @@ export async function notifyFinancialNotification(
       })
       await sendEmailNotification(env, db, {
         organizationId: input.organizationId, organizationName: guest.message.organizationName,
-        to, template: input.eventKey, title: guest.message.title, payload: {},
-        email: { subject: sanitizeEmailHeaderValue(guest.message.title), ...rendered },
+        to, template: input.eventKey, title: guest.message.subject ?? guest.message.title, payload: {},
+        email: { subject: sanitizeEmailHeaderValue(guest.message.subject ?? guest.message.title), ...rendered },
         delivery: threadDelivery(await anchor(), 'status_update', 'email', input.eventKey, to, `${input.eventKey}:buyer`),
       })
     })())
@@ -1961,6 +1963,69 @@ export async function notifyOrganizationInvited(
     },
     email: {
       subject: `You're invited to join ${opts.organizationName} on Blawby`,
+      ...rendered,
+    },
+  })
+}
+
+export async function notifyOrganizationInvitationAccepted(
+  env: NotificationEnv,
+  db: DbClient,
+  opts: {
+    organizationId: string
+    organizationName: string
+    organizationSlug: string
+    inviterUserId: string
+    invitationId: string
+    inviteeEmail: string
+  }
+) {
+  const inviter = await queryFirst<{ email: string }>(db, 'SELECT email FROM user WHERE id = ?', [opts.inviterUserId])
+  if (!inviter?.email) return
+  const platformDomain = getPlatformDomain(env)
+  const teamSettingsUrl = `${dashboardOrigin(env, { orgSlug: opts.organizationSlug, locationSlug: null })}/team`
+  const eventKey = `organization-invitation-accepted:${opts.organizationId}:${opts.invitationId}`
+  const audit = organizationEventQuery({
+    organizationId: opts.organizationId,
+    actorId: opts.inviterUserId,
+    actorType: 'system',
+    eventType: 'owner.alerted',
+    entityType: 'invitation',
+    entityId: opts.invitationId,
+    dedupeKey: eventKey,
+    metadata: { inviteeEmail: opts.inviteeEmail },
+  })
+  await execute(db, `${audit.query} ON CONFLICT(dedupe_key) DO NOTHING`, audit.params)
+  const entry = await queryFirst<{ id: string }>(db, 'SELECT id FROM activity_entries WHERE dedupe_key = ? AND organization_id = ?', [eventKey, opts.organizationId])
+  if (!entry) throw new Error('Invitation acceptance delivery has no organization receipt')
+
+  const message = organizationInvitationAcceptedMessage({
+    organizationName: opts.organizationName,
+    inviteeEmail: opts.inviteeEmail,
+    teamSettingsUrl,
+  })
+  const rendered = await renderNotificationEmail(message, { platformDomain })
+
+  await sendEmailNotification(env, db, {
+    organizationId: opts.organizationId,
+    organizationName: opts.organizationName,
+    to: inviter.email,
+    template: 'organization_invitation_accepted',
+    title: message.subject ?? message.title,
+    delivery: {
+      conversationId: null,
+      subject: { activityEntryId: entry.id },
+      purpose: 'status_update',
+      idempotencyKey: `organization-invitation-accepted-email:${opts.invitationId}`,
+    },
+    payload: {
+      invitation_id: opts.invitationId,
+      invitee_email: opts.inviteeEmail,
+      organization_name: opts.organizationName,
+      deep_link: teamSettingsUrl,
+    },
+    email: {
+      subject: sanitizeEmailHeaderValue(message.subject ?? message.title),
       ...rendered,
     },
   })

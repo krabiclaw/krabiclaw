@@ -1606,22 +1606,22 @@ test('a payout sent and a payout failed are emailed to the business owner and ad
   await deliver('paid')
   const mail = sentMail(emails)
   assert.deepEqual(mail.map(sent => [sent.subject, String(sent.to)]).sort(), [
-   ['Payout failed', 'admin@mail-fixture.blawby.com'], ['Payout failed', 'owner@mail-fixture.blawby.com'],
-   ['Payout paid', 'admin@mail-fixture.blawby.com'], ['Payout paid', 'owner@mail-fixture.blawby.com'],
+   ['Your $250.00 USD payout for Payments failed', 'admin@mail-fixture.blawby.com'], ['Your $250.00 USD payout for Payments failed', 'owner@mail-fixture.blawby.com'],
+   ['Your $250.00 USD payout for Payments is on the way', 'admin@mail-fixture.blawby.com'], ['Your $250.00 USD payout for Payments is on the way', 'owner@mail-fixture.blawby.com'],
   ], 'owners and admins hear; the business\'s member does not')
   for (const sent of mail) {
    assert.match(sent.html, /\$250\.00 USD/u)
    assert.match(sent.html, /href="https:\/\/proof\.example\/dashboard\/payments\/earnings\/payouts"/u)
   }
-  assert.match(mail.find(sent => sent.subject === 'Payout paid')!.html, /Oct 5, 2026/u)
-  assert.match(mail.find(sent => sent.subject === 'Payout failed')!.html, /Review your payout details in Stripe\./u)
+  assert.match(mail.find(sent => sent.subject === 'Your $250.00 USD payout for Payments is on the way')!.html, /Oct 5, 2026/u)
+  assert.match(mail.find(sent => sent.subject === 'Your $250.00 USD payout for Payments failed')!.html, /Review your payout details in Stripe\./u)
   // Each send is recorded as sent by Resend, to the person it went to.
   const receipts = (await db.prepare("SELECT provider, status, json_extract(email_json, '$.message.subject') subject, json_extract(email_json, '$.message.to') recipient FROM guest_thread_deliveries WHERE channel = 'email' ORDER BY subject, recipient").all()).results
   assert.deepEqual(receipts, [
-   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'admin@mail-fixture.blawby.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout failed', recipient: 'owner@mail-fixture.blawby.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'admin@mail-fixture.blawby.com' },
-   { provider: 'resend', status: 'sent', subject: 'Payout paid', recipient: 'owner@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Your $250.00 USD payout for Payments failed', recipient: 'admin@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Your $250.00 USD payout for Payments failed', recipient: 'owner@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Your $250.00 USD payout for Payments is on the way', recipient: 'admin@mail-fixture.blawby.com' },
+   { provider: 'resend', status: 'sent', subject: 'Your $250.00 USD payout for Payments is on the way', recipient: 'owner@mail-fixture.blawby.com' },
   ])
  } finally { await runtime.dispose() }
 })
