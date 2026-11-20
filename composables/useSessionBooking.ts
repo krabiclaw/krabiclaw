@@ -11,7 +11,6 @@ import { getErrorMessage } from '~/utils/errors'
 import { getPhoneCountry } from '~/utils/phone'
 import { isRecord, normalizeApiError, publicApiRequest, publicApiMutation } from '~/utils/api-clients'
 import { setBookingConfirmation } from '~/composables/useBookingHandoff'
-import { agreementLabel } from '~/shared/agreements'
 import type { SubmissionMeasurement } from '~/composables/useOrganizationConversionTracking'
 import type { ConversionValue } from '~/utils/organization-conversion-events'
 import type { ContactFormState } from '~/components/booking/BookingContactForm.vue'
@@ -38,26 +37,6 @@ export function fetchSessionAvailability(slug: string, location_id: string, date
         isRecord(value) && value.unit === 'slot' && (value.timezone === null || (typeof value.timezone === 'string' && isValidTimezone(value.timezone))) && Array.isArray(value.sessions),
     },
   )
-}
-
-/** The listing's agreement as the booking form shows it, or null when the listing has none. */
-export function listingAgreementOf(product: Pick<PublicProduct, 'kind' | 'agreement'>) {
-  const document = product.agreement
-  if (!document?.public_url) return null
-  return { label: agreementLabel(product.kind), file_name: document.file_name ?? agreementLabel(product.kind), url: document.public_url }
-}
-
-/** Signs the listing's agreement on the booking just made; a failure says so, since the booking stands either way. */
-export async function signBookedAgreement(conversationId: string, contact: Pick<ContactFormState, 'signature'>, failed: string): Promise<string | null> {
-  if (!contact.signature) return null
-  try {
-    await publicApiMutation(`/api/messages/${encodeURIComponent(conversationId)}/agreement/sign`, {
-      method: 'POST', body: contact.signature, validate: (value): value is { signed: true } => isRecord(value) && value.signed === true,
-    })
-    return null
-  } catch (error) {
-    return `${failed} ${getErrorMessage(error, '')}`.trim()
-  }
 }
 
 /** The public Product booking flow, shared by product pages, online consultations and a restaurant's tables. */
@@ -392,11 +371,6 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         await navigateTo({ path: response.pay_path, hash: `#${response.purchase_claim}` })
         return
       }
-      const unsigned = await signBookedAgreement(response.conversation_id, contact, t('agreement.sign_failed', { document: agreementLabel(context.value.product.kind).toLowerCase() }))
-      if (unsigned) {
-        bookingError.value = unsigned
-        return
-      }
       // A table is a reservation to the business's ad and analytics accounts, which already count it by that name.
       mirrorSubmission(context.value.product.kind === 'table' ? 'reservation_submit' : 'booking_submit', response.measurement, context.value.location?.id ?? null, response.quoted_value)
       setBookingConfirmation({
@@ -441,6 +415,6 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
     return { bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, selectedVariantId, selectedPrice, sellableVariants, variantPriceLabel,
       timeSelection, submitting, timedQuote, quotePending, reviewSelection, bookingError, sessions, sessionsPending, availabilityDates, referenceDate, calendarMonth, lastCalendarMonth, changeMonth, guestsMin, guestsMax,
       selectedSession, loadSessions, openBooking, openBookingAt, upcomingSessions,
-      sessionDayLabel, sessionTimeLabel, submitBooking, agreement: computed(() => listingAgreementOf(context.value.product)) }
+      sessionDayLabel, sessionTimeLabel, submitBooking }
 }
 export type SessionBookingController = ReturnType<typeof useSessionBooking>

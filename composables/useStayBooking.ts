@@ -1,6 +1,4 @@
 import type { MaybeRefOrGetter } from 'vue'
-import { agreementLabel } from '~/shared/agreements'
-import { listingAgreementOf, signBookedAgreement } from '~/composables/useSessionBooking'
 import type { LodgingConfirmationMode } from '~/shared/lodging-booking'
 import type { PublicProduct } from '~/server/types/products'
 import type { PublicProductLocation } from '~/server/utils/public-products'
@@ -412,8 +410,6 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
                 : (value.status === 'confirmed' || value.status === 'cancelled') && value.request_status === null)),
       })
       if (response.status !== 'checkout') {
-        const conversationId = response.activity_path.split('/').at(-1)!
-        bookingError.value = await signBookedAgreement(decodeURIComponent(conversationId), contact, t('agreement.sign_failed', { document: agreementLabel('stay').toLowerCase() })) ?? ''
         submittedRequest.value = response
         return
       }
@@ -447,7 +443,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     checkout, enquiryPath, needsApproval, actionLabel, submittedRequest,
     bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, dateField, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, priceSummary, rangeLabel, guestsLabel, nightCount,
-    openCalendar, loadCalendar, horizon, night, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, openBooking, submitBooking, money, nightsLabel, dateLabel, agreement: computed(() => listingAgreementOf(context.value.product)),
+    openCalendar, loadCalendar, horizon, night, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }
 }
 export type StayBookingController = ReturnType<typeof useStayBooking>

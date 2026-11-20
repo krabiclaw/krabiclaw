@@ -5,7 +5,7 @@
     </template>
     <UAlert v-if="p.loadError.value || error" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="p.loadError.value || error || ''" />
     <template v-if="product">
-      <p class="text-sm text-muted">{{ people }} read and sign this when they book.</p>
+      <p class="text-sm text-muted">Standard document or house rules for this listing. Available as a template when sending an agreement to sign.</p>
       <div v-if="product.agreement" class="mt-6 overflow-hidden rounded-2xl border border-default" data-testid="listing-agreement">
         <iframe :src="product.agreement.public_url" :title="product.agreement.file_name ?? label" class="h-80 w-full bg-elevated" />
         <div class="px-4 py-3.5">
@@ -21,7 +21,7 @@
         <span class="text-base font-semibold">{{ busy ? 'Uploading…' : 'Upload a PDF' }}</span>
         <span class="text-xs text-muted">Up to 20 MB</span>
       </button>
-      <p class="mt-4 text-xs text-muted">Replacing it changes what new bookings sign. Bookings already made keep the version their {{ people.toLowerCase() }} signed.</p>
+      <p class="mt-4 text-xs text-muted">Replacing it updates the template for future bookings. Existing bookings preserve their signed documents.</p>
       <input ref="picker" type="file" accept="application/pdf" class="hidden" @change="picked">
     </template>
   </DashboardIndexPanel>
@@ -42,7 +42,6 @@ const router = useRouter()
 const dashboardApi = useDashboardApi()
 const product = computed(() => p.product.value)
 const label = computed(() => product.value ? agreementLabel(product.value.kind) : 'Agreement')
-const people = computed(() => product.value?.kind === 'service' ? 'Clients' : 'Guests')
 const api = `/api/editor/organizations/${encodeURIComponent(p.organizationId)}`
 const { upload } = useMediaUpload(api)
 const picker = ref<HTMLInputElement | null>(null)
