@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d24504f6e256f034889396d2c69bed8cf47a2ac764981e50bd1998ee748fd7d9",
-  "documentationFingerprint": "sha256:93fe67ff64315ec12643ff3921fe2bdce052a1a88e8f84f174d9281f87fd8ca4",
+  "fingerprint": "sha256:b99baed17a54fa1275aede1eb24fdcb45625be59066fc590a59531fbcc1698b4",
+  "documentationFingerprint": "sha256:e3efb484920594c0fa14ff182e4c4b78bf664f1f685c82b05faadd9a00246424",
   "tools": [
     {
       "name": "add_organization_language",
@@ -64604,7 +64604,7 @@
     {
       "name": "get_social_connections",
       "title": "Get social connections",
-      "description": "Read the site’s website, Facebook Page, Instagram and Discord channel publishing connections before selecting a publication target. Returns target_id, connection_revision, supported formats and operations, setup links, and problems, including whether Meta currently accepts each connection and whether the Blawby bot can still post to the connected Discord channel. Credentials are not returned.",
+      "description": "Read the site's saved website, Facebook Page, Instagram and Discord publishing destinations before selecting a target. Returns target_id, connection_revision, supported formats and operations, setup links and saved setup problems. A channel operation checks access through its provider.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -126664,7 +126664,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:a2a95f5e752b47a10f2d42dfaaca0caca19afd2a4110adc3fd97dad2eb8a763a",
-        "get_social_connections": "sha256:0b69bc4bd8739b684d41b13b63c90c9b9281fdf40fd58aa0a6331bd6fcaf3b1d",
+        "get_social_connections": "sha256:76ab10278b0c846bda5a8edc8aff1f28b770344b3a205a41c8825906c3bb443d",
         "publish_post": "sha256:752fb1e9c0267e6ba03088081fa8a0e5c5f8034640f03df3c52078a8df8f95d4"
       }
     },
