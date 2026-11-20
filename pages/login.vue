@@ -10,6 +10,7 @@
       <AuthAppleButton label="Sign in with Apple" :loading="googleLoading" :last-used="lastUsedMethod === 'apple'" @activate="signInWithApple(postLoginUrl)" />
       <USeparator label="or" />
       <AuthEmailSignInForm :key="queryEmail" :callback-url="postLoginUrl" :initial-email="queryEmail" :last-used="lastUsedMethod === 'email'" @verification-required="showVerification" />
+      <AuthTermsNotice />
 
       <UAlert v-if="verificationEmail" color="neutral" variant="soft" description="Verify your email before signing in.">
         <template #actions>

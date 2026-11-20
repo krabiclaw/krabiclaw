@@ -6,7 +6,6 @@
     <UFormField label="Password" name="signup-password" :error="passwordError" size="lg">
       <UInput v-model="password" type="password" placeholder="••••••••" :disabled="loading" autocomplete="new-password" size="lg" class="w-full" />
     </UFormField>
-    <slot />
     <UButton type="submit" size="lg" block :loading="loading">Create account</UButton>
     <UAlert v-if="error" color="error" variant="soft" :description="error" />
   </form>
@@ -16,8 +15,8 @@
 import { authClient } from '~/lib/auth-client'
 import { validatePassword } from '~/utils/password-validation'
 
-const props = withDefaults(defineProps<{ callbackUrl: string; initialEmail?: string; agreed: boolean }>(), { initialEmail: '' })
-const emit = defineEmits<{ success: [email: string]; agreementRequired: [] }>()
+const props = withDefaults(defineProps<{ callbackUrl: string; initialEmail?: string }>(), { initialEmail: '' })
+const emit = defineEmits<{ success: [email: string] }>()
 const email = ref(props.initialEmail)
 const password = ref('')
 const emailError = ref('')
@@ -28,8 +27,7 @@ async function submit() {
   const normalizedEmail = email.value.trim()
   emailError.value = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) ? '' : 'Please enter a valid email address.'
   passwordError.value = validatePassword(password.value)
-  if (!props.agreed) emit('agreementRequired')
-  if (emailError.value || passwordError.value || !props.agreed) return
+  if (emailError.value || passwordError.value) return
   const result = await run(() => authClient.signUp.email({ email: normalizedEmail, password: password.value, name: normalizedEmail.split('@')[0] || 'User', callbackURL: props.callbackUrl }), 'Sign up failed. Please try again.') as { error?: { message?: string } & Record<string, unknown> } | null
   if (result?.error) error.value = result.error.message || 'Sign up failed. Please try again.'
   else if (result) emit('success', normalizedEmail)
