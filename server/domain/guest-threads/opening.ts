@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import type { BatchQuery } from '~/server/db'
 import { GUEST_NOTE_EVENT, OPENING_EVENT, messageQueries } from '~/server/domain/conversations'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
@@ -68,7 +69,7 @@ export function openingMessageQueries(input: {
   const note = input.note?.trim() ? input.note.trim() : null
   const openingKey = `conversation:${input.conversationId}:opening`
   return [
-    ...messageQueries({ conversationId: input.conversationId, authorKind: 'krabiclaw', authorUserId: input.openedByUserId, channel: 'web',
+    ...messageQueries({ conversationId: input.conversationId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: input.openedByUserId, channel: 'web',
       body: input.body, eventName: OPENING_EVENT, dedupeKey: openingKey, occurredAt: input.at }).queries,
     ...(note ? messageQueries({ conversationId: input.conversationId, authorKind: 'guest', authorUserId: input.guestUserId, channel: 'web',
       body: note, eventName: GUEST_NOTE_EVENT, dedupeKey: `conversation:${input.conversationId}:guest-note`, occurredAt: input.at }).queries : []),

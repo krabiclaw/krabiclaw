@@ -10,7 +10,8 @@ import type { LayoutKey } from 'nuxt/app'
 export type SiteSurface = 'tenant' | 'platform'
 
 /** Blawby's own site is the one organization on this theme id. Every other id is a customer site. */
-export const PLATFORM_THEME_ID = 'krabiclaw-theme-v1'
+export const PLATFORM_THEME_ID = 'blawby-theme-v1'
+export const PLATFORM_THEME_IDS: readonly string[] = [PLATFORM_THEME_ID, 'krabiclaw-theme-v1']
 export const PLATFORM_CONTACT_EMAIL = 'hello@blawby.com'
 /** The theme id provisioning gives a customer site. */
 export const TENANT_THEME_ID = 'tenant-theme-v1'
@@ -92,7 +93,7 @@ export function isPublicLocationPath(path: string): boolean {
  * names Blawby's own site out explicitly: that site is also `service`.
  */
 export function isLegalPracticeSite(input: { themeId?: string | null; vertical?: string | null }): boolean {
-  return String(input.themeId ?? '').trim().toLowerCase() !== PLATFORM_THEME_ID && isLegalPractice(input.vertical)
+  return !isPlatformSite(input) && isLegalPractice(input.vertical)
 }
 
 // Blawby's own site: the marketing pages, documentation and blog. It is an
@@ -133,7 +134,7 @@ export const PUBLIC_SITES: readonly PublicSiteDefinition[] = [PLATFORM_SITE, CUS
 
 /** Is this Blawby's own site? Its theme id alone says. */
 export function isPlatformSite(input: { themeId?: string | null }): boolean {
-  return String(input.themeId ?? '').trim().toLowerCase() === PLATFORM_THEME_ID
+  return PLATFORM_THEME_IDS.includes(String(input.themeId ?? '').trim().toLowerCase())
 }
 
 export const TENANT_NON_INDEXABLE_EXACT_PATHS = new Set(
@@ -147,7 +148,6 @@ export const TENANT_NON_INDEXABLE_EXACT_PATHS = new Set(
 export function resolvePublicSite(input: {
   themeId?: string | null
 }): PublicSiteDefinition {
-  const themeId = String(input.themeId ?? '').trim().toLowerCase()
-  if (themeId === PLATFORM_THEME_ID) return PLATFORM_SITE
+  if (isPlatformSite(input)) return PLATFORM_SITE
   return CUSTOMER_SITE
 }

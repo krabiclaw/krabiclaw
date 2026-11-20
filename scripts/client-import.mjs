@@ -323,7 +323,7 @@ async function scanImages(dir) {
       original_name: entry,
       normalized_name: normalName,
       r2_key: r2Key,
-      public_url: `https://media.krabiclaw.com/${r2Key}`,
+      public_url: `https://media.blawby.com/${r2Key}`,
       assigned_to: assignedTo,
       place_id: rawArgs["images-place-id"] ?? null,
       alt_text: null,
@@ -499,7 +499,7 @@ INSERT INTO business_locations (
     .map((f, i) => {
       const assetId = `asset-${SLUG}-${i}`;
       const r2Key = f.r2_key;
-      const publicUrl = `https://media.krabiclaw.com/${r2Key}`;
+      const publicUrl = `https://media.blawby.com/${r2Key}`;
       const ext = f.normalized_name.split(".").pop()?.toLowerCase() ?? "";
       const mimeType = MIME_MAP[ext] ?? "application/octet-stream";
       return `INSERT INTO media_assets (id, organization_id, r2_key, public_url, file_name, mime_type, alt_text, kind, provider, source, status)
@@ -559,7 +559,7 @@ WHERE id = '${orgId}';
 INSERT INTO organization_domains (id, organization_id, domain, type, role, status, dns_status)
 VALUES
   ('domain-${SLUG}-local', '${orgId}', '${SLUG}.localhost', 'subdomain', 'secondary', 'active', 'valid'),
-  ('domain-${SLUG}-prod', '${orgId}', '${SLUG}.krabiclaw.com', 'subdomain', 'canonical', 'active', 'valid')
+  ('domain-${SLUG}-prod', '${orgId}', '${SLUG}.blawby.com', 'subdomain', 'canonical', 'active', 'valid')
 ON CONFLICT(id) DO NOTHING;
 
 -- Locales
@@ -1264,7 +1264,7 @@ Next steps:
   5. Verify:   yarn client:verify --url http://localhost:3000 --vertical ${VERTICAL} --organization-id ${ORGANIZATION_ID} --slug ${SLUG}
   6. Release + verify prod:
                Merge through staging to main; CI deploys and verifies each environment.
-               yarn client:verify --url https://${SLUG}.krabiclaw.com --vertical ${VERTICAL} --organization-id ${ORGANIZATION_ID} --slug ${SLUG}
+               yarn client:verify --url https://${SLUG}.blawby.com --vertical ${VERTICAL} --organization-id ${ORGANIZATION_ID} --slug ${SLUG}
 
   Or use the onboard wrapper (steps 1-5 in one command):
                yarn client:onboard --slug ${SLUG} --organization-id ${ORGANIZATION_ID} --vertical ${VERTICAL}

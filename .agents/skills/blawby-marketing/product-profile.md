@@ -11,7 +11,7 @@ write.
 | Name | Blawby |
 | Website | https://blawby.com |
 | MCP endpoint | https://blawby.com/api/mcp |
-| MCP registry | `io.github.Blawby/blawby` (the older `io.github.krabiclaw/krabiclaw` listing serves the same endpoint) |
+| MCP registry | `io.github.Blawby/blawby` |
 | Contact | hello@blawby.com (general), privacy@blawby.com, legal@blawby.com, support@blawby.com, billing@blawby.com. Product support is `/help`; do not promise a support SLA. |
 | Founder | Paul Chris Luke, [LinkedIn](https://www.linkedin.com/in/paulchrisluke/) |
 | Started | May 2026, full time |

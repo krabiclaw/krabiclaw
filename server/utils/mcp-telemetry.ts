@@ -248,7 +248,7 @@ export async function logMcpToolCallEvent(db: DbClient, record: McpToolCallEvent
     organizationId: record.organization_id,
     resource: 'mcp_operation',
     source: record.mcp_surface,
-    provider: record.mcp_surface === 'client' ? 'mcp_client' : 'krabiclaw',
+    provider: record.mcp_surface === 'client' ? 'mcp_client' : 'blawby',
     channel: 'tools/call',
     quantity: 1,
     unit: 'tool_call',

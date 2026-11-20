@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -190,7 +191,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert(thread.kind === 'booking')
     assert.deepEqual([thread.booking_id, thread.payload.guest.email, thread.payload.guest.phone, thread.payload.guest.name, thread.payload.participant?.title], [null, null, null, null, 'Conversation supplied by Airbnb'])
     const entries = await recordedMessages(db, rows[0]!.id)
-    assert.deepEqual(entries.map(entry => [entry.body, entry.author_kind, JSON.parse(entry.payload_json).provider_inserted_at]), [['Hello', 'guest', RAW], [null, 'krabiclaw', RAW]])
+    assert.deepEqual(entries.map(entry => [entry.body, entry.author_kind, JSON.parse(entry.payload_json).provider_inserted_at]), [['Hello', 'guest', RAW], [null, PLATFORM_MESSAGE_AUTHOR_KIND, RAW]])
     const detail = await hostConversation(db, env, rows[0]!.id)
     assert(detail.conversation.kind === 'guest')
     assert.deepEqual([detail.conversation.booking_id, detail.conversation.composer, detail.conversation.title], [null, { channel: 'airbnb' }, 'Conversation supplied by Airbnb'])

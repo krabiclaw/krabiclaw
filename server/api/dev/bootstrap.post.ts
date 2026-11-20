@@ -30,7 +30,7 @@ export default defineHandler(async (event) => {
   })
   if (!organization) throw new HTTPError({ statusCode: 500, message: 'Better Auth did not create the platform organization' })
   const provisioned = await provisionOrganization(env, db, id, {
-    organizationId: organization.id, name: 'Blawby', subdomain: 'krabiclaw', vertical: 'service', sourceLocale: 'en', origin: event.req,
+    organizationId: organization.id, name: 'Blawby', subdomain: 'blawby', vertical: 'service', sourceLocale: 'en', origin: event.req,
   })
   if (provisioned.status !== 200) throw new HTTPError({ statusCode: provisioned.status, message: `Provisioning the platform organization failed: ${JSON.stringify(provisioned.data)}` })
   await executeBatch(db, [{

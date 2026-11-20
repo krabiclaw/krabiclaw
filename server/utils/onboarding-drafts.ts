@@ -20,7 +20,8 @@ import { LOGO_SHAPES } from '~/shared/media-placement-contract'
 import type { OnboardingStepId } from '~/shared/onboarding-flow'
 
 type DraftSourceType = 'google_places' | 'manual'
-export const ONBOARDING_ORGANIZATION_MARKER = '__krabiclaw_organization_creation_marker'
+export const ONBOARDING_ORGANIZATION_MARKER = '__blawby_organization_creation_marker'
+export const LEGACY_ONBOARDING_ORGANIZATION_MARKER = '__krabiclaw_organization_creation_marker'
 
 export interface SavedOnboardingDraft {
   id: string
@@ -37,7 +38,7 @@ export interface SavedOnboardingDraft {
 
 export async function readActiveOnboardingDraft(db: D1Database, userId: string, includeAbandoned = false) {
   const rows = await queryAll<SavedOnboardingDraft>(db,
-    "SELECT * FROM onboarding_drafts d WHERE user_id = ? AND (status = 'active' OR (status = 'abandoned' AND EXISTS (SELECT 1 FROM organization WHERE (id = d.organization_id OR json_extract(metadata, ?) = d.id) AND onboarding_status <> 'active'))) ORDER BY created_at, id LIMIT 2", [userId, `$.${ONBOARDING_ORGANIZATION_MARKER}`])
+    "SELECT * FROM onboarding_drafts d WHERE user_id = ? AND (status = 'active' OR (status = 'abandoned' AND EXISTS (SELECT 1 FROM organization WHERE (id = d.organization_id OR COALESCE(json_extract(metadata, ?), json_extract(metadata, ?)) = d.id) AND onboarding_status <> 'active'))) ORDER BY created_at, id LIMIT 2", [userId, `$.${ONBOARDING_ORGANIZATION_MARKER}`, `$.${LEGACY_ONBOARDING_ORGANIZATION_MARKER}`])
   if (rows.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'More than one unfinished website draft needs recovery', data: { code: 'ONBOARDING_DRAFT_CONFLICT', draft_ids: rows.map(row => row.id) } })
   const row = rows[0]
   if (row?.status === 'abandoned' && !includeAbandoned) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft cleanup is incomplete. Retry discarding this draft.', data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id, organization_id: row.organization_id } })

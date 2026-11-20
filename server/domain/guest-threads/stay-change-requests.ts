@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { CHANNEX_PROPERTY_HOME } from '~/server/integrations/channex/listing-mappings'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
@@ -64,7 +65,7 @@ const ANSWERS: Record<Outcome, { event: string; host: string; guest: string; air
 async function recordOutcome(db: DbClient, entry: MessageRow, proposal: Proposal, outcome: Outcome, actorUserId: string | null): Promise<MessageRow> {
   const answer = ANSWERS[outcome]
   return appendMessage(db, {
-    conversationId: entry.conversation_id, authorKind: 'krabiclaw', authorUserId: actorUserId, channel: 'airbnb',
+    conversationId: entry.conversation_id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: actorUserId, channel: 'airbnb',
     eventName: answer.event, dedupeKey: `booking-change-decision:${entry.id}`,
     body: actorUserId ? answer.host : proposal.initiated_by === 'guest' ? answer.guest : answer.airbnb,
     payload: { requestId: entry.id, outcome },
@@ -152,7 +153,7 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
     const guest = request.initiatedBy === 'guest'
     // The guest's own request names their account; a host's proposal on Airbnb is Blawby's to relay.
     entry = await appendMessage(db, {
-      conversationId: threadId, authorKind: 'krabiclaw', authorUserId: guest ? stay.guest_user_id : null, channel: 'airbnb', eventName: 'booking_change.requested', dedupeKey,
+      conversationId: threadId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: guest ? stay.guest_user_id : null, channel: 'airbnb', eventName: 'booking_change.requested', dedupeKey,
       body: `${guest ? 'Asked' : 'Proposed'} on Airbnb to change the stay to ${nightsLabel(request.after, 'en')} for ${request.after.adults + request.after.children} guests (${formatMinorAmount(request.after.total_minor, request.after.currency, 'en-US')}).`,
       payload: proposal,
     }, conversationTaskQueries(threadId, new Date().toISOString()))

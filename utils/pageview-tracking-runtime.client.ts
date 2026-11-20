@@ -3,7 +3,6 @@ import { normalizeReferrerHost, readAttributionParams } from '~/utils/analytics-
 import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { isTrackablePath } from '~/utils/pageview-path'
-import { NATIVE_PAGEVIEW_ZARAZ_EVENT } from '~/utils/zaraz-consent'
 
 import { browserPageviewTransport, type BrowserPageview as TrackedPage } from '~/utils/browser-pageview'
 
@@ -70,7 +69,7 @@ export function registerPageviewTracking() {
   const locales = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
   const isTracked = (path: string) => isTrackablePath(resolveTenantLocalePath(path, locales.value.map(item => item.locale)).sourcePath) && path !== '/dev' && !path.startsWith('/dev/')
 
-  const { deliver: deliverPageview, duration: sendDuration } = browserPageviewTransport(NATIVE_PAGEVIEW_ZARAZ_EVENT, error => {
+  const { deliver: deliverPageview, duration: sendDuration } = browserPageviewTransport(error => {
     void nuxtApp.callHook('vue:error', error, null, 'analytics-collector')
     return false
   })

@@ -23,7 +23,7 @@ import {
   usesTenantHeader,
 } from "../utils/tenant-hosts";
 import { clearPreviewAuthorization, previewSecretOf, PREVIEW_COOKIE_NAME, PREVIEW_TOKEN_QUERY, PUBLIC_WEBSITE_QUERY, resolvePreviewAuthorization } from "../utils/preview-token";
-import { PLATFORM_SITE, resolvePublicSite } from "~/utils/site-routing";
+import { PLATFORM_THEME_IDS, resolvePublicSite } from "~/utils/site-routing";
 import { organizationSocialMediaFromJson } from '~/server/utils/public-social-image'
 import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette, resolveSitePalette } from '~/shared/site-palette'
@@ -350,9 +350,10 @@ function platformTenantQuery() {
       FROM organization o
       LEFT JOIN organization_domains canonical
         ON canonical.organization_id = o.id AND canonical.role = 'canonical' AND canonical.status = 'active'
-      WHERE o.theme_id = ? AND o.status = 'active' AND o.onboarding_status = 'active'
+      WHERE o.theme_id IN (${PLATFORM_THEME_IDS.map(() => '?').join(', ')})
+        AND o.status = 'active' AND o.onboarding_status = 'active'
       LIMIT 1
-    `, params: [PLATFORM_SITE.themeId] }
+    `, params: [...PLATFORM_THEME_IDS] }
 }
 
 async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {

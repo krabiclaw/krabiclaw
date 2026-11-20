@@ -1,11 +1,11 @@
 import { readAttributionParams } from './analytics-attribution'
 import { browserPageviewTransport, postPublicInteraction } from './browser-pageview'
 import { installPublicDocumentControls } from './public-document-controls'
-import { NATIVE_PAGEVIEW_ZARAZ_EVENT, ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME } from './zaraz-consent'
+import { ZARAZ_ANALYTICS_PURPOSE_ID, ZARAZ_CONSENT_COOKIE_NAME } from './zaraz-consent'
 
 const report = (error: unknown) => { globalThis.reportError(error); return false as const }
 const { pathname: path, search, hash } = location
-const { deliver, duration } = browserPageviewTransport(NATIVE_PAGEVIEW_ZARAZ_EVENT, report)
+const { deliver, duration } = browserPageviewTransport(report)
 const enteredAt = Date.now()
 const track = !(document.currentScript as HTMLElement | null)?.hasAttribute('data-preview') && !navigator.webdriver && typeof window.crypto?.randomUUID === 'function'
 const eventId = track ? crypto.randomUUID() : ''

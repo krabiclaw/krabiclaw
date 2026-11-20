@@ -515,7 +515,7 @@ export async function ensureStripeConnectedAccount(
       defaults: {
         responsibilities: { fees_collector: 'application', losses_collector: 'stripe' },
       },
-      metadata: { krabiclaw_organization_id: input.organizationId },
+      metadata: { blawby_organization_id: input.organizationId },
       include: STRIPE_CONNECT_ACCOUNT_INCLUDE,
     }, { idempotencyKey: `krabiclaw-connect-account:express-managed-risk:${input.organizationId}` })
   } catch (error) {

@@ -64,21 +64,21 @@ test('connected account reservation is organization-scoped and claimed by one st
 
 test('Connect callback URLs are built only from the configured platform origin and organization slug', () => {
   assert.deepEqual(
-    buildStripeConnectOnboardingUrls('https://krabiclaw.com', 'sun-and-sea', true),
+    buildStripeConnectOnboardingUrls('https://blawby.com', 'sun-and-sea', true),
     {
-      returnUrl: 'https://krabiclaw.com/dashboard/sun-and-sea/payments?tab=payouts&stripe_connect=returned',
-      refreshUrl: 'https://krabiclaw.com/api/dashboard/connect/refresh?org=sun-and-sea',
+      returnUrl: 'https://blawby.com/dashboard/sun-and-sea/payments?tab=payouts&stripe_connect=returned',
+      refreshUrl: 'https://blawby.com/api/dashboard/connect/refresh?org=sun-and-sea',
     },
   )
-  assert.throws(() => buildStripeConnectOnboardingUrls('http://krabiclaw.com', 'sun-and-sea', false), /HTTPS/)
+  assert.throws(() => buildStripeConnectOnboardingUrls('http://blawby.com', 'sun-and-sea', false), /HTTPS/)
   assert.throws(() => buildStripeConnectOnboardingUrls('http://localhost:3000', 'sun-and-sea', true), /HTTPS/)
   assert.equal(new URL(buildStripeConnectOnboardingUrls('http://localhost:3000', 'sun-and-sea', false).returnUrl).origin, 'http://localhost:3000')
-  assert.throws(() => buildStripeConnectOnboardingUrls('https://krabiclaw.com/path', 'sun-and-sea', true), /origin/)
-  assert.deepEqual(buildAppPayoutsOnboardingUrls('https://krabiclaw.com'), {
-    returnUrl: 'https://krabiclaw.com/app/return/payouts?outcome=done',
-    refreshUrl: 'https://krabiclaw.com/app/return/payouts?outcome=refresh',
+  assert.throws(() => buildStripeConnectOnboardingUrls('https://blawby.com/path', 'sun-and-sea', true), /origin/)
+  assert.deepEqual(buildAppPayoutsOnboardingUrls('https://blawby.com'), {
+    returnUrl: 'https://blawby.com/app/return/payouts?outcome=done',
+    refreshUrl: 'https://blawby.com/app/return/payouts?outcome=refresh',
   })
-  assert.throws(() => buildAppPayoutsOnboardingUrls('http://krabiclaw.com'), /HTTPS/)
+  assert.throws(() => buildAppPayoutsOnboardingUrls('http://blawby.com'), /HTTPS/)
 })
 
 test('Today suggests Stripe setup until the account is ready, and a price for each experience booked here', async t => {
@@ -159,6 +159,7 @@ test('Today suggests Stripe setup until the account is ready, and a price for ea
         assert.equal(created, false, 'Stripe is asked to create the account once')
         const input = JSON.parse(String(request instanceof Request ? await request.text() : init?.body))
         assert.equal(input.identity.country, 'US', 'Stripe receives the country the merchant selected')
+        assert.deepEqual(input.metadata, { blawby_organization_id: 'org' })
         created = true
         creating()
         await createReleased

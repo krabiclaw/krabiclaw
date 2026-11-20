@@ -9,7 +9,7 @@ export type BrowserPageview = {
 }
 
 /** The network protocol shared by document visits and Nuxt navigation. */
-export function browserPageviewTransport(gaEvent: string, report: (error: unknown) => false) {
+export function browserPageviewTransport(report: (error: unknown) => false) {
   const send = async (payload: Record<string, unknown>) => {
     const response = await fetch('/api/analytics/track', {
       method: 'POST',
@@ -19,20 +19,22 @@ export function browserPageviewTransport(gaEvent: string, report: (error: unknow
       keepalive: true,
     })
     if (!response.ok) throw new Error(`Analytics collection was rejected (${response.status})`)
-    return await response.json() as { ignored?: boolean; ga4_delivery?: { dispatch?: boolean } }
+    return await response.json() as { ignored?: boolean; ga4_delivery?: { dispatch?: boolean; event_name?: string } }
   }
 
   async function deliver(after: Promise<boolean>, page: BrowserPageview): Promise<boolean> {
     await after
     const result = await send(page.pageview!).catch(report)
     if (!result || result.ignored) return false
-    if (result.ga4_delivery?.dispatch) {
+    const delivery = result.ga4_delivery
+    if (delivery?.dispatch) {
       void (async () => {
         let deliveryStatus = 'dispatched'
         try {
           const zaraz = window.zaraz
           if (!zaraz?.track) throw new Error('Zaraz is unavailable for the recorded pageview')
-          await zaraz.track(gaEvent, { event_id: page.eventId, page_location: new URL(page.fullPath, window.location.origin).href })
+          if (!delivery.event_name) throw new Error('The collector dispatched a pageview without its Zaraz event')
+          await zaraz.track(delivery.event_name, { event_id: page.eventId, page_location: new URL(page.fullPath, window.location.origin).href })
         } catch (error) { deliveryStatus = 'failed'; report(error) }
         await send({ event_id: page.eventId, event_type: 'ga4_delivery', page_path: page.path, delivery_status: deliveryStatus }).catch(report)
       })()

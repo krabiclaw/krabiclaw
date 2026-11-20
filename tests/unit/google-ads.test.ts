@@ -94,7 +94,7 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
 })
 
 test('creating a search campaign submits its budget, targeting and copy atomically while paused and returns Google resource names', async (t) => {
-  const targetUrl = 'https://krabiclaw.com/blog/operations/preview'
+  const targetUrl = 'https://blawby.com/blog/operations/preview'
   const headlines = ['Discover Krabi', 'Authentic Tours', 'Book Online Now']
   const descriptions = ['Explore breathtaking islands with local experts.', 'Personalized tours with guaranteed quality.']
   const providerFetch = t.mock.method(globalThis, 'fetch', async (input, init) => {
@@ -188,7 +188,7 @@ test('creating a search campaign reports a provider rejection instead of returni
   await assert.rejects(createGoogleAdsSearchCampaign('test-token', 'dev-tok', '331-742-7925', {
     name: 'New Blog Post Campaign',
     dailyBudgetAmountMicros: 15000000,
-    targetUrl: 'https://krabiclaw.com/blog/operations/preview',
+    targetUrl: 'https://blawby.com/blog/operations/preview',
     keywords: [{ text: 'krabi tours', matchType: 'PHRASE' }],
     headlines: ['Discover Krabi', 'Authentic Tours', 'Book Online Now'],
     descriptions: ['Explore breathtaking islands with local experts.', 'Personalized tours with guaranteed quality.'],

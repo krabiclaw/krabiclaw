@@ -5,6 +5,9 @@ import { TENANT_TYPES } from '../../utils/tenant-routing.ts'
 
 test('isNonIndexableHost classifies staging, cloudflare previews, and demo showcase hosts as non-indexable', () => {
   // Demo showcase hosts
+  for (const demo of ['demo.blawby.com', 'saltleaf-stays-demo.blawby.com', 'cedar-legal.blawby.com']) {
+    assert.equal(isNonIndexableHost(demo), true, demo)
+  }
   assert.equal(isNonIndexableHost('demo.krabiclaw.com'), true)
   assert.equal(isNonIndexableHost('demo.localhost'), true)
   assert.equal(isNonIndexableHost('demo.localhost:3000'), true)
@@ -19,16 +22,16 @@ test('isNonIndexableHost classifies staging, cloudflare previews, and demo showc
 
   // Production indexable hosts
   assert.equal(isNonIndexableHost('krabiclaw.com'), false)
-  assert.equal(isNonIndexableHost('www.krabiclaw.com'), false)
+  assert.equal(isNonIndexableHost('blawby.com'), false)
   assert.equal(isNonIndexableHost('pottery-house-krabi.com'), false)
-  assert.equal(isNonIndexableHost('kikuzuki.krabiclaw.com'), false)
+  assert.equal(isNonIndexableHost('kikuzuki.blawby.com'), false)
 })
 
 test('resolveRuntimeSeoConfig produces non-indexable configuration for demo hosts and demo organizations', () => {
   const demoHostResult = resolveRuntimeSeoConfig({
     tenantType: TENANT_TYPES.TENANT,
-    origin: 'https://demo.krabiclaw.com',
-    hostname: 'demo.krabiclaw.com',
+    origin: 'https://demo.blawby.com',
+    hostname: 'demo.blawby.com',
     tenantName: 'Ember & Slice',
   })
   assert.equal(demoHostResult.indexable, false)
@@ -54,8 +57,8 @@ test('resolveRuntimeSeoConfig produces non-indexable configuration for demo host
 
   const platformResult = resolveRuntimeSeoConfig({
     tenantType: TENANT_TYPES.PLATFORM,
-    origin: 'https://krabiclaw.com',
-    hostname: 'krabiclaw.com',
+    origin: 'https://blawby.com',
+    hostname: 'blawby.com',
   })
   assert.equal(platformResult.indexable, true)
   assert.equal(platformResult.name, 'Blawby')

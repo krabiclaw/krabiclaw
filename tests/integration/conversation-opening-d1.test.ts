@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '../../shared/messages-contract.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -72,12 +73,15 @@ test('a table booking opens with its own message and the guest note, written onc
     await reservation('new', 'Window seat if possible', sentence)
     assert.deepEqual(await messages('new'), [['guest', sentence], ['guest', 'Window seat if possible']])
     const ledger = async (id: string) => (await db.prepare('SELECT sequence, author_kind, event_name FROM messages WHERE conversation_id = ? ORDER BY sequence').bind(id).all()).results
-    const opened = [{ sequence: 1, author_kind: 'krabiclaw', event_name: 'thread.opening' }, { sequence: 2, author_kind: 'guest', event_name: 'thread.guest_note' }]
+    const opened = [{ sequence: 1, author_kind: PLATFORM_MESSAGE_AUTHOR_KIND, event_name: 'thread.opening' }, { sequence: 2, author_kind: 'guest', event_name: 'thread.guest_note' }]
     assert.deepEqual(await ledger('new'), opened)
     await db.batch(requestInsertQueries({ id: 'new', kind: 'booking', organization_id: ORG, location_id: 'loc', booking_id: 'res-new', user_id: null,
       payload: threadPayloadForGuest({ name: 'Filip Heurckmans', email: 'filip@example.test', phone: '+32475699444', locale: 'en', ipHash: null }), created_at: CREATED }, undefined, { opening: sentence, note: 'Window seat if possible' })
       .slice(1).map(query => db.prepare(query.query).bind(...(query.params ?? []))))
     assert.deepEqual(await ledger('new'), opened)
+    assert.equal(PLATFORM_MESSAGE_AUTHOR_KIND, 'blawby')
+    await db.prepare("UPDATE messages SET author_kind = 'krabiclaw' WHERE conversation_id = 'new' AND author_kind = 'blawby'").run()
+    assert.deepEqual(await messages('new'), [['guest', sentence], ['guest', 'Window seat if possible']])
 
     // Another conversation, opened the same way, where the guest wrote since: their reply is its preview, and its
     // time orders it ahead of the one whose newest message is its opening note.
@@ -103,7 +107,11 @@ test('a table booking opens with its own message and the guest note, written onc
     const page = (userId: string, limit = 40) => loadConversationPage(db, { conversationId: 'shared', userId }, { before: null, limit })
     const list = (q?: string) => listConversations(db, null, { userId: traveler.id, buyerAudience: true, q })
     const privateWords = 'Private card receipt'
-    const payment = await appendMessage(db, { conversationId: 'shared', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: privateWords })
+    const payment = await appendMessage(db, { conversationId: 'shared', authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, eventName: 'payment.payment_captured', body: privateWords })
+    const existingPayment = { conversationId: 'shared', authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, eventName: 'payment.payment_captured', body: privateWords, dedupeKey: 'historical-payment-replay' }
+    const historical = await appendMessage(db, existingPayment)
+    await db.prepare("UPDATE messages SET author_kind = 'krabiclaw' WHERE id = ?").bind(historical.id).run()
+    assert.equal((await appendMessage(db, existingPayment)).id, historical.id)
     const privatePage = await page(traveler.id)
     assert.deepEqual(privatePage.entries, [])
     assert.equal(privatePage.capabilities.can_invite_guest, false)
@@ -123,7 +131,7 @@ test('a table booking opens with its own message and the guest note, written onc
     assert.deepEqual(await markConversationRead(db, { organizationId: ORG, conversationId: 'shared', userId: traveler.id }), { read: true, last_read_message_id: publicMessage.id })
     assert.equal(await guestUnread(db, traveler.id), 0)
     const travelerMessage = await appendMessage(db, { conversationId: 'shared', authorKind: 'guest', authorUserId: traveler.id, channel: 'web', body: 'I will be there' })
-    const latestPayment = await appendMessage(db, { conversationId: 'shared', authorKind: 'krabiclaw', authorUserId: null, eventName: 'payment.payment_captured', body: 'Another private payment' })
+    const latestPayment = await appendMessage(db, { conversationId: 'shared', authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, eventName: 'payment.payment_captured', body: 'Another private payment' })
     const first = await page(traveler.id, 1)
     const shown = first.entries.filter(entry => entry.type === 'message')
     assert.deepEqual(shown.map(entry => [entry.id, entry.author]), [[travelerMessage.id, 'You']])

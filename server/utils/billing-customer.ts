@@ -60,7 +60,7 @@ export async function connectedBuyerCustomer(db: DbClient, stripe: Stripe, buyer
   const connected = { stripeAccount: stripeAccountId }
   let mapping = await queryFirst<{ stripe_customer_id: string }>(db, 'SELECT stripe_customer_id FROM stripe_connected_customers WHERE user_id=? AND stripe_account_id=? AND livemode=?', [userId, stripeAccountId, Number(livemode)])
   if (!mapping) {
-    const created = await stripe.customers.create({ email: user.email, name: user.name ?? undefined, metadata: { krabiclaw_user_id: userId } }, connected)
+    const created = await stripe.customers.create({ email: user.email, name: user.name ?? undefined, metadata: { blawby_user_id: userId } }, connected)
     await execute(db, 'INSERT INTO stripe_connected_customers(user_id,stripe_account_id,livemode,stripe_customer_id,created_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,stripe_account_id,livemode) DO NOTHING', [userId, stripeAccountId, Number(livemode), created.id, new Date().toISOString()])
     mapping = await queryFirst<{ stripe_customer_id: string }>(db, 'SELECT stripe_customer_id FROM stripe_connected_customers WHERE user_id=? AND stripe_account_id=? AND livemode=?', [userId, stripeAccountId, Number(livemode)])
     if (!mapping) throw new Error('The connected customer was not recorded')

@@ -1,3 +1,4 @@
+import { PLATFORM_MESSAGE_AUTHOR_KIND } from '~/shared/messages-contract'
 import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent } from '~/server/events'
 import { HTTPError } from 'nitro'
 import { bookingStatusQuery } from '~/server/domain/bookings'
@@ -192,7 +193,7 @@ async function operationEntryQueries(
       ${inventory ? `AND ${inventory.query}` : ''}`
     : `src.product_session_id IS NOT NULL AND src.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')`
   return messageQueries({
-    id: entryId, conversationId: context.thread.id, authorKind: 'krabiclaw', authorUserId: input.actorUserId,
+    id: entryId, conversationId: context.thread.id, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: input.actorUserId,
     body: null, eventName: `${plan.kind}.${plan.action}`, dedupeKey, occurredAt: now,
     payload: {
       action: plan.action, beforeStatus: plan.beforeStatus, afterStatus: plan.afterStatus,
@@ -542,7 +543,7 @@ export async function deliverGuestReply(db: DbClient, input: ReplyInput, append:
   const guestEmail = destination.channel === 'email' || destination.channel === 'account' ? destination.email : null
   const messageChannel = recorded?.channel ?? (channel ? 'airbnb' : guestEmail ? 'email' : 'web')
   const commit = () => append(db, {
-    conversation: thread, role: 'member', authorKind: actorUserId === null ? 'krabiclaw' : 'member', authorUserId: recordedAuthor,
+    conversation: thread, role: 'member', authorKind: actorUserId === null ? PLATFORM_MESSAGE_AUTHOR_KIND : 'member', authorUserId: recordedAuthor,
     channel: messageChannel, body: messageChannel === 'airbnb' ? body : body || null, eventName, payload: { request_hash: requestHash }, dedupeKey,
   }, {
     env: input.env, photos: photoInput, uploaderUserId: actorUserId, recorded, retryMessageId,

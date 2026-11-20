@@ -5,8 +5,8 @@
 //   node --env-file=.env --experimental-strip-types scripts/provision-lodging-demo.ts --staging
 //   node --env-file=.env --experimental-strip-types scripts/provision-lodging-demo.ts --production
 //
-// Staging signs in as the development owner (KRABICLAW_DEV_EMAIL and
-// KRABICLAW_DEV_PASSWORD) and books stays through test-mode Stripe Connect.
+// Staging signs in as the development owner (BLAWBY_DEV_EMAIL and
+// BLAWBY_DEV_PASSWORD) and books stays through test-mode Stripe Connect.
 // Production signs in as the app-review account (CANARY_LOGIN_EMAIL and
 // CANARY_LOGIN_PASSWORD); with no online payments there its homes take
 // enquiries. Either way it uses the same endpoints the
@@ -189,8 +189,8 @@ class StepError extends Error {}
 const { values } = parseArgs({ options: { staging: { type: 'boolean' }, production: { type: 'boolean' } }, strict: true })
 if (values.staging === values.production) throw new StepError('Pass exactly one of --staging or --production.')
 const TARGET = values.production
-  ? { base: 'https://krabiclaw.com', site: `https://${DEMO.slug}.krabiclaw.com`, email: 'CANARY_LOGIN_EMAIL', password: 'CANARY_LOGIN_PASSWORD', owner: 'the production app-review account' }
-  : { base: 'https://staging.blawby.com', site: `https://${DEMO.slug}-staging.blawby.com`, email: 'KRABICLAW_DEV_EMAIL', password: 'KRABICLAW_DEV_PASSWORD', owner: 'the staging development owner' }
+  ? { base: 'https://blawby.com', site: `https://${DEMO.slug}.blawby.com`, email: 'CANARY_LOGIN_EMAIL', password: 'CANARY_LOGIN_PASSWORD', owner: 'the production app-review account' }
+  : { base: 'https://staging.blawby.com', site: `https://${DEMO.slug}-staging.blawby.com`, email: 'BLAWBY_DEV_EMAIL', password: 'BLAWBY_DEV_PASSWORD', owner: 'the staging development owner' }
 const BASE = TARGET.base
 const email = process.env[TARGET.email]
 const password = process.env[TARGET.password]

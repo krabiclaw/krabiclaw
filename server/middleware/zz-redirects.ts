@@ -56,7 +56,7 @@ function articlePathWithoutCategory(pathname: string): string | null {
   return match ? `/${match[1]}/${match[2]}` : null
 }
 
-// Platform-domain-only (krabiclaw.com bare host) paths Google Search Console
+// Platform-domain-only paths Google Search Console
 // keeps recrawling with no current or planned replacement (see issue #317).
 // A plain 404 lets Google keep retrying indefinitely; 410 Gone is a stronger,
 // faster de-index signal. `/posts` is not one of them: Blawby's own site

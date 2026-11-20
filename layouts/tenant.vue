@@ -86,7 +86,7 @@ useHead(() => {
     htmlAttrs: { lang: activeLocale.value },
     link: [
       { rel: 'preconnect', href: 'https://imagedelivery.net' },
-      { rel: 'preconnect', href: 'https://media.krabiclaw.com' },
+      { rel: 'preconnect', href: 'https://media.blawby.com' },
     ],
     style: isHome.value ? [{ innerHTML: tenantCriticalCss, tagPriority: 'critical' }] : [],
     meta: shellSearchConsoleVerification.value

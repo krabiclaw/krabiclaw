@@ -81,7 +81,11 @@ test('Google Ads diagnostics are read-only tools for the selected Growth tenant'
   const { result } = await catalog.json()
   const diagnostics = result.tools.filter((tool: { name: string }) => toolNames.includes(tool.name))
   expect(diagnostics.map((tool: { name: string }) => tool.name).sort()).toEqual(toolNames.sort())
-  for (const tool of diagnostics) expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false })
+  expect(result._meta['blawby/catalogFingerprint']).toMatch(/^sha256:[0-9a-f]{64}$/)
+  for (const tool of diagnostics) {
+    expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false })
+    expect(tool._meta['blawby/toolInfo']).toMatchObject({ domain: expect.any(String), minimumRole: expect.any(String) })
+  }
 
   const response = await mcpRequest(request, baseURL!, {
     method: 'tools/call', toolName: 'list_conversion_actions', args: { organization_id: tenant.organizationId },

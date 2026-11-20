@@ -30,7 +30,7 @@ test('public discovery resolves translations through current publication owners'
       // Blawby's own organization is the one running the platform template.
       // Public sites: discovery serves only a tenant that finished onboarding.
       await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone, onboarding_status) VALUES (?,?,?,?,?,?, 'USD', 'UTC', 'active')`)
-        .bind(id, id, id, id, id === 'platform' ? 'krabiclaw-theme-v1' : 'tenant-theme-v1', id === 'platform' ? 'service' : 'restaurant').run()
+        .bind(id, id, id, id, id === 'platform' ? 'blawby-theme-v1' : 'tenant-theme-v1', id === 'platform' ? 'service' : 'restaurant').run()
       for (const locale of ['en', 'th']) await db.prepare('INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,?,?,?)')
         .bind(id + locale, id, locale, Number(locale === 'en'), 'published').run()
     }
