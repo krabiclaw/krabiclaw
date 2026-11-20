@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib'
+import fontkit from '@pdf-lib/fontkit'
 import { z } from 'zod'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { appendMessage, findMessageByDedupeKey, messageQueries, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
@@ -430,6 +431,70 @@ export async function agreementDocument(env: CloudflareEnv, conversation: Conver
 
 const SIGNATURE_COLOR = rgb(0.09, 0.09, 0.11)
 
+const NOTO_FONT_FILES = {
+  thai: 'NotoSansThai-Regular.ttf',
+  kr: 'NotoSansKR-Regular.ttf',
+  jp: 'NotoSansJP-Regular.ttf',
+  sc: 'NotoSansSC-Regular.ttf',
+  tc: 'NotoSansTC-Regular.ttf',
+  latin: 'NotoSans-Regular.ttf',
+} as const
+type NotoFontKey = keyof typeof NOTO_FONT_FILES
+
+const WIN_ANSI_REGEX = /^[\u0020-\u007E\u00A0-\u00FF\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]*$/
+
+function isWinAnsi(text: string): boolean {
+  return WIN_ANSI_REGEX.test(text)
+}
+
+const fontBytesCache = new Map<string, Uint8Array>()
+
+async function loadFontAssetBytes(env: CloudflareEnv, fileName: string): Promise<Uint8Array> {
+  const cached = fontBytesCache.get(fileName)
+  if (cached) return cached
+  let bytes: Uint8Array
+  if (env.ASSETS) {
+    const res = await env.ASSETS.fetch(new Request(`http://assets/fonts/${fileName}`))
+    if (!res.ok) throw new Error(`Could not load font asset ${fileName}: ${res.status}`)
+    bytes = new Uint8Array(await res.arrayBuffer())
+  } else {
+    const { readFile } = await import('node:fs/promises')
+    const { resolve } = await import('node:path')
+    bytes = new Uint8Array(await readFile(resolve(process.cwd(), 'public/fonts', fileName)))
+  }
+  fontBytesCache.set(fileName, bytes)
+  return bytes
+}
+
+const fontkitInstanceCache = new Map<string, ReturnType<typeof fontkit.create>>()
+async function getFontkitFont(env: CloudflareEnv, key: NotoFontKey) {
+  const cached = fontkitInstanceCache.get(key)
+  if (cached) return cached
+  const bytes = await loadFontAssetBytes(env, NOTO_FONT_FILES[key])
+  const instance = fontkit.create(bytes)
+  fontkitInstanceCache.set(key, instance)
+  return instance
+}
+
+async function pickNotoFontKey(env: CloudflareEnv, text: string): Promise<NotoFontKey> {
+  const chars = [...text]
+  if (chars.some(c => /\p{Script=Thai}/u.test(c))) return 'thai'
+  if (chars.some(c => /\p{Script=Hangul}/u.test(c))) return 'kr'
+  if (chars.some(c => /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(c))) return 'jp'
+  if (chars.some(c => /\p{Script=Han}/u.test(c))) {
+    const jpFont = await getFontkitFont(env, 'jp')
+    if (chars.every(c => !/\p{Script=Han}/u.test(c) || jpFont.hasGlyphForCodePoint(c.codePointAt(0)!))) {
+      return 'jp'
+    }
+    const scFont = await getFontkitFont(env, 'sc')
+    if (chars.every(c => !/\p{Script=Han}/u.test(c) || scFont.hasGlyphForCodePoint(c.codePointAt(0)!))) {
+      return 'sc'
+    }
+    return 'tc'
+  }
+  return 'latin'
+}
+
 /** The document with every signature where it was placed and a closing page that records who signed, when and how. */
 export async function signedAgreementDocument(env: CloudflareEnv, conversation: ConversationRow, messageId: string, viewer: AgreementViewer): Promise<{ bytes: Uint8Array<ArrayBuffer>; fileName: string }> {
   const { booking, records, listing } = await readAgreement(env.DB, conversation)
@@ -444,14 +509,30 @@ export async function signedAgreementDocument(env: CloudflareEnv, conversation: 
   const signatures = state.signers.map(signer => ({ signer, signed: signedSchema.parse(payload(signer.signature!)), at: signer.signature!.occurred_at }))
   if (signatures.some(({ signed }) => signed.sha256 !== fingerprint)) throw new Error(`The ${agreement.label.toLowerCase()} in storage is not the one that was signed`)
   const pdf = await PDFDocument.load(original)
+  pdf.registerFontkit(fontkit)
   const [script, regular, bold] = await Promise.all([pdf.embedFont(StandardFonts.TimesRomanItalic), pdf.embedFont(StandardFonts.Helvetica), pdf.embedFont(StandardFonts.HelveticaBold)])
+
+  const embeddedNotoFonts = new Map<NotoFontKey, PDFFont>()
+  async function resolveFont(text: string, defaultFont: PDFFont): Promise<PDFFont> {
+    if (isWinAnsi(text)) return defaultFont
+    const key = await pickNotoFontKey(env, text)
+    let font = embeddedNotoFonts.get(key)
+    if (!font) {
+      const bytes = await loadFontAssetBytes(env, NOTO_FONT_FILES[key])
+      font = await pdf.embedFont(bytes, { subset: true })
+      embeddedNotoFonts.set(key, font)
+    }
+    return font
+  }
+
   const day = (at: string) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date(at))
   for (const field of state.fields) {
     const page = pdf.getPage(field.page - 1)
     const { width, height } = page.getSize()
     const signature = signatures.find(({ signer }) => signer.key === field.signer_key)!
     const text = field.kind === 'signature' ? signature.signed.typed_name : day(signature.at)
-    const font = field.kind === 'signature' ? script : regular
+    const defaultFont = field.kind === 'signature' ? script : regular
+    const font = await resolveFont(text, defaultFont)
     const box = { x: field.x * width, y: height - (field.y + field.height) * height, w: field.width * width, h: field.height * height }
     const size = Math.min(box.h * (field.kind === 'signature' ? 0.8 : 0.6), field.kind === 'signature' ? 28 : 12)
     page.drawText(text, { x: box.x + 2, y: box.y + (box.h - size) / 2 + size * 0.2, size, font, color: SIGNATURE_COLOR, maxWidth: box.w - 4 })
@@ -459,19 +540,23 @@ export async function signedAgreementDocument(env: CloudflareEnv, conversation: 
   // The signature record: what was signed, by whom, when and from where.
   const page = pdf.addPage([612, 792])
   let y = 740
-  const line = (text: string, size = 10, font = regular) => { page.drawText(text, { x: 54, y, size, font, color: SIGNATURE_COLOR, maxWidth: 504 }); y -= size + 8 }
-  line('Signature record', 16, bold)
-  line(`${agreement.label} · ${agreement.file_name}`)
-  line(`Document fingerprint (SHA-256): ${fingerprint}`, 8)
+  const line = async (text: string, size = 10, defaultFont = regular) => {
+    const font = await resolveFont(text, defaultFont)
+    page.drawText(text, { x: 54, y, size, font, color: SIGNATURE_COLOR, maxWidth: 504 })
+    y -= size + 8
+  }
+  await line('Signature record', 16, bold)
+  await line(`${agreement.label} · ${agreement.file_name}`)
+  await line(`Document fingerprint (SHA-256): ${fingerprint}`, 8)
   y -= 8
   for (const { signer, signed, at } of signatures) {
-    line(`${signer.name} (${signer.role === 'host' ? 'business' : 'guest'})`, 11, bold)
-    line(`Signed as “${signed.typed_name}” on ${new Date(at).toUTCString()}`)
-    line(`Agreed to sign electronically. IP address ${signed.ip ?? 'not recorded'}.`, 9)
+    await line(`${signer.name} (${signer.role === 'host' ? 'business' : 'guest'})`, 11, bold)
+    await line(`Signed as “${signed.typed_name}” on ${new Date(at).toUTCString()}`)
+    await line(`Agreed to sign electronically. IP address ${signed.ip ?? 'not recorded'}.`, 9)
     y -= 6
   }
-  if (state.request) line(`Sent ${new Date(state.request.occurred_at).toUTCString()}. Completed ${new Date(agreement.completed_at!).toUTCString()}.`, 9)
-  line('Signed through Blawby.', 9)
+  if (state.request) await line(`Sent ${new Date(state.request.occurred_at).toUTCString()}. Completed ${new Date(agreement.completed_at!).toUTCString()}.`, 9)
+  await line('Signed through Blawby.', 9)
   return { bytes: new Uint8Array(await pdf.save({ updateFieldAppearances: false })), fileName: agreement.file_name.replace(/\.pdf$/i, '') + '-signed.pdf' }
 }
 

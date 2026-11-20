@@ -147,6 +147,7 @@
     "@nuxtjs/robots": "6.2.4",
     "@nuxtjs/sitemap": "8.6.1",
     "@opentelemetry/api": "^1.9.1",
+    "@pdf-lib/fontkit": "^1.1.1",
     "@photostructure/tz-lookup": "11.7.0",
     "@resvg/resvg-wasm": "^2.6.2",
     "@stripe/stripe-js": "^9.17.0",
