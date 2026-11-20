@@ -32,7 +32,12 @@
               <template v-for="message in item.runs" :key="message.id">
                 <div v-if="message.job" class="w-full max-w-md rounded-[28px] bg-accented/50 p-2" :data-team-message="message.id" data-automatic data-testid="conversation-job-card">
                   <div class="rounded-3xl bg-default p-4 shadow-sm">
-                    <p class="text-sm text-muted">Job</p>
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-sm text-muted">Job</p>
+                      <UBadge v-if="message.job_status === 'done'" label="Done" color="success" variant="subtle" size="sm" />
+                      <UBadge v-else-if="message.job_status === 'cancelled'" label="Cancelled" color="neutral" variant="subtle" size="sm" />
+                      <UBadge v-else-if="message.job_status === 'skipped'" label="Skipped" color="neutral" variant="subtle" size="sm" />
+                    </div>
                     <p class="mt-0.5 whitespace-pre-wrap break-words text-base font-semibold text-highlighted">{{ message.body }}</p>
                     <div v-if="message.photos.length" class="mt-3 grid gap-1" :class="message.photos.length > 1 ? 'grid-cols-2' : 'grid-cols-1'">
                       <button v-for="(photo, at) in message.photos" :key="photo.id" type="button" class="block overflow-hidden rounded-2xl bg-accented" :aria-label="`Open photo ${at + 1} of ${message.photos.length}`" @click="viewer = { photos: message.photos.map(item => ({ url: item.url })), at }">

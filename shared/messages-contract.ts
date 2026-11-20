@@ -47,6 +47,7 @@ export interface ConversationMessage {
   automatic: boolean
   /** Blawby's post of a job: the card the job's Done is on. */
   job: boolean
+  job_status?: 'open' | 'done' | 'skipped' | 'cancelled' | null
   sent_at: string
   time: string | null
   body: string | null

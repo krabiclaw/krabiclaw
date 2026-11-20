@@ -89,6 +89,7 @@ export function isConversationEntry(value: unknown): value is ConversationEntry 
     && Array.isArray(value.photos) && value.photos.every(isPhoto)
     && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshown_files)
     && isNullableText(value.author_user_id) && typeof value.automatic === 'boolean'
+    && (value.job_status === undefined || value.job_status === null || isText(value.job_status))
     && Array.isArray(value.deliveries) && value.deliveries.every(delivery => isRecord(delivery)
       && isText(delivery.id) && isText(delivery.channel) && isText(delivery.status)
       && isNullableText(delivery.error) && isText(delivery.updated_at))

@@ -21,17 +21,12 @@
           <USelect v-model="assigneeKey" :items="(options?.assignees ?? []).map(person => ({ label: person.name, value: person.id }))" class="w-full" />
         </UFormField>
         <template v-else>
-          <UFormField v-if="!claimRole && assignees.length" label="Assigned">
-            <USelect v-model="assigneeKey" :items="assigneeItems" class="w-full" />
+          <UFormField label="Assigned">
+            <USelect v-model="assigneeSelection" :items="assigneeItems" class="w-full" />
           </UFormField>
-          <template v-if="claimOptions?.listings.length && claimOptions.roles.length">
-            <UFormField label="Available to claim">
-              <USelect v-model="claimRoleChoice" :items="[{ value: 'none', label: 'No' }, ...claimOptions.roles]" class="w-full" />
-            </UFormField>
-            <UFormField v-if="claimRole" label="Listing" required>
-              <USelect v-model="listingId" :items="claimOptions.listings.map(listing => ({ value: listing.listing_id, label: listing.label }))" class="w-full" />
-            </UFormField>
-          </template>
+          <UFormField v-if="claimRole && (claimOptions?.listings.length ?? 0) > 1" label="Listing" required>
+            <USelect v-model="listingId" :items="(claimOptions?.listings ?? []).map(listing => ({ value: listing.listing_id, label: listing.label }))" class="w-full" />
+          </UFormField>
         </template>
         <p v-if="report" class="rounded-xl bg-elevated px-3 py-2 text-sm text-muted" data-testid="task-create-report">
           {{ report.guest }}’s message{{ report.photos ? ` and ${report.photos === 1 ? 'photo go' : `${report.photos} photos go`}` : ' goes' }} with the job.
@@ -73,8 +68,12 @@ const title = ref('')
 const notes = ref('')
 const due = ref('')
 const assigneeKey = ref('none')
-const claimRoleChoice = ref('none')
-const claimRole = computed(() => maintenance.value || claimRoleChoice.value === 'none' ? null : claimRoleChoice.value)
+const assigneeSelection = ref('none')
+const claimRole = computed(() => !maintenance.value && assigneeSelection.value.startsWith('role:') ? assigneeSelection.value.slice(5) : null)
+const assignedMemberId = computed(() => {
+  if (maintenance.value) return assigneeKey.value
+  return assigneeSelection.value.startsWith('member:') ? assigneeSelection.value.slice(7) : null
+})
 const listingId = ref('')
 const placeKey = ref<string | undefined>(undefined)
 const options = ref<Options | null>(null)
@@ -83,13 +82,24 @@ const failure = ref<string | null>(null)
 // One key per request, kept across retries of the same draft.
 const idempotencyKey = ref(crypto.randomUUID())
 const assignees = computed(() => props.assignees ?? [])
-const assigneeItems = computed(() => [{ label: 'Unassigned', value: 'none' }, ...assignees.value.map(person => ({ label: person.name, value: person.id }))])
+const assigneeItems = computed(() => {
+  const items: Array<{ label: string; value: string }> = [{ label: 'Unassigned', value: 'none' }]
+  if (props.claimOptions?.roles.length) {
+    for (const role of props.claimOptions.roles) {
+      items.push({ label: `Any ${role.label} (claimable)`, value: `role:${role.value}` })
+    }
+  }
+  for (const person of assignees.value) {
+    items.push({ label: person.name, value: `member:${person.id}` })
+  }
+  return items
+})
 const keyOf = (place: Pick<MaintenancePlace, 'product_id' | 'location_id'>) => `${place.product_id ?? ''}|${place.location_id ?? ''}`
 const placeItems = computed(() => (options.value?.places ?? []).map(place => ({ value: keyOf(place), label: place.label })))
 const place = computed(() => options.value?.places.find(candidate => keyOf(candidate) === placeKey.value) ?? null)
 const ready = computed(() => Boolean(title.value.trim()) && (maintenance.value
   ? Boolean(place.value && assigneeKey.value !== 'none')
-  : !claimRole.value || Boolean(listingId.value)))
+  : !claimRole.value || Boolean(listingId.value || (props.claimOptions?.listings.length ?? 0) <= 1)))
 const isTaskResult = (value: unknown): value is { task: TaskView } => isRecord(value) && isRecord(value.task) && typeof value.task.id === 'string'
 const isOptions = (value: unknown): value is Options => isRecord(value) && Array.isArray(value.places) && Array.isArray(value.assignees)
 
@@ -98,7 +108,10 @@ watch(open, (isOpen) => {
   title.value = ''; notes.value = ''; due.value = ''; failure.value = null
   kind.value = props.report ? 'maintenance' : 'custom'
   assigneeKey.value = assignees.value.find(person => person.you)?.id ?? 'none'
-  claimRoleChoice.value = 'none'; listingId.value = ''; placeKey.value = undefined
+  const youMember = assignees.value.find(person => person.you)
+  assigneeSelection.value = youMember ? `member:${youMember.id}` : 'none'
+  listingId.value = props.claimOptions?.listings[0]?.listing_id ?? ''
+  placeKey.value = undefined
   idempotencyKey.value = crypto.randomUUID()
 }, { immediate: true })
 
@@ -128,6 +141,7 @@ async function save() {
   busy.value = true
   failure.value = null
   try {
+    const resolvedProductId = claimRole.value ? (listingId.value || (props.claimOptions?.listings[0]?.listing_id ?? null)) : null
     const result = await applicationFetch(`/api/organizations/${encodeURIComponent(props.organizationId)}/tasks`, { method: 'POST', validate: isTaskResult, body: {
       title: title.value.trim(), notes: notes.value.trim() || null,
       // The end of the chosen day on this device's clock.
@@ -135,8 +149,8 @@ async function save() {
       ...(maintenance.value
         ? { kind: 'maintenance', product_id: place.value!.product_id, location_id: place.value!.location_id, assigned_member_id: assigneeKey.value,
             ...(props.report ? { source_message_id: props.report.message_id } : {}) }
-        : { assigned_member_id: claimRole.value || assigneeKey.value === 'none' ? null : assigneeKey.value,
-            ...(claimRole.value ? { claim_role: claimRole.value, product_id: listingId.value } : {}) }),
+        : { assigned_member_id: assignedMemberId.value,
+            ...(claimRole.value ? { claim_role: claimRole.value, product_id: resolvedProductId } : {}) }),
       idempotency_key: idempotencyKey.value,
     } })
     // A draft opened since this request was sent stays open.
