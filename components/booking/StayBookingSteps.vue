@@ -14,7 +14,7 @@
     <StayGuestFields :controller="controller" class="mb-4" />
     <p v-if="bookingError" role="alert" class="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">{{ bookingError }}</p>
     <p v-if="needsApproval" class="mb-4 text-sm text-muted">{{ t('stay.pay_after_approval') }}</p>
-    <BookingContactForm v-model="contactForm" :questions="formQuestions.questions.value" :answer-errors="formQuestions.answerErrors.value" :questions-notice="formQuestions.notice.value" :default-country="defaultPhoneCountry" :loading="submitting || quotePending" :submit-text="needsApproval ? t('stay.request_to_book') : t('payment.continue_to_pay')" @submit="submitBooking" />
+    <BookingContactForm v-model="contactForm" :questions="formQuestions.questions.value" :answer-errors="formQuestions.answerErrors.value" :questions-notice="formQuestions.notice.value" :default-country="defaultPhoneCountry" :loading="submitting || quotePending" :submit-text="needsApproval ? t('stay.request_to_book') : t('payment.continue_to_pay')" :agreement="needsApproval ? agreement : null" @submit="submitBooking" />
   </div>
 </template>
 
@@ -25,7 +25,7 @@ import StayGuestFields from '~/components/booking/StayGuestFields.vue'
 import type { StayBookingController } from '~/composables/useStayBooking'
 
 const props = defineProps<{ controller: StayBookingController }>()
-const { submittedRequest, needsApproval, contactForm, formQuestions, defaultPhoneCountry, rangeLabel, quote, quotePending, guestsLabel, bookingError, submitting, submitBooking, money, nightsLabel } = props.controller
+const { submittedRequest, needsApproval, contactForm, formQuestions, defaultPhoneCountry, rangeLabel, quote, quotePending, guestsLabel, bookingError, submitting, submitBooking, money, nightsLabel, agreement } = props.controller
 const { t } = useI18n()
 const platformOrigin = useRuntimeConfig().public.platformDomain
 const activityUrl = computed(() => submittedRequest.value ? new URL(submittedRequest.value.activity_path, platformOrigin).href : undefined)

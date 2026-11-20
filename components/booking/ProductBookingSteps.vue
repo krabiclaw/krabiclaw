@@ -61,6 +61,7 @@
             :phone-required="phoneRequired"
             :loading="submitting"
             :submit-text="timedQuote?.payment_required ? t('payment.continue_to_pay') : confirmationMode === 'review' ? t('booking.request_appointment') : t('site.experience_detail.confirm_booking')"
+            :agreement="timedQuote?.payment_required ? null : agreement"
             @submit="submitBooking"
           />
         </div>
@@ -75,7 +76,7 @@ import { formatTime } from '~/utils/timezone'
 // A paid booking is not confirmed in the dialog: the guest goes on to pay, so the button says so.
 const props = defineProps<{ controller: SessionBookingController; confirmationMode: 'instant' | 'review'; phoneRequired?: boolean }>()
 const { bookingStep, contactForm, formQuestions, defaultPhoneCountry, sellableVariants, selectedVariantId, variantPriceLabel, sessionsPending,
-  availabilityDates, referenceDate, calendarMonth, lastCalendarMonth, changeMonth, timeSelection, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, guestsMin, guestsMax, bookingError, submitting, timedQuote, quotePending, reviewSelection, submitBooking } = props.controller
+  availabilityDates, referenceDate, calendarMonth, lastCalendarMonth, changeMonth, timeSelection, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, guestsMin, guestsMax, bookingError, submitting, timedQuote, quotePending, reviewSelection, submitBooking, agreement } = props.controller
 const { t, locale } = useI18n()
 const variantGroup = useId()
 </script>

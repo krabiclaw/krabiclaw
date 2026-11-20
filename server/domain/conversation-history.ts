@@ -147,7 +147,7 @@ function presentEntries(
         : authorKind === 'guest' ? guestViewer ? 'You' : guestName
         : mine ? 'You' : !guestViewer && name ? firstName(name) : context.organization_name
       items.push({ type: 'event', id: message.id, sequence: message.sequence, sent_at: message.occurred_at,
-        text: eventText(message, actor, guestName, guestViewer, Boolean(airbnb)) })
+        text: eventText(message, actor, guestName, guestViewer, Boolean(airbnb)), ...(message.event_name === 'agreement.sent' ? { agreement: true as const } : {}) })
       continue
     }
     const payload = parseMessagePayload(message)

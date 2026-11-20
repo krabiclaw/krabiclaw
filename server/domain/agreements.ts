@@ -17,7 +17,7 @@ import { buildMediaPlacementInsertQuery } from '~/server/utils/media-asset-manag
 import { sniffMediaMimeType } from '~/server/utils/media-mime'
 import { sanitizeFilename, uploadPrivateDocument } from '~/server/utils/media-upload'
 import { AGREEMENT_EVENTS, agreementDocumentPath, agreementLabel, isAgreementField, type AgreementField, type AgreementSigner, type BookingAgreement } from '~/shared/agreements'
-import { PLATFORM_MESSAGE_AUTHOR_KIND, accountReservationPath } from '~/shared/messages-contract'
+import { PLATFORM_MESSAGE_AUTHOR_KIND, guestConversationPath } from '~/shared/messages-contract'
 import type { ProductKind } from '~/shared/product-details'
 
 /** The largest PDF a business may store or send: the same ceiling as a photo. */
@@ -355,7 +355,7 @@ async function emailSigners(env: CloudflareEnv, conversation: ConversationRow, b
       link = new URL('/messages/invite', origin)
       link.searchParams.set('token', invite.token)
     } else {
-      link = new URL(accountReservationPath(conversation.id), origin)
+      link = new URL(guestConversationPath('account', conversation.id), origin)
     }
     const delivery = await createDeliveryReceipt(env.DB, {
       subject: { messageId: sent.id }, channel: 'email', provider: getEmailDeliveryMode(env) === 'provider' ? 'resend' : 'log_only',

@@ -404,6 +404,8 @@ export interface BookingEditor {
   stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
   /** The booking's conversation, where its agreement is sent and signed. */
   conversationId: ComputedRef<string | null>
+  /** The booking's agreement and, for the business, who it may ask to sign. */
+  agreement: ComputedRef<{ label: string | null; signers: { key: string; name: string; role: 'guest' | 'host' }[] } | null>
   /** A stay's Change reservation step: what it is now, and the write. */
   stayChange: { stay: ComputedRef<{ check_in_date: string; check_out_date: string; adults: number; children: number } | null>; save: (input: { check_in_date: string; check_out_date: string; adults: number; children: number }) => Promise<void> }
 }
@@ -1175,6 +1177,11 @@ provide(bookingEditorKey, {
   savePrivateNote,
   stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
   conversationId,
+  agreement: computed(() => {
+    const record = booking.value ?? detail.value
+    if (!record || !('agreement_signers' in record) || !record.agreement_signers) return null
+    return { label: record.agreement?.label ?? null, signers: record.agreement_signers }
+  }),
   stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },
 })
 </script>

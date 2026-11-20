@@ -57,7 +57,8 @@ export interface ConversationMessage {
 
 export type ConversationEntry =
   | { type: 'day'; id: string; label: string }
-  | { type: 'event'; id: string; sequence: number; text: string; sent_at: string }
+  /** `agreement` marks the booking's agreement record, which opens the agreement to read or sign. */
+  | { type: 'event'; id: string; sequence: number; text: string; sent_at: string; agreement?: true }
   | ConversationMessage
 
 export interface ConversationParticipant {

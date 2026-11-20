@@ -21,7 +21,9 @@
           <template v-for="item in rows" :key="item.key">
             <p v-if="item.type === 'day'" class="mb-1 mt-3 text-center text-xs font-medium text-dimmed">{{ item.label }}</p>
 
-            <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">{{ item.text }}</p>
+            <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">
+              {{ item.text }}<template v-if="item.agreement"> · <button type="button" class="font-medium text-highlighted underline underline-offset-4" data-testid="conversation-open-agreement" @click="agreementOpen = true">View</button></template>
+            </p>
 
             <p v-else-if="item.type === 'reservation'" class="my-2 text-center text-xs text-muted">
               {{ item.text ? `${item.text} ` : '' }}<NuxtLink :to="item.to" class="font-medium text-highlighted underline underline-offset-4" prefetch prefetch-on="interaction" data-testid="conversation-show-reservation" :title="reservationRead.error.value?.message" @pointerenter="prefetchReservation(item.to)" @focus="prefetchReservation(item.to)">Show reservation</NuxtLink>
@@ -113,6 +115,10 @@
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
         <MessageComposer v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope && thread.kind !== 'team'" :suggest-reply="suggestionsOn && !!latestGuestMessage && !personalScope" :generating-suggestions="generatingSuggestions" :placeholder="thread.kind === 'team' ? 'Message your team' : undefined" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : guestThread ? 'Send reply' : 'Send message'" @send="sendReply" @suggest-reply="generateSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
+        <!-- The booking's agreement, opened from its record in the thread: how a guest invited to the conversation reads and signs it. -->
+        <DashboardListItemDialog v-if="agreementOpen" v-model:open="agreementOpen" title="Agreement" :show-actions="false">
+          <BookingAgreement :conversation-id="threadId" />
+        </DashboardListItemDialog>
         <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell Blawby what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
     </template>
@@ -121,6 +127,8 @@
 
 <script setup lang="ts">
 import { isConversationEntriesPage, isConversationEntry, isConversationOperation } from './guest-thread-client'
+import BookingAgreement from '~/components/booking/BookingAgreement.vue'
+import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import type { ConversationEntriesPage, ConversationEntry, ConversationPage } from '~/shared/messages-contract'
 import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 
@@ -136,6 +144,7 @@ import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } f
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation>; reservationTo?: string | null; closing?: boolean }>(), { personalScope: false, closing: false })
+const agreementOpen = ref(false)
 const reservationRead = useDashboardReservationPrefetch()
 const router = useRouter()
 function prefetchReservation(to: string) {
@@ -279,7 +288,7 @@ type MessageItem = Extract<ConversationEntry, { type: 'message' }> & { sending?:
 const failedDeliveries = (message: MessageItem) => message.deliveries.filter(delivery => delivery.status === 'failed')
 type Row =
   | { type: 'day'; key: string; label: string }
-  | { type: 'event'; key: string; text: string }
+  | { type: 'event'; key: string; text: string; agreement?: true }
   | { type: 'reservation'; key: string; to: string; text: string | null }
   | { type: 'run'; key: string; mine: boolean; runs: MessageItem[] }
 
@@ -386,7 +395,7 @@ const rows = computed<Row[]>(() => {
       continue
     }
     if (reservation && item.sent_at > reservation.at) placeReservation()
-    if (item.type === 'event') out.push({ type: 'event', key, text: item.text })
+    if (item.type === 'event') out.push({ type: 'event', key, text: item.text, ...(item.agreement ? { agreement: true as const } : {}) })
     else {
       const last = out.at(-1)
       const mine = item.author === 'You' || (userId.value != null && item.author_user_id === userId.value)

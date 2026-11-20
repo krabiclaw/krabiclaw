@@ -47,6 +47,16 @@
       ></textarea>
     </div>
 
+    <!-- The listing's agreement: read it and sign with a typed name before booking. -->
+    <section v-if="agreement" class="space-y-4 rounded-2xl border border-(--kc-field-border) p-4" data-testid="booking-agreement-step">
+      <h3 class="text-base font-semibold text-default">{{ t('agreement.sign_step', { document: agreement.label.toLowerCase() }) }}</h3>
+      <a :href="agreement.url" target="_blank" rel="noopener" class="flex items-center justify-between gap-3 rounded-xl bg-elevated px-3 py-3 text-sm text-default">
+        <span class="min-w-0 truncate font-medium">{{ agreement.file_name }}</span>
+        <span class="shrink-0 font-semibold underline">{{ t('agreement.read') }}</span>
+      </a>
+      <AgreementSignFields v-model:name="signedName" v-model:consent="signedConsent" :document="agreement.label" :disabled="loading" />
+    </section>
+
     <div class="pt-2">
       <TenantButton type="submit" size="lg" block :loading="loading" :disabled="loading">
         {{ loading ? t('site.experience_detail.processing') : submitText || t('site.experience_detail.confirm_booking') }}
@@ -58,6 +68,7 @@
 <script setup lang="ts">
 import PhoneInput from '~/components/PhoneInput.vue'
 import FormQuestionFields from '~/components/forms/FormQuestionFields.vue'
+import AgreementSignFields from '~/components/booking/AgreementSignFields.vue'
 import type { CountryCode } from '~/utils/phone'
 import type { FormQuestion } from '~/shared/form-questions'
 import { unansweredRequired, type FormAnswerDraft } from '~/utils/form-answers'
@@ -72,6 +83,8 @@ export interface ContactFormState {
   notes: string
   /** Answers to the offering's, location's or home's own questions, by question ID. */
   answers: FormAnswerDraft
+  /** The name the guest typed to sign the listing's agreement, when it has one; they agreed to sign electronically. */
+  signature?: { typed_name: string; consent: true }
 }
 
 const form = defineModel<ContactFormState>({ required: true })
@@ -86,6 +99,8 @@ const props = withDefaults(defineProps<{
   answerErrors?: Record<string, string>
   /** Said when the questions changed while the form was open. */
   questionsNotice?: string
+  /** The listing's agreement the guest signs to book. */
+  agreement?: { label: string; file_name: string; url: string } | null
 }>(), {
   loading: false,
   phoneRequired: false,
@@ -94,6 +109,8 @@ const props = withDefaults(defineProps<{
   questionsNotice: '',
 })
 const { t } = useI18n()
+const signedName = ref('')
+const signedConsent = ref(false)
 
 const emit = defineEmits<{
   submit: [form: ContactFormState]
@@ -111,6 +128,7 @@ function submit() {
     document.querySelector<HTMLElement>(`[data-question-id="${first.id}"] input, [data-question-id="${first.id}"] textarea`)?.focus()
     return
   }
-  emit('submit', { ...form.value })
+  // The browser requires the name and the consent; both ride with the booking to be signed once it exists.
+  emit('submit', { ...form.value, ...(props.agreement && signedConsent.value ? { signature: { typed_name: signedName.value.trim(), consent: true as const } } : {}) })
 }
 </script>
