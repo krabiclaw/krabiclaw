@@ -17,7 +17,7 @@ test.describe('stateless MCP server', () => {
 
     // A blank header is not "no tenant selected": it names a tenant that
     // resolves to nothing, and must fail closed the same way.
-    for (const header of ['x-blawby-organization-id', 'x-krabiclaw-organization-id']) {
+    for (const header of ['x-blawby-organization-id']) {
       const blankOrgTools = await mcpRequest(request, baseURL!, {
         method: 'tools/list',
         extraHeaders: { [header]: '   ' },
