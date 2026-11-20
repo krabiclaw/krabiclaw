@@ -30,12 +30,12 @@ export function groupConversationEntries(entries: Exclude<ConversationEntry, { t
 }
 
 export function conversationMessage(input: {
-  id: string; sequence: number; authorUserId: string | null; side: ConversationMessage['side']; author: string;
+  id: string; sequence: number; authorUserId: string | null; authorKind: ConversationMessage['author_kind']; side: ConversationMessage['side']; author: string;
   automatic: boolean; sentAt: string; body: string | null; attachments: GuestThreadEntryAttachmentViewModel[];
   deliveries?: HistoryDelivery[]; unshownFiles?: number;
 }): ConversationMessage {
   return {
-    type: 'message', id: input.id, sequence: input.sequence, author_user_id: input.authorUserId,
+    type: 'message', id: input.id, sequence: input.sequence, author_user_id: input.authorUserId, author_kind: input.authorKind,
     side: input.side, author: input.author, automatic: input.automatic, job: false,
     sent_at: input.sentAt, time: null, body: input.body, unshown_files: input.unshownFiles ?? 0,
     photos: input.attachments.map(({ id, url, thumbnailUrl, width, height }) => ({ id, url, thumbnail_url: thumbnailUrl, width, height })),

@@ -11,7 +11,7 @@ import type { MessageIdentity } from '~/shared/dashboard-invalidations'
 import { getStay, stayAccessFor } from '~/server/domain/stays'
 import type { JobSubject } from '~/server/domain/tasks'
 import { appendMessage, participantGuard, type ConversationRow, type MessageRow } from '~/server/domain/conversations'
-import { messagePreview } from '~/server/domain/guest-threads/attachments'
+import { messagePhotoPlacements, messagePreview } from '~/server/domain/guest-threads/attachments'
 
 /**
  * Team conversations: the organization's own members talking to each other,
@@ -385,14 +385,14 @@ function threadParticipantsKey(subject: JobSubject | null, locationId: string | 
     location_id: locationId, member_ids: [...new Set(seatMemberIds)].sort() })
 }
 
-/** The identity of a job's conversation with exactly these seats: what `createTeamThread` gives the same roster. */
+/** The identity of a job's conversation with exactly these seats: what `createTeamThread` gives the same roster about the same booking or place. */
 export function jobThreadParticipantsKey(subject: JobSubject, seatMemberIds: readonly string[]): Promise<string> {
-  return threadParticipantsKey(subject, null, seatMemberIds)
+  return subject.unit === 'location' ? threadParticipantsKey(null, subject.id, seatMemberIds) : threadParticipantsKey(subject, null, seatMemberIds)
 }
 
 /**
- * Blawby writes into a stay's team conversation: a cleaning job, a
- * reminder, a move, a cancellation. The conversation with exactly these seats
+ * Blawby writes into a job's team conversation, a booking's or, for a repair,
+ * a place's: a job, a reminder, a move, a cancellation. The conversation with exactly these seats
  * is the one a member starts for the same people (`createTeamThread`), opened
  * here when nobody has yet. The message is sent once per key (kept as its
  * payload's `key`); it alerts only the users named, and like every message
@@ -407,6 +407,8 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
   senderName: string
   /** An existing conversation to post into, seats as they are: what a job's former people are told goes where the job was. */
   threadId?: string
+  /** Photos already stored that the post carries: a guest's photos of what needs repair. */
+  photoAssetIds?: readonly string[]
 }): Promise<{ threadId: string; messageId: string; created: boolean }> {
   const body = input.body.trim()
   if (!body || body.length > MAX_BODY) throw new Error(`An automatic team message must be 1 to ${MAX_BODY} characters`)
@@ -420,22 +422,23 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
     const participantsKey = await jobThreadParticipantsKey(input.subject, seatIds)
     const now = new Date().toISOString()
     const id = (await queryFirst<{ id: string }>(db, 'SELECT id FROM conversations WHERE organization_id = ? AND participants_key = ?', [input.organizationId, participantsKey]))?.id ?? crypto.randomUUID()
+    const place = input.subject.unit === 'location'
     await executeBatch(db, [{
       // Only while every seat is a current member; a roster that has lost someone is not opened.
-      query: `INSERT INTO conversations (id, organization_id, kind, booking_id, participants_key, last_message_at, created_at)
-              SELECT ?, ?, 'team', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.organization_id = ? AND b.id = ?)
+      query: `INSERT INTO conversations (id, organization_id, kind, booking_id, location_id, participants_key, last_message_at, created_at)
+              SELECT ?, ?, 'team', ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM ${place ? 'business_locations' : 'bookings'} s WHERE s.organization_id = ? AND s.id = ?)
                 AND (SELECT COUNT(*) FROM member WHERE organizationId = ? AND id IN (SELECT value FROM json_each(?))) = ?
               ON CONFLICT (organization_id, participants_key) WHERE participants_key IS NOT NULL DO NOTHING`,
-      params: [id, input.organizationId, input.subject.id, participantsKey, now, now, input.organizationId, input.subject.id, input.organizationId, d1JsonStringSet(seatIds), seatIds.length],
+      params: [id, input.organizationId, place ? null : input.subject.id, place ? input.subject.id : null, participantsKey, now, now, input.organizationId, input.subject.id, input.organizationId, d1JsonStringSet(seatIds), seatIds.length],
     }, ...seatQueries(input.organizationId, id, seatIds, now)], { operation: 'Open a job conversation' })
     threadId = (await queryFirst<{ id: string }>(db, 'SELECT id FROM conversations WHERE organization_id = ? AND participants_key = ?', [input.organizationId, participantsKey]))?.id
-    if (!threadId) throw new Error(`Automatic team message ${input.idempotencyKey} for booking ${input.subject.id} has no conversation: a seat is no longer a member or the booking is gone`)
+    if (!threadId) throw new Error(`Automatic team message ${input.idempotencyKey} for ${place ? 'location' : 'booking'} ${input.subject.id} has no conversation: a seat is no longer a member or the ${place ? 'location' : 'booking'} is gone`)
   }
   const messageId = crypto.randomUUID()
   const row = await appendMessage(db, {
     id: messageId, conversationId: threadId, authorKind: PLATFORM_MESSAGE_AUTHOR_KIND, authorUserId: null, body,
     payload: { key: input.idempotencyKey }, dedupeKey: teamMessageKey(threadId, input.idempotencyKey),
-  })
+  }, messagePhotoPlacements(input.organizationId, messageId, [...input.photoAssetIds ?? []], new Date().toISOString()))
   const created = row.id === messageId
   if (created) {
     const seated = await queryAll<{ user_id: string }>(db, `SELECT seat.user_id FROM conversation_participants seat
