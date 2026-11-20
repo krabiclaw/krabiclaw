@@ -32,19 +32,22 @@
 
     <UAlert v-if="error" color="error" variant="soft" :description="error" class="mt-4" />
 
-    <!-- Agreement is its own action before either way of signing up, and starts unchecked. -->
-    <UCheckbox v-model="agreed" class="mt-6" name="terms-agreement">
-      <template #label>
-        I agree to the <NuxtLink :to="policyUrl('terms')" external target="_blank" class="font-semibold text-primary">Terms of Service</NuxtLink>
-        and the <NuxtLink :to="policyUrl('acceptable-use')" external target="_blank" class="font-semibold text-primary">Acceptable Use Policy</NuxtLink>,
-        which do not tolerate abusive content or users, and the <NuxtLink :to="policyUrl('privacy')" external target="_blank" class="font-semibold text-primary">Privacy Policy</NuxtLink>.
-      </template>
-    </UCheckbox>
-    <div class="mt-4 space-y-3" :class="agreed ? '' : 'pointer-events-none opacity-50'" :aria-disabled="!agreed" :inert="!agreed">
+    <div class="mt-6 space-y-3">
       <AuthGoogleButton label="Sign up with Google" :loading="loading" @activate="googleSignup" />
       <AuthAppleButton label="Sign up with Apple" :loading="loading" @activate="appleSignup" />
       <USeparator label="or use email" />
-      <AuthEmailSignUpForm :callback-url="verificationCallback" :initial-email="queryEmail" @success="emailSignupComplete" />
+      <AuthEmailSignUpForm :callback-url="verificationCallback" :initial-email="queryEmail" :agreed="agreed" @success="emailSignupComplete" @agreement-required="agreementMissing = true">
+        <!-- Agreement is its own action, unchecked, under the password as on iOS; every way of signing up waits for it (App Store guideline 1.2). -->
+        <UFormField name="terms-agreement" :error="agreementMissing && !agreed ? 'Please review and accept the Terms of Service and Privacy Policy to create an account.' : undefined">
+          <UCheckbox v-model="agreed" name="terms-agreement">
+            <template #label>
+              I agree to the <NuxtLink :to="policyUrl('terms')" external target="_blank" class="font-semibold text-primary">Terms of Service</NuxtLink>
+              and the <NuxtLink :to="policyUrl('acceptable-use')" external target="_blank" class="font-semibold text-primary">Acceptable Use Policy</NuxtLink>,
+              which do not tolerate abusive content or users, and the <NuxtLink :to="policyUrl('privacy')" external target="_blank" class="font-semibold text-primary">Privacy Policy</NuxtLink>.
+            </template>
+          </UCheckbox>
+        </UFormField>
+      </AuthEmailSignUpForm>
     </div>
     <p class="mt-6 text-center text-sm text-muted">Already have an account? <NuxtLink :to="loginUrl" class="font-semibold text-primary">Sign in</NuxtLink></p>
     </div>
@@ -83,6 +86,7 @@ const verificationCallback = computed(() => {
 const { loading, error, signInWithGoogle, signInWithApple } = useAuthOperation()
 const pendingEmail = ref('')
 const agreed = ref(false)
+const agreementMissing = ref(false)
 // The account is Blawby's, so its policies are the platform's, whichever site serves this page.
 const platformDomain = String(useRuntimeConfig().public.platformDomain)
 const policyUrl = (slug: string) => new URL(`/policies/${slug}`, platformDomain).toString()
@@ -102,12 +106,12 @@ const isAuthenticated = computed(() => Boolean(session?.user?.id && !session.use
 if (isAuthenticated.value) await navigateTo(postLoginUrl.value, { external: true, redirectCode: 302 })
 
 async function googleSignup() {
-  if (!agreed.value) return
+  if (!agreed.value) { agreementMissing.value = true; return }
   await signInWithGoogle(postLoginUrl.value)
 }
 
 async function appleSignup() {
-  if (!agreed.value) return
+  if (!agreed.value) { agreementMissing.value = true; return }
   await signInWithApple(postLoginUrl.value)
 }
 

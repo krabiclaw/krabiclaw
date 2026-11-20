@@ -252,8 +252,15 @@
           <div v-if="detail || (booking?.type === 'booking' && booking.payments !== null) || booking?.payments?.length" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Payment info</h2>
             <template v-if="detail">
-              <h3 class="mt-5 text-sm font-semibold text-highlighted">Amount paid</h3>
-              <p class="mt-1 text-sm text-muted" data-testid="stay-amount-paid">{{ money(detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</p>
+              <!-- A channel's guest pays the channel, so the booking's total is what was paid; the host records nothing here. -->
+              <template v-if="channelManaged">
+                <h3 class="mt-5 text-sm font-semibold text-highlighted">Paid through {{ channelName }}</h3>
+                <p class="mt-1 text-sm text-muted" data-testid="stay-amount-paid">{{ money(detail.total_minor) }}</p>
+              </template>
+              <template v-else>
+                <h3 class="mt-5 text-sm font-semibold text-highlighted">Amount paid</h3>
+                <p class="mt-1 text-sm text-muted" data-testid="stay-amount-paid">{{ money(detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</p>
+              </template>
               <template v-if="!personalScope">
                 <ul v-if="!channelManaged && detail.payments.length" class="mt-4 space-y-3">
                   <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4">

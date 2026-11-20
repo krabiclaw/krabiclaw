@@ -1,19 +1,26 @@
 <template>
+  <!-- Two steps, as Airbnb's co-host invite: the address first, then the role on a screen of its own, so the keyboard never hides the choice. -->
   <DashboardLeafPanel
     v-if="screen"
     id="organization-members-invite"
     :title="screen.title"
-    :save-label="savedInvitation ? screen.resend_label : screen.save_label"
+    :save-label="step === 'email' ? 'Next' : savedInvitation ? screen.resend_label : screen.save_label"
     :saving="inviting"
-    :disabled="!email.trim() || !selectedRole"
+    :disabled="step === 'email' ? !validEmail : !selectedRole"
     :error="inviteError"
     @cancel="resetInvite"
-    @save="sendInvite"
+    @save="next"
   >
-    <div class="space-y-6">
+    <form v-if="step === 'email'" @submit.prevent="next">
       <UFormField :label="screen.email_label" required>
-        <UInput v-model="email" type="email" autocomplete="email" :disabled="inviting" autofocus class="w-full" />
+        <UInput v-model="email" type="email" autocomplete="email" enterkeyhint="next" autofocus class="w-full" />
       </UFormField>
+    </form>
+    <div v-else class="space-y-6">
+      <button type="button" class="flex w-full items-center gap-3 rounded-lg border border-default p-3 text-left" :disabled="inviting" @click="step = 'email'">
+        <span class="min-w-0 flex-1"><span class="block text-sm text-muted">{{ screen.email_label }}</span><span class="block truncate font-medium text-highlighted">{{ email.trim() }}</span></span>
+        <span class="text-sm font-medium text-highlighted underline">Edit</span>
+      </button>
       <fieldset class="space-y-2" :disabled="inviting">
         <legend class="mb-2 font-medium">{{ screen.role_label }}</legend>
         <label v-for="choice in screen.roles" :key="choice.value" class="flex cursor-pointer items-start gap-3 rounded-lg border border-default p-3">
@@ -51,6 +58,8 @@ const { data: screen, error } = await useAsyncData(
 if (error.value) throw error.value
 
 const email = ref('')
+const step = ref<'email' | 'role'>('email')
+const validEmail = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim()))
 const role = ref(screen.value?.default_role)
 const selectedRole = computed(() => screen.value?.roles.find(choice => choice.value === role.value))
 const grants = ref<Record<string, string>>({})
@@ -60,8 +69,14 @@ const savedInvitation = ref<string | null>(null)
 watch(role, () => { grants.value = {} })
 watch([email, role, grants], () => { savedInvitation.value = null }, { deep: true })
 
+function next() {
+  if (step.value === 'role') return sendInvite()
+  if (validEmail.value) step.value = 'role'
+}
+
 function resetInvite() {
   email.value = ''
+  step.value = 'email'
   role.value = screen.value?.default_role
   grants.value = {}
   inviteError.value = ''

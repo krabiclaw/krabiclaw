@@ -33,6 +33,9 @@ test('the email link returns through normal sign-in and only the invited account
     await expect(team.getByRole('heading', { name: 'Pending invitations', exact: true })).toBeVisible()
     await team.getByRole('link', { name: 'Invite a team member' }).click()
     await team.getByLabel('Email address').fill(invitee.email)
+    // The role is its own step, never under the keyboard of the email field.
+    await expect(team.getByRole('radio', { name: /^General Staff/ })).toHaveCount(0)
+    await team.getByRole('button', { name: 'Next', exact: true }).click()
     await expect(team.getByRole('radio', { name: /^General Staff/ })).toBeChecked()
     await expect(team.getByRole('radio', { name: /^Restaurant Manager/ })).toBeVisible()
     await expect(team.getByRole('radio', { name: /^Cleaner/ })).toHaveCount(0)

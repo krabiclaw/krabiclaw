@@ -1,9 +1,9 @@
 <template>
-  <!-- Where it was booked: the channel's mark in a small circle, at the corner of a person's avatar. -->
+  <!-- Where it was booked: the channel's mark in a small circle at the corner of a person's avatar, or bare inside a stay bar already painted in the channel's colour. -->
   <span
-    class="flex items-center justify-center rounded-full border-2 border-(--ui-bg) text-[10px] font-bold text-white"
-    :class="large ? 'size-8' : 'size-[22px]'"
-    :style="{ backgroundColor: STAY_CHANNEL_COLORS[channel] }"
+    class="flex shrink-0 items-center justify-center text-[10px] font-bold text-white"
+    :class="bare ? 'size-3.5' : ['rounded-full border-2 border-(--ui-bg)', large ? 'size-8' : 'size-[22px]']"
+    :style="bare ? undefined : { backgroundColor: STAY_CHANNEL_COLORS[channel] }"
     role="img"
     :aria-label="`Booked through ${STAY_CHANNEL_LABELS[channel]}`"
   >
@@ -16,5 +16,5 @@
 <script setup lang="ts">
 import { STAY_CHANNEL_COLORS, STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
 
-defineProps<{ channel: StayChannel; large?: boolean }>()
+defineProps<{ channel: StayChannel; large?: boolean; bare?: boolean }>()
 </script>

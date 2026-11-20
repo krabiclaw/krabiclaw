@@ -152,7 +152,7 @@ function presentEntries(
       : side === 'guest' ? guestViewer && (mine || opening) ? 'You' : providerName || (message.author_user_id !== conversation.user_id && name) || guestName
         : guestViewer ? context.organization_name
           : scheduled ? 'Automatic'
-            : mine || mirrored ? 'You' : name ? (conversation.kind === 'team' ? name : firstName(name)) : isPlatformMessageAuthor(message.author_kind) ? 'Sent automatically' : 'Deleted account'
+            : mine ? 'You' : mirrored ? providerName || context.organization_name : name ? (conversation.kind === 'team' ? name : firstName(name)) : isPlatformMessageAuthor(message.author_kind) ? 'Sent automatically' : 'Deleted account'
     const photos = history.photos.get(message.id)?.length ?? 0
     const links = mirrored && Array.isArray(payload.attachments) ? payload.attachments.length : 0
     const unshownFiles = Math.max(links - photos, 0) + (Array.isArray(payload.unshownFiles) ? payload.unshownFiles.length : 0)
