@@ -127,7 +127,6 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   const { db, env, organizationId } = organization
   const principal = memberAccessPrincipal(organization.membership, { env })
   const managesBookings = await roleAllows({ ...principal, permissions: { operations: ['update'] } })
-  let agreementRead: Awaited<ReturnType<typeof readBookingAgreement>> | null = null
   if (toolName === 'create_product_session' || toolName === 'update_product_session') {
     const productId = requiredString(args, 'product_id')
     await assertProductAccess(db, { ...principal, productId })
@@ -220,29 +219,25 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     if (result.kind === 'stay') return { success: true, ...nightBookingMutation(result.stay) }
     return renderStructuredResponse({ success: result.status < 400, ...result.body, http_status: result.status }, undefined, undefined, result.status >= 400)
   }
-  if (toolName === 'send_booking_agreement' || toolName === 'get_product_booking') {
-    const id = requiredString(args, 'booking_id')
-    await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: toolName === 'get_product_booking' ? 'read' : 'update' })
-    const conversation = await queryFirst<ConversationRow>(db, "SELECT * FROM conversations WHERE booking_id = ? AND organization_id = ? AND kind = 'booking'", [id, organizationId])
+  // The member's own name signs for the business; the agreement reads as the member reads it.
+  const agreementActor = async () => {
     const actorRow = await queryFirst<{ name: string }>(db, 'SELECT name FROM user WHERE id = ?', [organization.userId])
     if (!actorRow) throw new HTTPError({ statusCode: 401, message: 'The signed-in account was not found' })
-    const actor = { userId: organization.userId, name: actorRow.name }
-    const canManage = toolName === 'send_booking_agreement' || await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: 'update' }).then(() => true, (error: unknown) => {
-      if (error instanceof HTTPError && error.statusCode === 404) return false
-      throw error
+    return { userId: organization.userId, name: actorRow.name }
+  }
+  if (toolName === 'send_booking_agreement') {
+    const id = requiredString(args, 'booking_id')
+    await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: 'update' })
+    const conversation = await queryFirst<ConversationRow>(db, "SELECT * FROM conversations WHERE booking_id = ? AND organization_id = ? AND kind = 'booking'", [id, organizationId])
+    if (!conversation) throw new HTTPError({ statusCode: 404, message: 'This booking has no guest conversation to send the document in' })
+    const resolved = await resolveUserUploadedMediaFile(toolFileReference(args.file, 'file'))
+    if (resolved.contentType !== 'application/pdf') throw new HTTPError({ statusCode: 415, message: 'Attach a PDF' })
+    const actor = await agreementActor()
+    await sendAgreement(env, conversation, actor, {
+      file: new File([resolved.buffer], resolved.filename, { type: 'application/pdf' }),
+      signers: Array.isArray(args.signers) ? args.signers : [], fields: Array.isArray(args.fields) ? args.fields : [],
     })
-    const viewer = { userId: organization.userId, verifiedEmail: null, canManage }
-    if (toolName === 'send_booking_agreement') {
-      if (!conversation) throw new HTTPError({ statusCode: 404, message: 'This booking has no guest conversation to send the document in' })
-      const resolved = await resolveUserUploadedMediaFile(toolFileReference(args.file, 'file'))
-      if (resolved.contentType !== 'application/pdf') throw new HTTPError({ statusCode: 415, message: 'Attach a PDF' })
-      await sendAgreement(env, conversation, actor, {
-        file: new File([resolved.buffer], resolved.filename, { type: 'application/pdf' }),
-        signers: Array.isArray(args.signers) ? args.signers : [], fields: Array.isArray(args.fields) ? args.fields : [],
-      })
-      return { sent: true, agreement: (await readBookingAgreement(db, conversation, viewer, actor)).agreement }
-    }
-    agreementRead = conversation ? await readBookingAgreement(db, conversation, viewer, actor) : null
+    return { sent: true, agreement: (await readBookingAgreement(db, conversation, { userId: organization.userId, verifiedEmail: null, canManage: true }, actor)).agreement }
   }
   const statusActions: Record<string, 'confirm' | 'reject' | 'cancel'> = {
     confirm_product_booking: 'confirm', reject_product_booking: 'reject', cancel_product_booking: 'cancel',
@@ -265,8 +260,18 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     await publishConversationEvent(env, db, { conversationId: row.conversation_id, type: 'MESSAGE_UPDATE' })
     return { ...booking, unit: 'slot' }
   }
-  const agreementFields = agreementRead ? { agreement: agreementRead.agreement, ...(agreementRead.available_signers ? { agreement_signers: agreementRead.available_signers } : {}) } : {}
-  if (access && toolName === 'get_product_booking') return { booking_id: id, unit: 'nights', record: await getStay(db, access, id), ...agreementFields }
+  // A booking's agreement is the business's and its guests'; a member who only turns over the home does not read it.
+  const agreementFields = async () => {
+    if (access && !access.manage) return {}
+    const canManage = await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: 'update' }).then(() => true, (error: unknown) => {
+      if (error instanceof HTTPError && error.statusCode === 404) return false
+      throw error
+    })
+    const read = await readBookingAgreement(db, { id: row.conversation_id, organization_id: organizationId, booking_id: id, kind: 'booking' },
+      { userId: organization.userId, verifiedEmail: null, canManage }, await agreementActor())
+    return { agreement: read.agreement, ...(read.available_signers ? { agreement_signers: read.available_signers } : {}) }
+  }
+  if (access && toolName === 'get_product_booking') return { booking_id: id, unit: 'nights', record: await getStay(db, access, id), ...await agreementFields() }
   const thread = await getGuestRequest(db, row.conversation_id, organizationId, 'booking')
   if (!thread || thread.kind !== 'booking') {
     throw new HTTPError({
@@ -287,7 +292,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const provenance = thread.payload.provenance
     return { booking_id: id, unit: row.unit, conversation_id: thread.id, version: row.version, updated_at: row.updated_at, guest: thread.payload.guest, answers: formAnswerSnapshotsSchema.parse(JSON.parse(row.answers)),
       provenance: mcpBookingProvenance(provenance),
-      record: mcpBookingRecord(operationalRecord), ...agreementFields }
+      record: mcpBookingRecord(operationalRecord), ...await agreementFields() }
   }
   const key = requiredString(args, 'idempotency_key')
   if (toolName === 'request_product_booking_change') {
