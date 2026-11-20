@@ -1143,7 +1143,12 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
     product_id: isRoot && bindingQueries.length ? (asString(input.data.product_id, 'product_id') || null) : row.product_id,
     updated_at: updateResult.updated_at,
   }
-  return { page: pageDto(updatedRow, documentOf(updatedRow), blocks) }
+  const blockMap = new Map(currentBlocks.map(block => [block.id, (block as TenantPageBlock & { updated_at?: string | null }).updated_at]))
+  const finalBlocks = blocks.map(block => ({
+    ...block,
+    updated_at: blocksChanged ? updateResult.updated_at : (blockMap.get(block.id) ?? updateResult.updated_at),
+  }))
+  return { page: pageDto(updatedRow, documentOf(updatedRow), finalBlocks) }
 }
 
 /**
