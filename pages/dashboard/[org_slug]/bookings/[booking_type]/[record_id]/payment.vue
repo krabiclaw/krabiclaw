@@ -5,7 +5,7 @@
     title="Record a payment"
     lead="Money you received or refunded outside Blawby. Recording it moves no money."
     :saving="saving"
-    :disabled="!draft.amount.trim() || !draft.paid_on"
+    :disabled="!draft.amount.trim() || !draft.paid_on || (months !== null && !draft.period_start)"
     save-label="Record payment"
     :error="failure"
     @save="record"

@@ -18,7 +18,7 @@ import { changeBooking } from '~/server/domain/guest-threads/booking-changes'
 import { setBookingNote } from '~/server/domain/bookings'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { NOT_HANDLED, requiredString, optionalString, resolveUserUploadedMediaFile, toolFileReference, type McpExecutorContext } from './execution'
-import { readBookingAgreement, sendAgreement } from '~/server/domain/agreements'
+import { MAX_AGREEMENT_BYTES, readBookingAgreement, sendAgreement } from '~/server/domain/agreements'
 import { deleteDepositEntry, recordDepositEntry, setBookingDeposit } from '~/server/domain/deposits'
 import { generateAgreementFromTemplate } from '~/server/domain/agreement-templates'
 import type { ConversationRow } from '~/server/domain/conversations'
@@ -267,18 +267,22 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     if (!conversation) throw new HTTPError({ statusCode: 404, message: 'This booking has no guest conversation to send the document in' })
     const actor = await agreementActor()
     const signers = Array.isArray(args.signers) ? args.signers : []
+    let sent: { messageId: string }
     if (args.from_template === true) {
       const filled = await generateAgreementFromTemplate(env, conversation, actor, signers)
-      await sendAgreement(env, conversation, actor, { file: new File([new Uint8Array(filled.bytes)], filled.file_name, { type: 'application/pdf' }), signers, fields: filled.fields })
+      sent = await sendAgreement(env, conversation, actor, { file: new File([new Uint8Array(filled.bytes)], filled.file_name, { type: 'application/pdf' }), signers, fields: filled.fields })
     } else {
-      const resolved = await resolveUserUploadedMediaFile(toolFileReference(args.file, 'file'))
+      const resolved = await resolveUserUploadedMediaFile(toolFileReference(args.file, 'file'), MAX_AGREEMENT_BYTES)
       if (resolved.contentType !== 'application/pdf') throw new HTTPError({ statusCode: 415, message: 'Attach a PDF' })
-      await sendAgreement(env, conversation, actor, {
+      sent = await sendAgreement(env, conversation, actor, {
         file: new File([resolved.buffer], resolved.filename, { type: 'application/pdf' }),
         signers, fields: Array.isArray(args.fields) ? args.fields : [],
       })
     }
-    return { sent: true, agreement: (await readBookingAgreement(db, conversation, { userId: organization.userId, verifiedEmail: null, canManage: true }, actor)).agreement }
+    // The agreement read back is the one this call sent; a later send in between is reported, not shown as this one.
+    const { agreement } = await readBookingAgreement(db, conversation, { userId: organization.userId, verifiedEmail: null, canManage: true }, actor)
+    if (!agreement?.url.endsWith(`/agreements/${encodeURIComponent(sent.messageId)}`)) throw new HTTPError({ statusCode: 409, message: 'Another document was sent for this booking before this one could be read back', data: { code: 'AGREEMENT_CHANGED', field: 'booking_id' } })
+    return { sent: true, agreement }
   }
   const statusActions: Record<string, 'confirm' | 'reject' | 'cancel'> = {
     confirm_product_booking: 'confirm', reject_product_booking: 'reject', cancel_product_booking: 'cancel',

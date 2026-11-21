@@ -31,7 +31,8 @@ export function agreementTemplateFieldLabel(kind: ProductKind, field: AgreementT
   return KIND_LABELS[kind]?.[field] ?? COMMON_LABELS[field]
 }
 
-const PLACEHOLDER = /\{\{\s*([a-z_]+)\s*\}\}/g
+// Anything between double braces is a placeholder; one that names no field is refused, never left in the document.
+const PLACEHOLDER = /\{\{\s*([^{}]*?)\s*\}\}/g
 
 /** The template's fields, or the first unknown one, which is refused rather than left in the document. */
 export function agreementTemplateFields(text: string): { fields: AgreementTemplateField[]; unknown: string | null } {

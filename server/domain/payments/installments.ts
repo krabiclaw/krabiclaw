@@ -43,6 +43,10 @@ async function buyerCustomer(db: DbClient, payment: Payment): Promise<string> {
 export async function scheduleStayInstallments(env: CloudflareEnv, payment: Payment, bookingId: string): Promise<void> {
   const plan = checkoutPlan(payment)
   if (!plan) return
+  // A stay cancelled before its months were scheduled gets none.
+  const booking = await queryFirst<{ status: string }>(env.DB, 'SELECT status FROM bookings WHERE organization_id = ? AND id = ?', [payment.organization_id, bookingId])
+  if (!booking) throw new Error(`Monthly stay ${bookingId} was not found`)
+  if (booking.status === 'cancelled') return
   const stripe = paymentsStripe(env, Boolean(payment.livemode))
   const account = { stripeAccount: payment.stripe_account_id }
   const customer = await buyerCustomer(env.DB, payment)
@@ -66,18 +70,23 @@ export async function scheduleStayInstallments(env: CloudflareEnv, payment: Paym
       ...(plan.tax_code ? { tax_code: plan.tax_code } : {}),
     }, { ...account, idempotencyKey: `stay-installment-item:${bookingId}:${period.period_start}` })
   }
+  // A cancellation that committed while these were created removed only what existed then.
+  const after = await queryFirst<{ status: string }>(env.DB, 'SELECT status FROM bookings WHERE organization_id = ? AND id = ?', [payment.organization_id, bookingId])
+  if (after?.status === 'cancelled') await cancelStayInstallments(env, payment, bookingId)
 }
 
 /** A month Stripe collected: the stay's payment for that period, counted once as captured volume, as a checkout capture is. */
 export async function recordInstallmentPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, invoiceId: string, stripeAccount: string): Promise<void> {
-  const invoice = await stripe.invoices.retrieve(invoiceId, { expand: ['payments.data.payment.payment_intent.latest_charge'] }, { stripeAccount })
+  const invoice = await stripe.invoices.retrieve(invoiceId, { expand: ['payments'] }, { stripeAccount })
   const bookingId = invoice.metadata?.[BOOKING_KEY]
   if (!bookingId) return
   const first = await queryFirst<Payment>(db, "SELECT * FROM payments WHERE id = ? AND organization_id = ? AND subject_type = 'booking' AND subject_id = ?", [invoice.metadata?.blawby_payment_id, organizationId, bookingId])
   if (!first || first.stripe_account_id !== stripeAccount || Boolean(first.livemode) !== invoice.livemode) throw new Error(`Invoice ${invoice.id} names no payment of its stay`)
   const paid = invoice.payments?.data.find(entry => entry.status === 'paid')
-  const intent = paid?.payment.payment_intent
-  if (!intent || typeof intent === 'string') throw new Error(`Paid invoice ${invoice.id} has no PaymentIntent`)
+  const intentId = typeof paid?.payment.payment_intent === 'string' ? paid.payment.payment_intent : paid?.payment.payment_intent?.id
+  if (!intentId) throw new Error(`Paid invoice ${invoice.id} has no PaymentIntent`)
+  // Stripe expands at most four levels, so the charge is read with its PaymentIntent.
+  const intent = await stripe.paymentIntents.retrieve(intentId, { expand: ['latest_charge'] }, { stripeAccount })
   const charge = intent.latest_charge
   if (!charge || typeof charge === 'string' || charge.amount !== invoice.amount_paid) throw new Error(`Paid invoice ${invoice.id} has no matching charge`)
   const now = new Date().toISOString()
@@ -99,9 +108,12 @@ export async function recordInstallmentPayment(db: DbClient, stripe: Stripe, env
     occurredAt: paidAt, createdAt: now,
   }, { query: 'SELECT 1 WHERE changes()=1', params: [] })] : []
   const [inserted] = await executeBatch(db, [insert, ...usage], { operation: 'Record monthly stay payment' })
-  if ((inserted?.meta.changes ?? 0) !== 1) return
+  // A redelivered event whose earlier attempt saved the row but failed to publish publishes it now.
+  const recorded = (inserted?.meta.changes ?? 0) === 1 ? id
+    : (await queryFirst<{ id: string }>(db, 'SELECT id FROM payments WHERE stripe_account_id = ? AND livemode = ? AND stripe_payment_intent_id = ?', [stripeAccount, first.livemode, intent.id]))?.id
+  if (!recorded) throw new Error(`Monthly payment for invoice ${invoice.id} was not recorded`)
   await publishEvent(env, {
-    type: 'payment.captured', organization_id: organizationId, payment_id: id, intent_created: intent.created, saved_method_id: null, booking: null,
+    type: 'payment.captured', organization_id: organizationId, payment_id: recorded, intent_created: intent.created, saved_method_id: null, booking: null,
     notice: { kind: 'payment_captured', nativeId: intent.id, status: intent.status, amount: invoice.amount_paid, email: charge.billing_details.email ?? null },
   })
 }

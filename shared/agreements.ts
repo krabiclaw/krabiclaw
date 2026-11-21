@@ -83,7 +83,9 @@ export function isBookingAgreement(value: unknown): value is BookingAgreement {
   return isRecord(value) && typeof value.label === 'string' && (value.source === 'listing' || value.source === 'booking')
     && typeof value.file_name === 'string' && typeof value.url === 'string' && (value.signed_url === null || typeof value.signed_url === 'string')
     && (value.status === 'stored' || value.status === 'signing' || value.status === 'signed')
-    && Array.isArray(value.signers) && Array.isArray(value.fields) && value.fields.every(isAgreementField)
+    && Array.isArray(value.signers) && value.signers.every(signer => isRecord(signer) && typeof signer.key === 'string' && typeof signer.name === 'string'
+      && (signer.role === 'guest' || signer.role === 'host') && (signer.signed_at === null || typeof signer.signed_at === 'string'))
+    && Array.isArray(value.fields) && value.fields.every(isAgreementField)
     && typeof value.can_sign === 'boolean' && typeof value.can_manage === 'boolean'
 }
 

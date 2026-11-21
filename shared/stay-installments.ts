@@ -38,6 +38,8 @@ export function stayInstallments(stay: { check_in_date: string; check_out_date: 
   }
   const total = stay.nightly.reduce((sum, night) => sum + night.price_minor, 0)
   if (periods.reduce((sum, period) => sum + period.amount_minor, 0) !== total) throw new Error('A stay’s monthly payments do not add up to its total')
+  // A stay that fits in one month, or has a month with nothing to charge, is paid at once.
+  if (periods.length < 2 || periods.some(period => period.amount_minor === 0)) return null
   return periods
 }
 

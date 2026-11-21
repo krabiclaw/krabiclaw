@@ -2346,8 +2346,13 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv & Cloudflare
   if (isChannelManagedStay(current)) channelOwned(current, 'belongs to')
   if (input.version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
   const reason = optionalText(input.reason, 'reason', 500)
-  // A current-version replay publishes the saved cancellation without another mutation or refund intent.
-  if (current.status === 'cancelled') return publishBookingNights(env, access.organizationId, current, [])
+  // A current-version replay publishes the saved cancellation without another mutation or refund intent,
+  // and finishes stopping its monthly payments if that failed the first time.
+  if (current.status === 'cancelled') {
+    const replayed = await publishBookingNights(env, access.organizationId, current, [])
+    await cancelMonthlyPayments(db, env, access.organizationId, stayId)
+    return replayed
+  }
   const home = homeResult?.results[0] as TurnoverHome | undefined
   if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
   const next = current.version + 1
@@ -2631,8 +2636,10 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
       homes: await readTurnoverHomes(db, { organizationId, before: stay, after: stay }),
       guard: { query: `version = ? AND user_id = ? AND owner = 'app' AND channel = 'direct' AND status <> 'cancelled' AND product_session_id IS NULL
           AND EXISTS (SELECT 1 FROM conversations r WHERE r.id=? AND r.booking_id=bookings.id AND r.organization_id=bookings.organization_id AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')})
-          AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE payment_id IN (SELECT value FROM json_each(?)) AND status IN ('queued','creating','pending','requires_action'))`,
-        params: [stay.version, buyerUserId, stay.conversation_id, buyerUserId, paymentIds] },
+          AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE payment_id IN (SELECT value FROM json_each(?)) AND status IN ('queued','creating','pending','requires_action'))
+          AND (SELECT COALESCE(SUM(captured_amount - refunded_amount), 0) || ':' || COUNT(*) FROM payments WHERE organization_id = bookings.organization_id AND subject_type = 'booking' AND subject_id = bookings.id AND captured_amount > 0) = ?`,
+        // The refund was sized from these payments: a month captured or a refund completed since refuses the cancellation.
+        params: [stay.version, buyerUserId, stay.conversation_id, buyerUserId, paymentIds, `${payments.reduce((sum, entry) => sum + entry.captured_amount - entry.refunded_amount, 0)}:${payments.length}`] },
     })
     const results = await executeBatch(db, [
       ...cancellation.queries,

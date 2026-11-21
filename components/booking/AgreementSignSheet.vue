@@ -287,8 +287,9 @@ const pageElements = reactive<Record<number, HTMLElement>>({})
 const pageCanvases = reactive<Record<number, HTMLCanvasElement>>({})
 let pdfDoc: import('pdfjs-dist').PDFDocumentProxy | null = null
 
+// The signed PDF dates each signature in UTC; the preview shows the same day.
 const todayDate = computed(() => {
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date())
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date())
 })
 
 function isViewerField(field: AgreementField): boolean {
@@ -326,8 +327,12 @@ function scrollToSignature() {
   }
 }
 
+let loading = 0
 async function loadAndRenderPdf() {
   if (!import.meta.client || !props.agreement.url) return
+  // A load for a document the sheet no longer shows draws nothing.
+  const ticket = ++loading
+  const current = () => ticket === loading && open.value
   loadingPdf.value = true
   try {
     const pdfjs = await import('pdfjs-dist')
@@ -337,7 +342,9 @@ async function loadAndRenderPdf() {
     const response = await fetch(props.agreement.url)
     if (!response.ok) throw new Error(`The ${props.agreement.label.toLowerCase()} could not be opened (${response.status})`)
     const data = new Uint8Array(await response.arrayBuffer())
-    pdfDoc = await pdfjs.getDocument({ data }).promise
+    const loaded = await pdfjs.getDocument({ data }).promise
+    if (!current()) return
+    pdfDoc = loaded
     totalPages.value = pdfDoc.numPages
 
     await nextTick()
@@ -345,6 +352,7 @@ async function loadAndRenderPdf() {
     // Render each page
     for (let i = 1; i <= pdfDoc.numPages; i++) {
       const page = await pdfDoc.getPage(i)
+      if (!current()) return
       const canvas = pageCanvases[i]
       if (canvas) {
         const viewport = page.getViewport({ scale: 1.5 })
@@ -355,9 +363,9 @@ async function loadAndRenderPdf() {
       }
     }
   } catch (failure) {
-    error.value = getErrorMessage(failure, `The ${props.agreement.label.toLowerCase()} could not be shown. Open it with Review PDF.`)
+    if (current()) error.value = getErrorMessage(failure, `The ${props.agreement.label.toLowerCase()} could not be shown. Open it with Review PDF.`)
   } finally {
-    loadingPdf.value = false
+    if (ticket === loading) loadingPdf.value = false
   }
 }
 

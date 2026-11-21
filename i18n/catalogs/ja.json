@@ -100,6 +100,7 @@
   "payment.agreement": "ボタンを選択すると、{terms}に同意し、表示された合計金額を支払うことに同意します。",
   "payment.due_today": "本日のお支払い",
   "payment.later_payments": "今後のお支払い",
+  "payment.later_payments_tax": "今後の各お支払いには税金が加算されます。",
   "payment.final_payment": "最終回",
   "payment.stay_total": "滞在の合計",
   "payment.monthly_agreement": "ボタンを選択すると、{terms}に同意し、本日の金額を支払い、最終回まで今後の各金額がその日付にこのカードに請求されることに同意します。",

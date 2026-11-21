@@ -10,7 +10,8 @@
     >
       <template v-if="context">
         <!-- The document the booking has now: who signed, and what the business can still do with it. -->
-        <template v-if="context.current">
+        <!-- A replacement chosen for the current document is prepared like a first one. -->
+        <template v-if="context.current && !draft.file">
           <BookingAgreement :conversation-id="context.conversationId" :preloaded="{ agreement: context.current, canManage: true }" @open-signing="openSigning" />
           <div class="mt-4 divide-y divide-default border-t border-default">
             <button v-if="context.current.status !== 'signed'" type="button" :class="rowClass" data-testid="booking-agreement-replace" @click="startOver">
@@ -102,7 +103,7 @@
       <div v-if="workspace" class="fixed inset-0 z-50 flex flex-col bg-muted text-default" data-testid="fullscreen-field-workspace">
         <header class="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-default bg-default px-4 sm:px-6">
           <h1 class="truncate text-base font-semibold text-highlighted">{{ context?.label }} for {{ context?.title }}</h1>
-          <UButton icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close" @click="closeWorkspace" />
+          <UButton icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close" :disabled="sending" @click="closeWorkspace" />
         </header>
 
         <div class="flex min-h-0 flex-1">
@@ -170,7 +171,7 @@
             <footer class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-default bg-default px-4 py-3 sm:px-6">
               <p class="min-w-0 text-sm" :class="sendError ? 'text-error' : 'text-muted'" role="status">{{ sendError || readiness }}</p>
               <div class="flex items-center gap-3">
-                <UButton color="neutral" variant="ghost" label="Back" @click="closeWorkspace" />
+                <UButton color="neutral" variant="ghost" label="Back" :disabled="sending" @click="closeWorkspace" />
                 <UButton color="neutral" label="Request signatures" :loading="sending" :disabled="unplaced !== null" data-testid="request-signatures-button" @click="send" />
               </div>
             </footer>
@@ -349,9 +350,13 @@ function closeWorkspace() {
   workspace.value = false
 }
 
+let rendering = 0
 async function renderPage() {
   if (!pdf || !canvas.value) return
+  // Page changes can overlap; only the latest one draws.
+  const ticket = ++rendering
   const current = await pdf.getPage(page.value)
+  if (ticket !== rendering || !canvas.value) return
   const viewport = current.getViewport({ scale: 1.5 })
   canvas.value.width = viewport.width
   canvas.value.height = viewport.height

@@ -100,6 +100,7 @@
   "payment.agreement": "Khi chọn nút này, tôi đồng ý với {terms} và đồng ý thanh toán tổng số tiền hiển thị.",
   "payment.due_today": "Thanh toán hôm nay",
   "payment.later_payments": "Các khoản thanh toán sau",
+  "payment.later_payments_tax": "Thuế được cộng vào mỗi khoản thanh toán sau.",
   "payment.final_payment": "lần thanh toán cuối",
   "payment.stay_total": "Tổng tiền lưu trú",
   "payment.monthly_agreement": "Khi chọn nút này, tôi đồng ý với {terms}, thanh toán số tiền đến hạn hôm nay và đồng ý để thẻ này bị trừ từng khoản sau vào ngày của nó cho đến lần thanh toán cuối.",

@@ -95,6 +95,7 @@
           <!-- A long stay paid monthly: each later month on its date, and what the stay costs in all. -->
           <div v-if="laterPayments.length" class="border-t border-default pt-5 space-y-2" data-payment-schedule>
             <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.later_payments') }}</h3>
+            <p v-if="handoff.stay?.later_payments_add_tax" class="text-xs text-muted">{{ t('payment.later_payments_tax') }}</p>
             <dl class="space-y-2 text-sm">
               <div v-for="(period, index) in laterPayments" :key="period.period_start" class="flex justify-between gap-4">
                 <dt class="text-default">{{ formatCalendarDate(period.period_start, locale, { month: 'short', day: 'numeric', year: 'numeric' }) }}<template v-if="index === laterPayments.length - 1"> · {{ t('payment.final_payment') }}</template></dt>

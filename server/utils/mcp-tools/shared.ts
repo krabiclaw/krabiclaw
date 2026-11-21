@@ -772,7 +772,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   reject_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   cancel_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   request_product_booking_change: { ...D, openWorldHint: true, idempotentHint: true },
-  send_booking_agreement: { ...W, openWorldHint: true },
+  // Sending makes it the booking's agreement, replacing one still being signed.
+  send_booking_agreement: { ...D, openWorldHint: true },
   set_booking_deposit: { ...D, idempotentHint: true },
   record_booking_deposit: { ...D, idempotentHint: true },
   delete_booking_deposit_entry: D,

@@ -76,6 +76,38 @@ reviews:
           Fail if an assertion was widened, a matcher loosened or a case removed
           to make a failing test pass, unless the diff states which of the spec or
           the application was wrong and why the old premise no longer holds.
+      - name: "Reads stay fast"
+        mode: "error"
+        instructions: |
+          Speed is fixed by deleting work from the read path, not by moving it.
+
+          Fail if a request path adds a D1 round trip it did not have: a
+          queryFirst/queryAll/execute awaited one after another where the
+          statements could ride in one executeBatch, or a read the screen's
+          existing batch could carry (as the agreement and deposit reads ride
+          in the booking's batch).
+
+          Fail on a query inside a loop over rows (one statement per row, per
+          signer, per payment, per night) where one statement with IN, json_each
+          or a join reads them all.
+
+          Fail if a screen or API read computes, on every load, what a write
+          could store once — recounting, re-deriving or re-fetching from a
+          provider what the database already holds or should hold.
+
+          Fail if a slow read is answered with a background job, cron, timer,
+          request timeout (AbortSignal.timeout or any fetch deadline), cache
+          layer or retry, or by running the same statements in parallel instead
+          of removing them. Parallelizing or reordering the same work is not a
+          speed fix.
+
+          Fail on module-level state that holds large data between requests in a
+          Worker (font files, documents, decoded images): the isolate has
+          128 MB. Fail on a new server dependency that only the browser needs;
+          the Worker upload is close to its size limit.
+
+          Name the extra round trip, loop or recomputation and the statement or
+          stored value that removes it.
   path_instructions:
     - path: "**"
       instructions: |

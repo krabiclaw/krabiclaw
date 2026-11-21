@@ -326,7 +326,8 @@ test('a channel stay is read-only here and is paid through its channel; an app s
       [{ purpose: 'deposit', amount_minor: 50_000 }, { purpose: 'deposit_withheld', amount_minor: 10_000 }, { purpose: 'deposit', amount_minor: -40_000 }])
     // A receipt already returned or kept stays until those entries go.
     await assert.rejects(deleteDepositEntry(db, depositor, stay.id, received.entry.id), code('DEPOSIT_IN_USE'))
-    assert.equal((await readBookingDeposit(db, ORG, stay.id))?.held_minor, 0)
+    const readBack = await readBookingDeposit(db, ORG, stay.id)
+    assert.deepEqual([readBack?.required_minor, readBack?.held_minor], [50_000, 0])
 
     // A guest who already paid: the stay and its first payment are one write, and a replay adds no second payment.
     const withPayment = { product_id: cabin.id, idempotency_key: 'paid-up-front', check_in_date: '2026-12-10', check_out_date: '2026-12-12', ...guest, payment: { amount_minor: 45_000, method: 'cash', paid_on: '2026-12-01', reference: 'cash at the door' } }

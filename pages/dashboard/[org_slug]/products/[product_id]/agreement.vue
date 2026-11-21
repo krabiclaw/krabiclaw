@@ -21,9 +21,9 @@
       <!-- The business's own text, filled from each booking when it is sent. -->
       <template v-else-if="mode === 'template'">
         <div class="mt-6 flex flex-wrap gap-2" data-testid="template-fields">
-          <UButton v-for="field in AGREEMENT_TEMPLATE_FIELDS" :key="field" size="xs" color="neutral" variant="outline" :label="agreementTemplateFieldLabel(product.kind, field)" @click="insert(field)" />
+          <UButton v-for="field in AGREEMENT_TEMPLATE_FIELDS" :key="field" size="xs" color="neutral" variant="outline" :disabled="busy" :label="agreementTemplateFieldLabel(product.kind, field)" @click="insert(field)" />
         </div>
-        <UTextarea ref="editor" v-model="draft" class="mt-3 w-full" :rows="18" :maxlength="MAX_AGREEMENT_TEMPLATE_LENGTH" placeholder="# Engagement letter&#10;&#10;This letter confirms that {{business_name}} will represent {{client_name}}…" data-testid="template-text" />
+        <UTextarea ref="editor" v-model="draft" class="mt-3 w-full" :disabled="busy" :rows="18" :maxlength="MAX_AGREEMENT_TEMPLATE_LENGTH" placeholder="# Engagement letter&#10;&#10;This letter confirms that {{business_name}} will represent {{client_name}}…" data-testid="template-text" />
         <p class="mt-2 text-xs text-muted">{{ draft.length.toLocaleString() }} / {{ MAX_AGREEMENT_TEMPLATE_LENGTH.toLocaleString() }}. Start a line with # for a heading. Signature lines are added for each signer when you send it.</p>
         <UButton class="mt-5 w-full justify-center" label="Save" color="neutral" size="lg" :loading="busy" :disabled="busy || !draft.trim() || draft === saved" data-testid="template-save" @click="saveTemplate" />
       </template>
@@ -117,12 +117,9 @@ const placePdf = (assetId: string | null) => dashboardApi(`${api}/media/placemen
 })
 const putTemplate = (text: string | null) => dashboardApi(templateApi.value, { method: 'PUT', body: { text }, validate: isTemplateAnswer })
 
-// The listing has one agreement: saving one kind removes the other.
+// The listing has one agreement: the server removes an uploaded PDF in the same write.
 function saveTemplate() {
-  void run(async () => {
-    await putTemplate(draft.value)
-    if (product.value?.agreement) await placePdf(null)
-  }, 'The template could not be saved')
+  void run(async () => { await putTemplate(draft.value) }, 'The template could not be saved')
 }
 
 function picked(event: Event) {

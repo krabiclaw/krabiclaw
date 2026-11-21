@@ -59,7 +59,11 @@ export async function saveAgreementTemplate(env: CloudflareEnv, db: DbClient, in
   await uploadPrivateDocument({
     db, env, organizationId: input.organizationId, userId: input.userId, contentType: 'text/markdown',
     buffer: new TextEncoder().encode(input.text) as Uint8Array<ArrayBuffer>, filename: `${agreementLabel(input.kind)}.md`,
-    queries: assetId => buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: TEMPLATE_PLACEMENT(input.productId), media: [{ asset_id: assetId }] }),
+    // A listing has one agreement: the template replaces an uploaded PDF in the same batch.
+    queries: assetId => [
+      ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: TEMPLATE_PLACEMENT(input.productId), media: [{ asset_id: assetId }] }),
+      ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: { owner_type: 'product', owner_id: input.productId, slot: 'agreement' }, media: [] }),
+    ],
   })
 }
 

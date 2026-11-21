@@ -141,6 +141,7 @@
   "payment.agreement": "Durch die Auswahl des Buttons stimme ich den {terms} zu und zahle den angezeigten Gesamtbetrag.",
   "payment.due_today": "Heute fällig",
   "payment.later_payments": "Spätere Zahlungen",
+  "payment.later_payments_tax": "Steuern kommen zu jeder späteren Zahlung hinzu.",
   "payment.final_payment": "letzte Zahlung",
   "payment.stay_total": "Gesamtpreis des Aufenthalts",
   "payment.monthly_agreement": "Mit dem Klick auf die Schaltfläche stimme ich den {terms} zu, den heute fälligen Betrag zu zahlen und dass diese Karte mit jedem späteren Betrag an seinem Datum belastet wird, bis zur letzten Zahlung.",

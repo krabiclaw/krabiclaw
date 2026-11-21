@@ -119,7 +119,8 @@ export async function recordDepositEntry(db: DbClient, actor: DepositActor, book
   // What was kept moved no money; it changes whose the held money is.
   const method = kind === 'withheld' ? 'other' : input.method as DepositMethod
   if (!DEPOSIT_METHODS.includes(method)) fail(422, 'VALIDATION_ERROR', `method must be one of ${DEPOSIT_METHODS.join(', ')}`, 'method')
-  const paidOn = typeof input.paid_on === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.paid_on) && !Number.isNaN(Date.parse(`${input.paid_on}T00:00:00Z`)) ? input.paid_on : fail(422, 'VALIDATION_ERROR', 'paid_on must be a YYYY-MM-DD date', 'paid_on')
+  // A real calendar day: 2026-02-30 parses, but is not one.
+  const paidOn = typeof input.paid_on === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.paid_on) && new Date(`${input.paid_on}T00:00:00Z`).toISOString().slice(0, 10) === input.paid_on ? input.paid_on : fail(422, 'VALIDATION_ERROR', 'paid_on must be a YYYY-MM-DD date', 'paid_on')
   const reference = text(input.reference, 'reference', 200)
   // Keeping part of a deposit needs its reason, as a landlord's itemized statement does.
   const note = text(input.note, 'note', 1000, kind === 'withheld')

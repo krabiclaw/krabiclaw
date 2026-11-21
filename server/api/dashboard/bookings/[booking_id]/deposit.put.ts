@@ -8,5 +8,5 @@ import { setBookingDeposit } from '~/server/domain/deposits'
 export default defineHandler(async event => {
   const { db, actor } = await depositRequest(event)
   const body = await readRequiredBody<{ deposit_minor?: unknown }>(event)
-  return jsonResponse({ deposit: await setBookingDeposit(db, actor, getRouterParam(event, 'booking_id') ?? '', body.deposit_minor ?? null) })
+  return jsonResponse({ deposit: await setBookingDeposit(db, actor, getRouterParam(event, 'booking_id') ?? '', body.deposit_minor) })
 })

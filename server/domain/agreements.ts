@@ -316,7 +316,8 @@ export async function sendAgreement(env: CloudflareEnv, conversation: Conversati
   if (new Set(signers.map(signer => signer.key)).size !== signers.length) throw new HTTPError({ statusCode: 422, message: 'Each signer appears once', data: { code: 'DUPLICATE_SIGNER', field: 'signers' } })
   if (!signers.some(signer => signer.role === 'guest')) throw new HTTPError({ statusCode: 422, message: 'Add at least one guest to sign', data: { code: 'NO_GUEST_SIGNER', field: 'signers' } })
   const hosts = signers.filter(signer => signer.role === 'host')
-  if (hosts.length > 1 || hosts.some(signer => signer.key !== `user:${actor.userId}`)) throw new HTTPError({ statusCode: 422, message: 'Only you can sign for the business', data: { code: 'INVALID_HOST_SIGNER', field: 'signers' } })
+  // The business signs last, as one signer: the member who sends it.
+  if (hosts.length !== 1 || hosts[0]!.key !== `user:${actor.userId}`) throw new HTTPError({ statusCode: 422, message: 'You sign for the business, once, after your guests', data: { code: 'INVALID_HOST_SIGNER', field: 'signers' } })
   // A guest signer with an account is a guest in this conversation; anyone else is invited by email.
   const seated = new Set(availableSigners(signerRows!, actor).map(signer => signer.key))
   if (signers.some(signer => signer.role === 'guest' && signer.key.startsWith('user:') && !seated.has(signer.key))) {
@@ -344,17 +345,24 @@ export async function sendAgreement(env: CloudflareEnv, conversation: Conversati
   const sent = await findMessageByDedupeKey(env.DB, writer.dedupeKey)
   if (!sent) throw new Error('The agreement request was not saved')
   await emailSigners(env, conversation, booking, actor, sent, guests)
+  return { messageId: sent.id }
 }
 
 async function emailSigners(env: CloudflareEnv, conversation: ConversationRow, booking: AgreementBooking, actor: AgreementActor, sent: MessageRow, guests: { key: string; name: string }[]) {
-  const organization = await queryFirst<{ name: string }>(env.DB, 'SELECT name FROM organization WHERE id = ?', [conversation.organization_id])
-  if (!organization) throw new Error('The agreement has no organization')
+  // The business's name and every account signer's email, in one statement.
+  const accounts = guests.filter(signer => signer.key.startsWith('user:')).map(signer => signer.key.slice(5))
+  const read = await queryFirst<{ name: string; emails: string }>(env.DB,
+    `SELECT o.name, (SELECT json_group_object(u.id, u.email) FROM user u WHERE u.id IN (SELECT value FROM json_each(?))) AS emails FROM organization o WHERE o.id = ?`,
+    [JSON.stringify(accounts), conversation.organization_id])
+  if (!read) throw new Error('The agreement has no organization')
+  const organization = { name: read.name }
+  const accountEmails = JSON.parse(read.emails) as Record<string, string | null>
   const label = agreementLabel(booking.productKind).toLowerCase()
   const logo = await organizationLogo(env.DB, conversation.organization_id)
   const origin = platformOrigin(env)
-  for (const signer of guests) {
-    const email = signer.key.startsWith('email:') ? signer.key.slice(6)
-      : (await queryFirst<{ email: string }>(env.DB, 'SELECT email FROM user WHERE id = ?', [signer.key.slice(5)]))?.email
+  // Each guest's email is its own attempt: one failing does not keep the others from theirs. Every failure is reported.
+  const outcomes = await Promise.allSettled(guests.map(async signer => {
+    const email = signer.key.startsWith('email:') ? signer.key.slice(6) : accountEmails[signer.key.slice(5)]
     if (!email) throw new HTTPError({ statusCode: 409, message: `${signer.name} has no email to send the ${label} to`, data: { code: 'SIGNER_EMAIL_MISSING', field: 'signers' } })
     let link: URL
     if (signer.key.startsWith('email:')) {
@@ -378,6 +386,12 @@ async function emailSigners(env: CloudflareEnv, conversation: ConversationRow, b
       }), { platformDomain: getPlatformDomain(env) }),
     })
     if (!isDeliverySent(delivered)) throw new HTTPError({ statusCode: 502, message: delivered.error || `The email to ${signer.name} was not confirmed`, data: { code: 'DELIVERY_INCOMPLETE', field: 'delivery', delivery_id: delivered.id } })
+  }))
+  const failed = outcomes.flatMap(outcome => outcome.status === 'rejected' ? [outcome.reason as unknown] : [])
+  if (failed.length === 1) throw failed[0]
+  if (failed.length) {
+    const reason = failed.map(error => error instanceof Error ? error.message : String(error)).join(' ')
+    throw new HTTPError({ statusCode: 502, message: `The ${label} was sent, but some emails were not: ${reason}`, data: { code: 'DELIVERY_INCOMPLETE', field: 'delivery' }, cause: new AggregateError(failed, reason) })
   }
 }
 
@@ -405,6 +419,8 @@ export interface SignAgreementInput {
 export async function signAgreement(env: CloudflareEnv, conversation: ConversationRow, viewer: AgreementViewer, input: SignAgreementInput) {
   if (!input.consent) throw new HTTPError({ statusCode: 422, message: 'Agree to sign electronically', data: { code: 'CONSENT_REQUIRED', field: 'consent' } })
   const typedName = input.typedName.trim()
+  // The signed PDF draws the name in a Noto font: Latin, Greek and Cyrillic, Thai, Korean, Japanese or Chinese.
+  if (!SIGNABLE_NAME.test(typedName)) throw new HTTPError({ statusCode: 422, message: 'Type your name in Latin, Greek, Cyrillic, Thai, Korean, Japanese or Chinese letters', data: { code: 'NAME_SCRIPT_UNSUPPORTED', field: 'typed_name' } })
   if (typedName.length < 2 || typedName.length > 120) throw new HTTPError({ statusCode: 422, message: 'Type your full name', data: { code: 'NAME_REQUIRED', field: 'typed_name' } })
   const { booking, records, listing, signerRows } = await readAgreement(env.DB, conversation, true)
   const state = agreementState(records, listing, booking, new Date().toISOString())
@@ -436,6 +452,7 @@ export async function agreementDocument(env: CloudflareEnv, conversation: Conver
 }
 
 const SIGNATURE_COLOR = rgb(0.09, 0.09, 0.11)
+const SIGNABLE_NAME = /^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Thai}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}\p{Script=Common}\p{Script=Inherited}]+$/u
 
 const NOTO_FONT_FILES = {
   thai: 'NotoSansThai-Regular.ttf',
@@ -524,8 +541,10 @@ export async function signedAgreementDocument(env: CloudflareEnv, conversation: 
     const defaultFont = field.kind === 'signature' ? script : regular
     const font = await resolveFont(text, defaultFont)
     const box = { x: field.x * width, y: height - (field.y + field.height) * height, w: field.width * width, h: field.height * height }
-    const size = Math.min(box.h * (field.kind === 'signature' ? 0.8 : 0.6), field.kind === 'signature' ? 28 : 12)
-    page.drawText(text, { x: box.x + 2, y: box.y + (box.h - size) / 2 + size * 0.2, size, font, color: SIGNATURE_COLOR, maxWidth: box.w - 4 })
+    // One line, shrunk to the field's width, so a long name never runs below it.
+    const tallest = Math.min(box.h * (field.kind === 'signature' ? 0.8 : 0.6), field.kind === 'signature' ? 28 : 12)
+    const size = Math.min(tallest, (box.w - 4) / Math.max(font.widthOfTextAtSize(text, 1), 0.01))
+    page.drawText(text, { x: box.x + 2, y: box.y + (box.h - size) / 2 + size * 0.2, size, font, color: SIGNATURE_COLOR })
   }
   // The signature record: what was signed, by whom, when and from where.
   const page = pdf.addPage([612, 792])

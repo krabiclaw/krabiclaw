@@ -65,6 +65,7 @@ export default {
     "agreement": "By selecting the button, I agree to the {terms} and to pay the total shown.",
     "due_today": "Due today",
     "later_payments": "Later payments",
+    "later_payments_tax": "Tax is added to each later payment.",
     "final_payment": "final payment",
     "stay_total": "Stay total",
     "monthly_agreement": "By selecting the button, I agree to the {terms}, to pay the amount due today, and to this card being charged each later amount on its date until the final payment.",

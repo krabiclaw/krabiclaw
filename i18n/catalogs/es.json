@@ -141,6 +141,7 @@
   "payment.agreement": "Al seleccionar el botón, acepto los {terms} y pagar el total mostrado.",
   "payment.due_today": "A pagar hoy",
   "payment.later_payments": "Pagos posteriores",
+  "payment.later_payments_tax": "Los impuestos se suman a cada pago posterior.",
   "payment.final_payment": "último pago",
   "payment.stay_total": "Total de la estancia",
   "payment.monthly_agreement": "Al seleccionar el botón, acepto las {terms}, pagar el importe de hoy y que se cargue en esta tarjeta cada importe posterior en su fecha hasta el último pago.",

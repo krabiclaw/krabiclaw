@@ -48,8 +48,9 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
  const keys=payments.map(entry=>visitRefundRowKey(input.action,input.bookingId,entry.id))
  // The approval and the booking write are one batch: the booking still holds money and the approval is the one given for it.
  const guard={query:`EXISTS(SELECT 1 FROM payment_authorizations a WHERE a.payment_id=? AND a.organization_id=? AND a.id=? AND a.user_id=? AND a.action=? AND a.amount IS NULL AND a.approved_at IS NOT NULL AND a.consumed_at IS NULL AND a.expires_at>?)
-   AND EXISTS(SELECT 1 FROM payments p WHERE p.id IN (SELECT value FROM json_each(?)) AND p.organization_id=? AND p.captured_amount>p.refunded_amount)`,
-  params:[payment.id,input.organizationId,input.authorizationId!,input.actorUserId,authorizationAction,input.now,JSON.stringify(ids),input.organizationId]}
+   AND (SELECT json_group_array(p.id||':'||(p.captured_amount-p.refunded_amount)) FROM (SELECT * FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount ORDER BY created_at, id) p)=?`,
+  // The payments read are still exactly the ones holding money, by the same amounts: a month captured or a refund completed since refuses the change.
+  params:[payment.id,input.organizationId,input.authorizationId!,input.actorUserId,authorizationAction,input.now,input.organizationId,input.bookingId,JSON.stringify(payments.map(entry=>`${entry.id}:${entry.captured_amount-entry.refunded_amount}`))]}
  return {guard,queries:[
   ...payments.map((entry,index)=>({query:`INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,created_by,created_at,updated_at) SELECT ?,?,?,NULL,'requested_by_customer',(SELECT note FROM payment_authorizations WHERE id=?),'queued',?,?,? WHERE ${input.committed.query} ON CONFLICT(idempotency_key) DO NOTHING`,params:[crypto.randomUUID(),entry.id,keys[index],input.authorizationId!,input.actorUserId,input.now,input.now,...(input.committed.params ?? [])]})),
   {query:'UPDATE payment_authorizations SET consumed_at=? WHERE id=? AND EXISTS(SELECT 1 FROM payment_refunds WHERE idempotency_key=?)',params:[input.now,input.authorizationId!,keys[0]]},

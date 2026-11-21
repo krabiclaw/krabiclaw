@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:3f8c37e44968f67c7352bfa9daf5f2f396ffd0fb11f9527cc724e9e8492762b4",
-  "documentationFingerprint": "sha256:97c0738e06c2bd21e49ce13b06e3bd1487c65d493884adf4eca673fa6c506902",
+  "fingerprint": "sha256:271f7229b8f1916f14e9a0d4e4d1a003bf766d609bc235cc63119a449f045eb9",
+  "documentationFingerprint": "sha256:1959ce5291e9ba9c3208b8d2b03953e8c90dd51a08b3cc48b205376b02505597",
   "tools": [
     {
       "name": "add_organization_language",
@@ -99076,7 +99076,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Send booking agreement"

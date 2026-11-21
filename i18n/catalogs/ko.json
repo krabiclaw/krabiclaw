@@ -141,6 +141,7 @@
   "payment.agreement": "버튼을 선택하면 {terms}에 동의하고 표시된 총액을 지불하는 데 동의합니다.",
   "payment.due_today": "오늘 결제 금액",
   "payment.later_payments": "이후 결제",
+  "payment.later_payments_tax": "이후 결제마다 세금이 추가됩니다.",
   "payment.final_payment": "마지막 결제",
   "payment.stay_total": "숙박 총액",
   "payment.monthly_agreement": "버튼을 선택하면 {terms}에 동의하고, 오늘 결제 금액을 지불하며, 마지막 결제까지 이후의 각 금액이 해당 날짜에 이 카드로 청구되는 것에 동의합니다.",
