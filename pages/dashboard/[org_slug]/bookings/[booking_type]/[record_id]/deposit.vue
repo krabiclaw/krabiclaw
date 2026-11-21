@@ -72,6 +72,7 @@
 
 <script setup lang="ts">
 import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
+import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { isCurrencyCode } from '~/shared/currencies'
 import { DEPOSIT_ENTRY_KINDS, DEPOSIT_METHODS, isBookingDeposit, type DepositEntry, type DepositEntryKind, type DepositMethod } from '~/shared/deposits'
 import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
@@ -87,6 +88,7 @@ const METHOD_LABELS: Record<DepositMethod, string> = { cash: 'Cash', bank_transf
 const rowClass = 'flex w-full items-center gap-3 py-4 text-left text-sm text-highlighted disabled:opacity-50'
 
 const editor = inject(bookingEditorKey, null)
+const dashboardApi = useDashboardApi()
 const context = computed(() => editor?.deposit.value ?? null)
 const deposit = computed(() => context.value?.current ?? null)
 const currency = computed(() => {
@@ -137,7 +139,7 @@ async function write(run: () => Promise<unknown>, onDone: () => void) {
 
 function saveRequired(value: string | null) {
   void write(async () => {
-    const answer = await applicationFetch(base(), { method: 'PUT', body: { deposit_minor: value === null ? null : minorFrom(value) }, validate: isRecord })
+    const answer = await dashboardApi(base(), { method: 'PUT', body: { deposit_minor: value === null ? null : minorFrom(value) }, validate: isRecord })
     if (answer.deposit !== null && !isBookingDeposit(answer.deposit)) throw new Error('The saved deposit could not be read back')
   }, () => { requiredOpen.value = false })
 }
@@ -158,7 +160,7 @@ function openEntry(kind: DepositEntryKind) {
 function saveEntry() {
   const kind = entryKind.value!
   void write(async () => {
-    await applicationFetch(`${base()}/entries`, {
+    await dashboardApi(`${base()}/entries`, {
       method: 'POST', validate: isRecord,
       body: {
         kind, amount_minor: minorFrom(entryDraft.amount), method: kind === 'withheld' ? undefined : entryDraft.method, paid_on: entryDraft.paid_on,
@@ -172,7 +174,7 @@ async function removeEntry(entry: DepositEntry) {
   removing.value = entry.id
   error.value = ''
   try {
-    await applicationFetch(`${base()}/entries/${encodeURIComponent(entry.id)}`, { method: 'DELETE', validate: isRecord })
+    await dashboardApi(`${base()}/entries/${encodeURIComponent(entry.id)}`, { method: 'DELETE', validate: isRecord })
     await editor!.refresh()
   } catch (failure) {
     error.value = getErrorMessage(failure, 'The entry could not be removed')

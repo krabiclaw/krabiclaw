@@ -25,12 +25,13 @@ const HELD_SQL = `(SELECT COALESCE(SUM(CASE WHEN purpose = 'deposit' THEN amount
 /** One statement: the booking's deposit terms and every entry, for a booking read's own batch. */
 export function depositQuery(target: DepositTarget): BatchQuery {
   return {
-    query: `SELECT b.deposit_minor, b.currency, p.kind,
+    query: `SELECT b.deposit_minor, COALESCE(b.currency, o.default_currency) AS currency, p.kind,
         (SELECT json_group_array(json_object('id', o.id, 'purpose', o.purpose, 'amount_minor', o.amount_minor, 'method', o.method,
           'paid_on', o.paid_on, 'reference', o.reference, 'note', o.note))
           FROM (SELECT * FROM offline_payments WHERE organization_id = b.organization_id AND booking_id = b.id AND purpose IN ${ENTRY_PURPOSES}
                 ORDER BY paid_on, created_at) o) AS entries_json
       FROM bookings b JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
+      JOIN organization o ON o.id = b.organization_id
      WHERE b.id = ${target.booking.sql} AND b.organization_id = ${target.organization.sql}`,
     params: [...target.booking.params, ...target.organization.params],
   }
@@ -40,9 +41,9 @@ type DepositRow = { deposit_minor: number | null; currency: string | null; kind:
 type StoredEntry = Omit<DepositEntry, 'kind'> & { purpose: 'deposit' | 'deposit_withheld' }
 
 /**
- * The deposit as every reader presents it. Null only for a booking with no
- * price, which has no currency to hold a deposit in; otherwise its terms and
- * entries, with required_minor null while it asks for none.
+ * The deposit as every reader presents it, in the booking's currency or, for a
+ * booking paid later with no total yet, the business's own. Null only when the
+ * business has no currency at all; required_minor is null while it asks for none.
  */
 export function presentDeposit(row: unknown): BookingDeposit | null {
   if (!row) return null
@@ -74,11 +75,11 @@ export interface DepositActor { organizationId: string; actorId: string }
 /** The booking's own facts a deposit write checks: the business owns it, and it has a currency. */
 async function depositBooking(db: DbClient, actor: DepositActor, bookingId: string) {
   const booking = await queryFirst<{ owner: 'app' | 'channel'; currency: string | null; location_id: string | null }>(db,
-    'SELECT owner, currency, location_id FROM bookings WHERE organization_id = ? AND id = ?', [actor.organizationId, bookingId])
+    'SELECT b.owner, COALESCE(b.currency, o.default_currency) AS currency, b.location_id FROM bookings b JOIN organization o ON o.id = b.organization_id WHERE b.organization_id = ? AND b.id = ?', [actor.organizationId, bookingId])
   if (!booking) fail(404, 'BOOKING_NOT_FOUND', 'That booking is not in this organization', 'booking_id')
   // A channel's guest pays its deposit through the channel, as they pay the stay.
   if (booking.owner === 'channel') fail(409, 'CHANNEL_OWNED', 'This booking’s deposit is handled by the channel it came from', 'booking_id')
-  if (!booking.currency) fail(409, 'BOOKING_HAS_NO_CURRENCY', 'This booking has no price, so it has no currency for a deposit', 'booking_id')
+  if (!booking.currency) fail(409, 'BOOKING_HAS_NO_CURRENCY', 'The business has no currency to hold a deposit in', 'booking_id')
   return booking
 }
 

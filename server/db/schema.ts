@@ -1065,8 +1065,9 @@ export const bookings = sqliteTable("bookings", {
 	policy_json: text().notNull(),
 	total_minor: integer(),
 	currency: text(),
-	// The refundable deposit the business asks for on this booking, in its
-	// currency: a stay's security deposit, a client's retainer held in trust.
+	// The refundable deposit the business asks for on this booking, in the
+	// booking's currency or, for one paid later with no total, the business's:
+	// a stay's security deposit, a client's retainer held in trust.
 	// Not part of total_minor. What was received, returned or kept is its
 	// offline_payments rows (purpose deposit / deposit_withheld).
 	// server/domain/deposits.ts writes it; >0 when set.
