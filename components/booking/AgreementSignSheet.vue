@@ -321,6 +321,15 @@ function scrollToSignature() {
 }
 
 let loading = 0
+/** Page renders in flight, cancelled before the document is released. */
+const rendering = new Set<{ cancel: () => void; promise: Promise<unknown> }>()
+async function release(document: import('pdfjs-dist').PDFDocumentProxy) {
+  const active = [...rendering]
+  for (const task of active) task.cancel()
+  // A cancelled render rejects by design; the document is released once all have settled.
+  await Promise.allSettled(active.map(task => task.promise))
+  await document.cleanup()
+}
 async function loadAndRenderPdf() {
   if (!import.meta.client || !props.agreement.url) return
   // A load for a document the sheet no longer shows draws nothing.
@@ -352,7 +361,13 @@ async function loadAndRenderPdf() {
         canvas.width = viewport.width
         canvas.height = viewport.height
         const canvasContext = canvas.getContext('2d')!
-        await page.render({ canvas, canvasContext, viewport }).promise
+        const task = page.render({ canvas, canvasContext, viewport })
+        rendering.add(task)
+        try {
+          await task.promise
+        } finally {
+          rendering.delete(task)
+        }
       }
     }
   } catch (failure) {
@@ -373,7 +388,10 @@ watch(open, (isOpen) => {
   } else {
     // Closing releases the document and its pages; a load still in flight draws nothing.
     loading++
-    void pdfDoc?.cleanup()
+    if (pdfDoc) {
+      const closing = pdfDoc
+      release(closing).catch(failure => { error.value = getErrorMessage(failure, 'The document could not be closed') })
+    }
     pdfDoc = null
     totalPages.value = 1
   }

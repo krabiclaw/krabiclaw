@@ -47,7 +47,6 @@ import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/
 import { assertBookingBatchWrite, bookingBatchWriteRefused, requireBookingConfig } from '~/server/utils/availability'
 import { GUEST_NOTE_EVENT, openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
-import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import { publishAccessInvalidation, publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, scheduleBusinessWake, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
@@ -2575,8 +2574,9 @@ export async function readGuestStay(db: DbClient, viewer: { userId: string; veri
   const now = new Date()
   const buyerUserId = viewer.userId
   // The stay, its agreement and its ownership are one snapshot, read in one round trip.
+  // The conversation's current guest is the account, as ownedBuyerRequest holds it, in the same statement.
   const ownedStay = `SELECT s.id, s.organization_id FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
-     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`
+     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND r.user_id = s.user_id AND ${CURRENT_GUEST_SQL('r')} AND s.owner = 'app' AND s.product_session_id IS NULL`
   const ownedId = { query: `(SELECT id FROM (${ownedStay}))`, params: [activityId, buyerUserId] }
   const ownedOrganization = { query: `(SELECT organization_id FROM (${ownedStay}))`, params: [activityId, buyerUserId] }
   const [ownedRows, detailRows, ...agreementRows] = await executeBatch(db, [{
@@ -2584,7 +2584,7 @@ export async function readGuestStay(db: DbClient, viewer: { userId: string; veri
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id AND captured_amount > 0) AS paid_online,
            CASE WHEN s.status='pending' AND ${stayRequestRespondBySql('s')} IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql('r.id')}) ELSE 0 END AS payment_processing
       FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
-     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`,
+     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND r.user_id = s.user_id AND ${CURRENT_GUEST_SQL('r')} AND s.owner = 'app' AND s.product_session_id IS NULL`,
     params: [now.toISOString(), activityId, buyerUserId],
   }, stayDetailSelection(ownedOrganization, ownedId, true), ...agreementQueries({
     booking: { sql: ownedId.query, params: ownedId.params },
@@ -2592,7 +2592,6 @@ export async function readGuestStay(db: DbClient, viewer: { userId: string; veri
   }, true)], { operation: 'Read the guest stay' })
   const owned = ownedRows!.results[0] as { id: string; conversation_id: string; organization_id: string; product_id: string; paid_online: number; payment_processing: number } | undefined
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
-  await ownedBuyerRequest(db, buyerUserId, owned.conversation_id)
   const stay = stayDetailFrom({ organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, detailRows!.results[0])
   if (stay.user_id !== buyerUserId || isChannelManagedStay(stay)) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
   const confirmed = stay.status === 'confirmed'

@@ -69,7 +69,7 @@
             <span class="text-sm font-semibold text-highlighted underline underline-offset-4">Edit</span>
           </NuxtLink>
 
-          <UButton block size="lg" color="neutral" label="Next: mark where everyone signs" :disabled="!draftReady" :loading="opening" data-testid="booking-agreement-prepare" @click="openWorkspace" />
+          <UButton block size="lg" color="neutral" label="Next: mark where everyone signs" :disabled="!draftReady || busy !== null" :loading="opening" data-testid="booking-agreement-prepare" @click="openWorkspace" />
           <p v-if="!draftReady" class="text-center text-sm text-muted">{{ draft.file ? 'Choose at least one guest to sign.' : 'Choose the PDF to sign.' }}</p>
 
           <div class="divide-y divide-default border-t border-default">
@@ -456,7 +456,8 @@ async function storeSignedCopy(event: Event) {
   const input = event.target as HTMLInputElement
   const chosen = input.files?.[0]
   input.value = ''
-  if (!chosen || !context.value || busy.value) return
+  // Storing and preparing a document to send are one at a time.
+  if (!chosen || !context.value || busy.value || opening.value || workspace.value) return
   busy.value = 'store'
   error.value = ''
   try {
