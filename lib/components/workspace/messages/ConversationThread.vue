@@ -126,8 +126,23 @@
           @update:open="value => { if (!value) repairing = null }" @created="repairing = null; toast.add({ title: 'Maintenance job created', color: 'success' })" />
         <!-- The booking's agreement, opened from its record in the thread: how a guest invited to the conversation reads and signs it. -->
         <DashboardListItemDialog v-if="agreementOpen" v-model:open="agreementOpen" title="Agreement" :show-actions="false">
-          <BookingAgreement :conversation-id="threadId" />
+          <BookingAgreement
+            :conversation-id="threadId"
+            @open-signing="(agr) => {
+              agreementOpen = false
+              signingAgreement = agr
+              signingOpen = true
+            }"
+            @changed="refresh()"
+          />
         </DashboardListItemDialog>
+        <AgreementSignSheet
+          v-if="signingAgreement"
+          v-model:open="signingOpen"
+          :conversation-id="threadId"
+          :agreement="signingAgreement"
+          @signed="refresh()"
+        />
         <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell Blawby what is wrong with ${reporting.author}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
     </template>
@@ -150,11 +165,15 @@ import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhoto
 import InboxAvatar from './InboxAvatar.vue'
 import ReportDialog from './ReportDialog.vue'
 import TaskCreate from '~/components/dashboard/TaskCreate.vue'
+import AgreementSignSheet from '~/components/booking/AgreementSignSheet.vue'
+import type { BookingAgreement as BookingAgreementRecord } from '~/shared/agreements'
 import { isScheduledMessageResponse, isSuggestedReplies, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 const props = withDefaults(defineProps<{ threadId: string; personalScope?: boolean; history: ReturnType<typeof useConversation>; reservationTo?: string | null; closing?: boolean }>(), { personalScope: false, closing: false })
 const agreementOpen = ref(false)
+const signingAgreement = ref<BookingAgreementRecord | null>(null)
+const signingOpen = ref(false)
 const reservationRead = useDashboardReservationPrefetch()
 const router = useRouter()
 function prefetchReservation(to: string) {

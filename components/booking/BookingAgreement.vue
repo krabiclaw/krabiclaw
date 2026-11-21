@@ -22,7 +22,7 @@
           <UIcon v-if="signer.signed_at" name="i-lucide-check" class="size-5 text-highlighted" aria-label="Signed" />
         </li>
       </ul>
-      <UButton v-if="agreement.can_sign" class="mt-5" block size="lg" color="neutral" label="Sign" data-testid="booking-agreement-sign" @click="signing = true" />
+      <UButton v-if="agreement.can_sign" class="mt-5" block size="lg" color="neutral" label="Sign" data-testid="booking-agreement-sign" @click="startSigning" />
     </template>
     <div class="mt-3">
       <a v-if="downloadUrl" :href="downloadUrl" :class="rowClass"><UIcon name="i-lucide-download" class="size-4 shrink-0" /><span class="min-w-0 flex-1">{{ agreement?.signed_url ? 'Download signed PDF' : 'Download' }}</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" /></a>
@@ -55,7 +55,17 @@ const props = defineProps<{
    */
   preloaded?: { agreement: BookingAgreement | null; canManage: boolean }
 }>()
-const emit = defineEmits<{ changed: [] }>()
+const emit = defineEmits<{
+  changed: []
+  openSigning: [agreement: BookingAgreement]
+}>()
+
+function startSigning() {
+  if (agreement.value) {
+    emit('openSigning', agreement.value)
+    signing.value = true
+  }
+}
 
 const rowClass = 'flex w-full items-center gap-3 py-2.5 text-left text-sm text-highlighted disabled:opacity-50'
 const fetched = ref<{ agreement: BookingAgreement | null; canManage: boolean } | null>(null)

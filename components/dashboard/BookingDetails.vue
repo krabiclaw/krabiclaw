@@ -172,7 +172,45 @@
             </p>
           </div>
 
-          <BookingAgreement v-if="conversationId && agreementRead" :class="sectionClass" :conversation-id="conversationId" :editor-path="personalScope ? null : editorPath" :preloaded="agreementRead" @changed="refreshDetails()" />
+          <div v-if="conversationId && agreementRead" id="booking-agreement-section" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">{{ agreementSectionTitle }}</h2>
+            <div class="mt-3">
+              <component
+                :is="personalScope ? 'button' : NuxtLink"
+                :to="personalScope ? undefined : { path: `${editorPath}/agreement`, query: route.query }"
+                type="button"
+                :class="rowClass"
+                data-testid="booking-agreement-row"
+                @click="personalScope && (guestAgreementOpen = true)"
+              >
+                <UIcon name="i-lucide-file-text" class="size-4 shrink-0 text-highlighted" />
+                <span class="min-w-0 flex-1">
+                  <span class="block font-medium">{{ agreementRowLabel }}</span>
+                  <span v-if="agreementRowSummary" class="block text-xs text-muted" data-testid="booking-agreement-status">{{ agreementRowSummary }}</span>
+                </span>
+                <UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+              </component>
+            </div>
+            <DashboardListItemDialog v-if="personalScope && guestAgreementOpen" v-model:open="guestAgreementOpen" :title="agreementRowLabel" :show-actions="false">
+              <BookingAgreement
+                :conversation-id="conversationId"
+                :preloaded="agreementRead"
+                @open-signing="(agr) => {
+                  guestAgreementOpen = false
+                  signingAgreement = agr
+                  signingOpen = true
+                }"
+                @changed="refreshDetails()"
+              />
+            </DashboardListItemDialog>
+            <AgreementSignSheet
+              v-if="signingAgreement && conversationId"
+              v-model:open="signingOpen"
+              :conversation-id="conversationId"
+              :agreement="signingAgreement"
+              @signed="refreshDetails()"
+            />
+          </div>
           <div v-if="panel.location || panel.address || panel.pin || panel.guide?.directions" id="getting-there" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Getting there</h2>
             <StaySetupMap v-if="panel.pin" :key="`${panel.pin.latitude},${panel.pin.longitude}`" :pin="panel.pin" :marker-icon="stay ? 'i-lucide-house' : 'i-lucide-map-pin'" :interactive="false" compact class="mt-4" />
@@ -250,7 +288,7 @@
             </div>
           </div>
 
-          <div v-if="detail || (booking?.type === 'booking' && booking.payments !== null) || booking?.payments?.length" :class="sectionClass">
+          <div v-if="detail || isLongTerm || (booking?.type === 'booking' && booking.payments !== null) || booking?.payments?.length" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Payment info</h2>
             <template v-if="detail">
               <h3 class="mt-5 text-sm font-semibold text-highlighted">Amount paid</h3>
@@ -280,6 +318,48 @@
               <a v-else-if="detail.online_payment?.receipt_url" :href="detail.online_payment.receipt_url" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-2">
                 <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
               </a>
+
+              <!-- Security Deposit Escrow (#1908) -->
+              <div v-if="isLongTerm" class="mt-4 rounded-xl border border-default bg-elevated/30 p-3.5 space-y-1.5" data-testid="security-deposit-escrow-card">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <UIcon name="i-lucide-shield-check" class="size-4 text-primary" />
+                    <span class="text-xs font-semibold text-highlighted">{{ booking?.vertical === 'service' ? 'Retainer (trust escrow)' : 'Security deposit (escrow)' }}</span>
+                  </div>
+                  <span class="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                    Held in escrow
+                  </span>
+                </div>
+                <p class="text-xs text-muted">
+                  {{ money(detail?.total_minor && stayNights > 0 ? Math.round(detail.total_minor / (stayNights / 30)) : 150000) }} {{ booking?.vertical === 'service' ? 'held in IOLTA trust escrow. Excluded strictly from legal operating revenue and tax analytics until earned.' : 'held in escrow as security against damages. Excluded strictly from operating rental revenue and tax analytics.' }}
+                </p>
+              </div>
+
+              <!-- Monthly Payment Schedule & Rent Ledger (#1907) -->
+              <div v-if="monthlySchedule.length > 1" class="mt-4 space-y-2" data-testid="monthly-rent-schedule-card">
+                <h4 class="text-xs font-semibold uppercase tracking-wider text-muted">Monthly rent schedule</h4>
+                <div class="space-y-1.5">
+                  <div
+                    v-for="period in monthlySchedule"
+                    :key="period.period"
+                    class="flex items-center justify-between rounded-lg border border-default bg-surface px-3 py-2 text-xs"
+                  >
+                    <div>
+                      <span class="font-medium text-highlighted">Month {{ period.period }}</span>
+                      <span class="text-muted ml-2">Due {{ formatCalendarDate(period.due_date, 'en') }}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="font-mono font-medium text-highlighted">{{ money(period.amount_minor) }}</span>
+                      <span
+                        class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+                        :class="period.status === 'paid' ? 'bg-success/10 text-success' : period.status === 'due' ? 'bg-amber-500/10 text-amber-600' : 'bg-elevated text-muted'"
+                      >
+                        {{ period.status }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </template>
             <p v-else-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
             <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds">
@@ -406,6 +486,8 @@ export interface BookingEditor {
   conversationId: ComputedRef<string | null>
   /** The booking's agreement and, for the business, who it may ask to sign. */
   agreement: ComputedRef<{ label: string | null; signers: { key: string; name: string; role: 'guest' | 'host' }[] } | null>
+  currentAgreement: ComputedRef<import('~/shared/agreements').BookingAgreement | null>
+  canManageAgreement: ComputedRef<boolean>
   /** A stay's Change reservation step: what it is now, and the write. */
   stayChange: { stay: ComputedRef<{ check_in_date: string; check_out_date: string; adults: number; children: number } | null>; save: (input: { check_in_date: string; check_out_date: string; adults: number; children: number }) => Promise<void> }
 }
@@ -440,7 +522,9 @@ import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatPostalAddress } from '~/utils/postal-address'
 import StaySetupMap from './StaySetupMap.client.vue'
 import BookingAgreement from '~/components/booking/BookingAgreement.vue'
+import AgreementSignSheet from '~/components/booking/AgreementSignSheet.vue'
 import { ApiClientError } from '~/utils/api-clients'
+import { calculateMonthlyPaymentSchedule } from '~/shared/agreements'
 
 const props = defineProps<{
   bookingType: DashboardRecordType
@@ -561,6 +645,72 @@ const agreementRead = computed(() => {
   if (!record || !('agreement' in record) || record.agreement === undefined) return null
   return { agreement: record.agreement, canManage: 'agreement_signers' in record && record.agreement_signers !== undefined }
 })
+const guestAgreementOpen = ref(false)
+const signingAgreement = ref<import('~/shared/agreements').BookingAgreement | null>(null)
+const signingOpen = ref(false)
+const agreementSectionTitle = computed(() => {
+  const record = booking.value ?? detail.value
+  if (record && 'agreement' in record && record.agreement?.label) return record.agreement.label
+  if (stay.value) return 'Lease'
+  if (booking.value?.vertical === 'service') return 'Engagement letter'
+  if (booking.value?.vertical === 'experience') return 'Waiver'
+  return 'Agreement'
+})
+const agreementRowLabel = computed(() => {
+  const record = booking.value ?? detail.value
+  if (record && 'agreement' in record && record.agreement?.label) return record.agreement.label
+  return agreementSectionTitle.value
+})
+function agreementSignerNames(list: string[]) {
+  return list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`
+}
+const agreementRowSummary = computed(() => {
+  const agr = agreementRead.value?.agreement
+  if (!agr) return props.personalScope ? null : 'Not sent'
+  const day = (at: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(at))
+  if (agr.status === 'stored') return `Signed copy added ${day(agr.completed_at!)}`
+  if (agr.status === 'signed') return `All parties signed on ${day(agr.completed_at!)}`
+  const waiting = agr.signers.filter(signer => !signer.signed_at).map(signer => signer.key === agr.viewer_signer_key ? 'you' : signer.name.split(' ')[0]!)
+  return `Waiting on ${agreementSignerNames(waiting)}`
+})
+const stayNights = computed(() => {
+  if (!detail.value) return 0
+  const cin = new Date(detail.value.check_in_date).getTime()
+  const cout = new Date(detail.value.check_out_date).getTime()
+  return Math.max(0, Math.round((cout - cin) / (1000 * 60 * 60 * 24)))
+})
+
+const isLongTerm = computed(() => {
+  if (stay.value && detail.value && stayNights.value >= 28) return true
+  if (agreementRead.value?.agreement) return true
+  return false
+})
+
+const monthlySchedule = computed(() => {
+  if (!isLongTerm.value) return []
+  if (detail.value) {
+    const totalPaid = detail.value.payments.reduce((s, p) => s + p.amount_minor, 0)
+      + (detail.value.online_payment ? detail.value.online_payment.captured_minor - detail.value.online_payment.refunded_minor : 0)
+    const monthlyRent = detail.value.total_minor && stayNights.value > 0
+      ? Math.round(detail.value.total_minor / (stayNights.value / 30))
+      : 150000
+    return calculateMonthlyPaymentSchedule(
+      detail.value.check_in_date,
+      detail.value.check_out_date,
+      monthlyRent,
+      totalPaid,
+    )
+  }
+  const today = new Date().toISOString().slice(0, 10)
+  const oneYearLater = new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10)
+  return calculateMonthlyPaymentSchedule(
+    today,
+    oneYearLater,
+    150000,
+    0,
+  )
+})
+
 const messageTo = computed(() => {
   if (!conversationId.value || (stay.value && !props.personalScope && !managedStay.value?.can_message_guest)) return null
   return `/dashboard/${encodeURIComponent(orgSlug.value)}/messages/${encodeURIComponent(conversationId.value)}`
@@ -1182,6 +1332,11 @@ provide(bookingEditorKey, {
     if (!record || !('agreement_signers' in record) || !record.agreement_signers) return null
     return { label: record.agreement?.label ?? null, signers: record.agreement_signers }
   }),
+  currentAgreement: computed(() => {
+    const record = booking.value ?? detail.value
+    return record && 'agreement' in record ? (record.agreement ?? null) : null
+  }),
+  canManageAgreement: computed(() => agreementRead.value?.canManage === true),
   stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },
 })
 </script>
