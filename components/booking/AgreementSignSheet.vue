@@ -254,6 +254,7 @@
 
 <script setup lang="ts">
 import type { AgreementField, BookingAgreement } from '~/shared/agreements'
+import { openPdfDocument } from '~/utils/pdf-document'
 import { isRecord } from '~/utils/api-clients'
 import { getErrorMessage } from '~/utils/errors'
 
@@ -337,14 +338,12 @@ async function loadAndRenderPdf() {
   const current = () => ticket === loading && open.value
   loadingPdf.value = true
   try {
-    const pdfjs = await import('pdfjs-dist')
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
 
     // Fetch the PDF bytes
     const response = await fetch(props.agreement.url)
     if (!response.ok) throw new Error(`The ${props.agreement.label.toLowerCase()} could not be opened (${response.status})`)
     const data = new Uint8Array(await response.arrayBuffer())
-    const loaded = await pdfjs.getDocument({ data }).promise
+    const loaded = await openPdfDocument(data)
     if (!current()) return
     pdfDoc = loaded
     totalPages.value = pdfDoc.numPages

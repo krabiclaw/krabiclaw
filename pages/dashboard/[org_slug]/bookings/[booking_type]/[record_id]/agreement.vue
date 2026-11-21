@@ -186,6 +186,7 @@
 
 <script setup lang="ts">
 import type { PDFDocumentProxy } from 'pdfjs-dist'
+import { openPdfDocument } from '~/utils/pdf-document'
 import BookingAgreement from '~/components/booking/BookingAgreement.vue'
 import AgreementSignSheet from '~/components/booking/AgreementSignSheet.vue'
 import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
@@ -300,9 +301,7 @@ async function openWorkspace() {
   opening.value = true
   error.value = ''
   try {
-    const pdfjs = await import('pdfjs-dist')
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
-    pdf = await pdfjs.getDocument({ data: new Uint8Array(await draft.file.arrayBuffer()) }).promise
+    pdf = await openPdfDocument(new Uint8Array(await draft.file.arrayBuffer()))
     pages.value = pdf.numPages
     // Signature lines are usually at the end.
     page.value = pdf.numPages

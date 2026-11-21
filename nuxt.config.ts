@@ -301,6 +301,10 @@ export default defineNuxtConfig({
       )
     },
     'nitro:init'(nitro) {
+      // Nitro always mounts the project's assets/ folder as server storage. Here that
+      // folder is the browser's (stylesheets, images, the demo video), which nothing on
+      // the server reads; mounted, every file was base64 in the Worker bundle.
+      nitro.options.serverAssets = nitro.options.serverAssets.filter(asset => asset.dir !== resolve(nitro.options.rootDir, 'assets'))
       // Nitro has now scanned both server/api and server/routes.
       // Written to a real file rather than a Nitro virtual module because the
       // page loader is reachable from the Vite SSR graph too (TenantPublicPage
