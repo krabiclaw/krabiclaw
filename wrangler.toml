@@ -144,6 +144,9 @@ queue = "blawby-events"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
+# One batch at a time: every settler of a payment publishes it, and duplicates run
+# after the first has sent its receipts, so they find them sent and send nothing.
+max_concurrency = 1
 dead_letter_queue = "blawby-events-dlq"
 
 # Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
@@ -345,6 +348,9 @@ queue = "blawby-events-staging"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
+# One batch at a time: every settler of a payment publishes it, and duplicates run
+# after the first has sent its receipts, so they find them sent and send nothing.
+max_concurrency = 1
 dead_letter_queue = "blawby-events-staging-dlq"
 
 # Airbnb sync and disconnect steps (server/integrations/channex/airbnb-sync.ts): one delivery at a time,
