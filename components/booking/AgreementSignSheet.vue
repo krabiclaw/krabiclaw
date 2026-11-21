@@ -137,22 +137,51 @@
         </div>
       </footer>
 
-      <!-- Signature Adoption Modal -->
+      <!-- Signature Adoption Modal (Exact 1:1 Parity with Zillow Image 2) -->
       <div
         v-if="adoptionModalOpen"
         class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
         data-testid="signature-adoption-dialog"
       >
-        <div class="w-full max-w-lg rounded-2xl border border-default bg-default p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-          <div class="flex items-center justify-between pb-4 border-b border-default">
-            <h3 class="text-base font-semibold text-highlighted">Adopt your electronic signature</h3>
-            <button type="button" class="text-muted hover:text-highlighted" @click="adoptionModalOpen = false">
+        <div class="w-full max-w-md rounded-2xl border border-default bg-default p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+          <!-- Header with Close Button on Top Left and Centered Title (Zillow Image 2) -->
+          <div class="relative flex items-center justify-center pb-4">
+            <button
+              type="button"
+              class="absolute left-0 top-0.5 text-muted hover:text-highlighted p-1 rounded-lg hover:bg-elevated transition-colors"
+              aria-label="Close"
+              @click="adoptionModalOpen = false"
+            >
               <UIcon name="i-lucide-x" class="size-5" />
             </button>
+            <h3 class="text-base font-bold text-highlighted">Sign {{ agreement.label || 'Agreement' }}</h3>
           </div>
-          <form class="mt-5 space-y-5" @submit.prevent="confirmAdoption">
+
+          <form class="space-y-4" @submit.prevent="confirmAdoption">
+            <!-- Document Info Box (Zillow Image 2) -->
+            <div class="flex items-center justify-between rounded-xl border border-default bg-elevated/30 p-3">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-default border border-default text-highlighted shadow-2xs">
+                  <UIcon name="i-lucide-file-text" class="size-5 text-[#006AFF]" />
+                </div>
+                <div class="min-w-0">
+                  <p class="truncate text-xs font-bold text-highlighted">{{ agreement.file_name }}</p>
+                  <p class="text-[11px] text-muted">Prepared for this booking</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="flex shrink-0 items-center gap-1.5 rounded-lg border border-default bg-default px-2.5 py-1 text-xs font-medium text-highlighted hover:bg-elevated shadow-2xs transition-colors"
+                @click="adoptionModalOpen = false"
+              >
+                <UIcon name="i-lucide-external-link" class="size-3 text-muted" />
+                <span>Review PDF</span>
+              </button>
+            </div>
+
+            <!-- Full legal name input (Zillow Image 2) -->
             <div>
-              <label for="sign-name" class="mb-1.5 block text-sm font-medium text-highlighted">Full legal name</label>
+              <label for="sign-name" class="mb-1.5 block text-xs font-bold text-highlighted">Full legal name</label>
               <input
                 id="sign-name"
                 v-model="name"
@@ -164,15 +193,16 @@
                 :disabled="saving"
                 placeholder="Type your full name"
                 data-testid="agreement-name"
-                class="w-full rounded-xl border border-default bg-default px-3.5 py-2.5 text-sm text-highlighted placeholder:text-muted focus:border-default focus:outline-none focus:ring-1 focus:ring-default"
+                class="w-full rounded-xl border border-default bg-default px-3.5 py-2.5 text-xs text-highlighted placeholder:text-muted focus:border-[#006AFF] focus:outline-none focus:ring-1 focus:ring-[#006AFF]"
               >
             </div>
 
+            <!-- Signature cursive preview box (Zillow Image 2) -->
             <div>
-              <p class="text-xs font-semibold text-muted">Your adopted electronic signature</p>
-              <div class="mt-1.5 flex min-h-16 items-center rounded-xl border border-dashed border-default bg-elevated px-4">
+              <p class="text-xs font-bold text-highlighted">Your adopted electronic signature</p>
+              <div class="mt-1.5 flex min-h-16 items-center rounded-xl border border-dashed border-default bg-elevated/40 px-4">
                 <p
-                  class="text-3xl leading-none text-highlighted"
+                  class="text-2xl leading-none text-highlighted"
                   style="font-family: 'Snell Roundhand', 'Segoe Script', 'Brush Script MT', cursive"
                   aria-hidden="true"
                 >
@@ -181,22 +211,24 @@
               </div>
             </div>
 
-            <label class="flex items-start gap-3 rounded-xl border border-default bg-elevated/40 p-3.5 text-sm cursor-pointer hover:bg-elevated/60 transition-colors">
+            <!-- Consent checkbox card (Zillow Image 2) -->
+            <label class="flex items-start gap-3 rounded-xl border border-default bg-elevated/20 p-3 text-xs cursor-pointer hover:bg-elevated/40 transition-colors">
               <input
                 v-model="consent"
                 type="checkbox"
                 required
                 :disabled="saving"
-                class="mt-0.5 size-4.5 rounded accent-primary cursor-pointer shrink-0"
+                class="mt-0.5 size-4 rounded accent-[#006AFF] cursor-pointer shrink-0"
                 data-testid="agreement-consent"
               >
-              <span class="leading-snug text-default select-none">
+              <span class="leading-relaxed text-muted select-none">
                 I agree that typing my name above constitutes a legally binding electronic signature on this {{ agreement.label.toLowerCase() }}, with the same legal effect as a handwritten signature.
               </span>
             </label>
 
             <UAlert v-if="error" color="error" variant="soft" icon="i-lucide-circle-alert" :description="error" />
 
+            <!-- Solid Dark Navy Button: Adopt and sign (Zillow Image 2) -->
             <div class="pt-1">
               <UButton
                 type="submit"
@@ -204,9 +236,9 @@
                 size="lg"
                 color="neutral"
                 :disabled="!consent || name.trim().length < 2"
-                class="font-semibold"
+                class="font-semibold bg-[#1C2038] hover:bg-[#15182B] text-white"
               >
-                Adopt and apply to document
+                Adopt and sign
               </UButton>
             </div>
           </form>
@@ -217,7 +249,6 @@
 </template>
 
 <script setup lang="ts">
-import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import type { AgreementField, BookingAgreement } from '~/shared/agreements'
 import { isRecord } from '~/utils/api-clients'
 import { getErrorMessage } from '~/utils/errors'

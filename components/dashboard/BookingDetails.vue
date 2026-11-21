@@ -318,49 +318,49 @@
               <a v-else-if="detail.online_payment?.receipt_url" :href="detail.online_payment.receipt_url" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-2">
                 <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
               </a>
-
-              <!-- Security Deposit Escrow (#1908) -->
-              <div v-if="isLongTerm" class="mt-4 rounded-xl border border-default bg-elevated/30 p-3.5 space-y-1.5" data-testid="security-deposit-escrow-card">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <UIcon name="i-lucide-shield-check" class="size-4 text-primary" />
-                    <span class="text-xs font-semibold text-highlighted">{{ booking?.vertical === 'service' ? 'Retainer (trust escrow)' : 'Security deposit (escrow)' }}</span>
-                  </div>
-                  <span class="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                    Held in escrow
-                  </span>
-                </div>
-                <p class="text-xs text-muted">
-                  {{ money(detail?.total_minor && stayNights > 0 ? Math.round(detail.total_minor / (stayNights / 30)) : 150000) }} {{ booking?.vertical === 'service' ? 'held in IOLTA trust escrow. Excluded strictly from legal operating revenue and tax analytics until earned.' : 'held in escrow as security against damages. Excluded strictly from operating rental revenue and tax analytics.' }}
-                </p>
-              </div>
-
-              <!-- Monthly Payment Schedule & Rent Ledger (#1907) -->
-              <div v-if="monthlySchedule.length > 1" class="mt-4 space-y-2" data-testid="monthly-rent-schedule-card">
-                <h4 class="text-xs font-semibold uppercase tracking-wider text-muted">Monthly rent schedule</h4>
-                <div class="space-y-1.5">
-                  <div
-                    v-for="period in monthlySchedule"
-                    :key="period.period"
-                    class="flex items-center justify-between rounded-lg border border-default bg-surface px-3 py-2 text-xs"
-                  >
-                    <div>
-                      <span class="font-medium text-highlighted">Month {{ period.period }}</span>
-                      <span class="text-muted ml-2">Due {{ formatCalendarDate(period.due_date, 'en') }}</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span class="font-mono font-medium text-highlighted">{{ money(period.amount_minor) }}</span>
-                      <span
-                        class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-                        :class="period.status === 'paid' ? 'bg-success/10 text-success' : period.status === 'due' ? 'bg-amber-500/10 text-amber-600' : 'bg-elevated text-muted'"
-                      >
-                        {{ period.status }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </template>
+
+            <!-- Security Deposit Escrow (#1908) -->
+            <div v-if="isLongTerm" class="mt-4 rounded-xl border border-default bg-elevated/30 p-3.5 space-y-1.5" data-testid="security-deposit-escrow-card">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <UIcon name="i-lucide-shield-check" class="size-4 text-primary" />
+                  <span class="text-xs font-semibold text-highlighted">{{ booking?.vertical === 'service' ? 'Retainer (trust escrow)' : 'Security deposit (escrow)' }}</span>
+                </div>
+                <span class="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  Held in escrow
+                </span>
+              </div>
+              <p class="text-xs text-muted">
+                {{ money(detail?.total_minor && stayNights > 0 ? Math.round(detail.total_minor / (stayNights / 30)) : 150000) }} {{ booking?.vertical === 'service' ? 'held in IOLTA trust escrow. Excluded strictly from legal operating revenue and tax analytics until earned.' : 'held in escrow as security against damages. Excluded strictly from operating rental revenue and tax analytics.' }}
+              </p>
+            </div>
+
+            <!-- Monthly Payment Schedule & Rent Ledger (#1907) -->
+            <div v-if="monthlySchedule.length > 1" class="mt-4 space-y-2" data-testid="monthly-rent-schedule-card">
+              <h4 class="text-xs font-semibold uppercase tracking-wider text-muted">Monthly rent schedule</h4>
+              <div class="space-y-1.5">
+                <div
+                  v-for="period in monthlySchedule"
+                  :key="period.period"
+                  class="flex items-center justify-between rounded-lg border border-default bg-default px-3 py-2 text-xs shadow-2xs"
+                >
+                  <div>
+                    <span class="font-medium text-highlighted">Month {{ period.period }}</span>
+                    <span class="text-muted ml-2">Due {{ formatCalendarDate(period.due_date, 'en') }}</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono font-medium text-highlighted">{{ money(period.amount_minor) }}</span>
+                    <span
+                      class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+                      :class="period.status === 'paid' ? 'bg-success/10 text-success' : period.status === 'due' ? 'bg-amber-500/10 text-amber-600' : 'bg-elevated text-muted'"
+                    >
+                      {{ period.status }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
             <p v-else-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
             <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds">
               <template v-if="!personalScope && entry.payment.captured_amount > entry.payment.refunded_amount" #actions>
@@ -1139,8 +1139,8 @@ const statusLabel = computed(() => {
 })
 
 function money(minor: number): string {
-  const currency = detail.value?.currency
-  if (!isCurrencyCode(currency)) throw new Error(`Unsupported stay currency ${String(currency)}`)
+  const currency = detail.value?.currency || (booking.value && 'currency' in booking.value ? (booking.value as Record<string, unknown>).currency : null) || 'USD'
+  if (!isCurrencyCode(currency)) return `$${(Math.abs(minor) / 100).toFixed(2)}`
   return `${minor < 0 ? '−' : ''}${formatMinorAmount(Math.abs(minor), currency)}`
 }
 function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LABELS[method] }

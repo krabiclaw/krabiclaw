@@ -59,21 +59,36 @@ test('Capture full Zillow-parity agreement preparation, full-screen signing, esc
   await agreementRow.click()
   await adminPage.waitForTimeout(1500)
 
-  // 3. Open Structured Lease & Terms Builder Modal (#2038, #1908, #1907 - Zillow Screenshots 01-09)
+  // 3. Verify Zillow 4-Card Checklist Hub & Open Terms Modal (Zillow Screenshots 01-09)
+  const cardDocs = adminPage.locator('[data-testid="card-documents"]')
+  await expect(cardDocs).toBeVisible({ timeout: 15_000 })
+  const cardDuration = adminPage.locator('[data-testid="card-duration"]')
+  await expect(cardDuration).toBeVisible()
+  const cardSigners = adminPage.locator('[data-testid="card-signers"]')
+  await expect(cardSigners).toBeVisible()
+  const cardRent = adminPage.locator('[data-testid="card-rent"]')
+  await expect(cardRent).toBeVisible()
+
+  // Open Duration Wizard Modal (Zillow Screenshots 01 & 02)
+  const editDurationBtn = adminPage.locator('[data-testid="edit-duration-btn"]')
+  await editDurationBtn.click()
+  await adminPage.waitForTimeout(1000)
+
+  // Screenshot 1: Structured Terms Modal (Lease summary)
+  await adminPage.screenshot({ path: path.join(SCREENSHOT_DIR, '01-zillow-lease-terms-builder.png') })
+
+  // Save and continue modal
+  const saveDurationBtn = adminPage.getByRole('button', { name: /Save and continue/i }).first()
+  await saveDurationBtn.click()
+  await adminPage.waitForTimeout(1000)
+
+  // Click "Next" to generate PDF and launch Full-Screen Field Workspace (Zillow Screenshot 09)
   const prepareBtn = adminPage.locator('[data-testid="booking-agreement-prepare"]')
   await expect(prepareBtn).toBeVisible()
   await prepareBtn.click()
-  await adminPage.waitForTimeout(1000)
+  await adminPage.waitForTimeout(3500)
 
-  // Screenshot 1: Structured Terms Builder Modal
-  await adminPage.screenshot({ path: path.join(SCREENSHOT_DIR, '01-zillow-lease-terms-builder.png') })
-
-  // Click "Generate and mark fields" to generate PDF and launch Full-Screen Workspace
-  const generateBtn = adminPage.getByRole('button', { name: /Generate and mark fields/i })
-  await generateBtn.click()
-  await adminPage.waitForTimeout(3000)
-
-  // 4. Full-Screen Field Placement Workspace (#1909 - Zillow Screenshots 10, 11, 12)
+  // 4. Full-Screen Field Placement Workspace (#1909 - Zillow Screenshots 10, 11, 12 & Image 1)
   const fullscreenWorkspace = adminPage.locator('[data-testid="fullscreen-field-workspace"]')
   await expect(fullscreenWorkspace).toBeVisible({ timeout: 15_000 })
   await adminPage.waitForTimeout(1500)
@@ -134,8 +149,8 @@ test('Capture full Zillow-parity agreement preparation, full-screen signing, esc
   // Screenshot 4: Signature Adoption Card with Snell Roundhand cursive preview
   await guestPage.screenshot({ path: path.join(SCREENSHOT_DIR, '04-zillow-signature-adoption-card.png') })
 
-  // Adopt signature
-  const adoptBtn = guestPage.getByRole('button', { name: /Adopt and apply/i })
+  // Adopt signature (Zillow Image 2: "Adopt and sign")
+  const adoptBtn = guestPage.getByRole('button', { name: /Adopt and sign|Adopt and apply/i })
   await adoptBtn.click()
   await guestPage.waitForTimeout(1000)
 
@@ -148,17 +163,13 @@ test('Capture full Zillow-parity agreement preparation, full-screen signing, esc
   // 6. OPERATOR BOOKING DETAILS: Escrow (#1908) & Monthly Rent Ledger (#1907)
   await adminPage.goto(`${baseURL}/dashboard/${studio.slug}/messages/${booked.conversation_id}`)
   await waitForNuxtHydration(adminPage)
-  const agreementRowAgain = adminPage.locator('[data-testid="booking-agreement-row"]')
-  await expect(agreementRowAgain).toBeVisible({ timeout: 15_000 })
-  await agreementRowAgain.scrollIntoViewIfNeeded()
-  await adminPage.waitForTimeout(1000)
+  await adminPage.waitForTimeout(1500)
 
-  // Scroll to reveal Escrow Deposit card and Monthly Ledger
+  // Scroll right pane to reveal Escrow Deposit card (#1908) and Monthly Ledger (#1907)
   const escrowCard = adminPage.locator('[data-testid="security-deposit-escrow-card"]')
-  if (await escrowCard.isVisible()) {
-    await escrowCard.scrollIntoViewIfNeeded()
-    await adminPage.waitForTimeout(1000)
-  }
+  await expect(escrowCard).toBeVisible({ timeout: 15_000 })
+  await escrowCard.scrollIntoViewIfNeeded()
+  await adminPage.waitForTimeout(1000)
 
   // Screenshot 5: Operator CMS with Agreement row, Escrow Deposit card & Monthly Ledger
   await adminPage.screenshot({ path: path.join(SCREENSHOT_DIR, '05-zillow-booking-details-escrow-ledger.png') })
