@@ -308,7 +308,7 @@
               <!-- Airbnb's payment rows: the label on the left, the amount on the right, both in the body colour. A channel's guest pays the channel, so its total is the booking's. -->
               <p class="mt-5 flex items-baseline justify-between gap-4 text-base font-semibold text-highlighted">
                 <span>{{ channelManaged ? 'Total' : 'Amount paid' }}</span>
-                <span data-testid="stay-amount-paid">{{ money(channelManaged ? detail.total_minor : detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</span>
+                <span data-testid="stay-amount-paid">{{ money(channelManaged ? detail.total_minor : detail.paid_minor) }}</span>
               </p>
               <p v-if="channelManaged" class="mt-1 text-sm text-muted">Payments, changes and cancellations are managed on {{ channelName }}.</p>
               <template v-if="!personalScope">
@@ -321,21 +321,26 @@
                     <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
                   </li>
                 </ul>
-                <NuxtLink v-if="manage && !channelManaged && !requestStatus && !detail.online_payment" :to="{ path: `${editorPath}/payment`, query: route.query }" :class="rowClass" class="mt-2" data-testid="stay-record-payment">
-                  <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Record a payment</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
-                </NuxtLink>
-                <template v-if="detail.online_payment">
-                  <NuxtLink :to="paymentPath" :class="rowClass" class="mt-2">
-                    <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                <!-- Each Stripe payment: the checkout, then each month of a stay paid monthly. -->
+                <div v-for="online in detail.online_payments" :key="online.payment_id" class="mt-2" data-testid="stay-online-payment">
+                  <NuxtLink :to="paymentPath(online.payment_id)" :class="rowClass">
+                    <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" />
+                    <span class="min-w-0 flex-1">{{ money(online.captured_minor - online.refunded_minor) }} · Paid online <span class="block text-xs text-muted">{{ formatCreatedAt(online.created_at) }}</span></span>
+                    <UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
                   </NuxtLink>
-                  <NuxtLink v-if="manage && detail.online_payment.captured_minor > detail.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: detail.online_payment.payment_id } }" :class="rowClass">
+                  <NuxtLink v-if="manage && online.captured_minor > online.refunded_minor" :to="{ path: `${paymentPath(online.payment_id)}/refund`, query: { payment: online.payment_id } }" :class="rowClass">
                     <UIcon name="i-lucide-undo-2" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Send a refund</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
                   </NuxtLink>
-                </template>
+                </div>
+                <NuxtLink v-if="manage && !channelManaged && !requestStatus" :to="{ path: `${editorPath}/payment`, query: route.query }" :class="rowClass" class="mt-2" data-testid="stay-record-payment">
+                  <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Record a payment</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                </NuxtLink>
               </template>
-              <a v-else-if="detail.online_payment?.receipt_url" :href="detail.online_payment.receipt_url" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-2">
-                <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
-              </a>
+              <template v-else>
+                <a v-for="online in detail.online_payments.filter(entry => entry.receipt_url)" :key="online.payment_id" :href="online.receipt_url!" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-2">
+                  <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Receipt · {{ formatCreatedAt(online.created_at) }}</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                </a>
+              </template>
             </template>
             <p v-else-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
             <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds">
@@ -858,11 +863,10 @@ const itinerary = computed<ReservationItineraryDetails | null>(() => {
   const value = detail.value
   const home = recordHome.value
   if (value?.status === 'confirmed' && home && !channelManaged.value) {
-    const online = value.online_payment
     return {
       title: home.name, organizationName: home.organization_name, address: home.location?.address ? formatPostalAddress(home.location.address) : null,
       photoUrl: home.photo_urls[0] ?? null, hostName: home.host?.name ?? null, partySize: value.adults + value.children + value.infants,
-      paid: [{ amount: online ? online.captured_minor - online.refunded_minor : value.paid_minor, currency: value.currency }],
+      paid: [{ amount: value.paid_minor, currency: value.currency }],
       schedule: { unit: 'nights', checkInDate: value.check_in_date, checkOutDate: value.check_out_date, checkInTime: home.check_in_time, checkOutTime: home.check_out_time },
       houseManual: home.arrival_guide?.house_manual, houseRules: home.house_rules,
     }
@@ -1063,7 +1067,7 @@ const cancellation = computed(() => accountStay.value?.cancellation ?? null)
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messageTo.value) && detail.value.status === 'confirmed'
   && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
-const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
+const paymentPath = (paymentId: string) => `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(paymentId)}`
 const channelName = computed(() => detail.value ? detail.value.channel === 'direct' ? 'You' : STAY_CHANNEL_LABELS[detail.value.channel] : '')
 /**
  * Who the stay is for. A stay made here always names its guest, so one without
@@ -1218,7 +1222,7 @@ async function releaseRemainingNights() {
 async function cancelStay() {
   const value = detail.value
   if (!value || isChannelManagedStay(value)) return
-  const held = value.online_payment ? value.online_payment.captured_minor - value.online_payment.refunded_minor : 0
+  const held = value.online_payments.reduce((sum, online) => sum + online.captured_minor - online.refunded_minor, 0)
   const description = held > 0
     ? `Its nights become available again and ${guest.value.state === 'named' ? guest.value.name : 'the guest'} is refunded ${money(held)} in full. You approve the refund next.`
     : value.request_status ? 'The guest will be notified and the nights will become available again.' : 'Its nights become available again. Record any refund as a payment.'

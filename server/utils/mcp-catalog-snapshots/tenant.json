@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6ac65b2d6f543897015867f99ccefad5255243b54f2c45fe08a5217342e0735c",
-  "documentationFingerprint": "sha256:2a7a67b45a724377e42105baed7390c218e029b1a27749f1f6756cfd2d1bb016",
+  "fingerprint": "sha256:f79b2baa90175723d5eabaece909ca2ad39f2449604aa4f903c5fbdc0139dea1",
+  "documentationFingerprint": "sha256:0a267bbe608e723a3dc5c7965cee2737cb3f396f5eb69b92c294243e2a3da5a1",
   "tools": [
     {
       "name": "add_organization_language",
@@ -55046,50 +55046,50 @@
                         "minLength": 1,
                         "type": "string"
                       },
-                      "online_payment": {
-                        "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
-                        "properties": {
-                          "amount_minor": {
-                            "type": "integer"
+                      "online_payments": {
+                        "items": {
+                          "description": "A Stripe payment the guest made for this stay on the site: the checkout, then each month of a stay paid monthly. paid_minor counts each net of refunds.",
+                          "properties": {
+                            "amount_minor": {
+                              "type": "integer"
+                            },
+                            "captured_minor": {
+                              "type": "integer"
+                            },
+                            "created_at": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "currency": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "payment_id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "receipt_url": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "refunded_minor": {
+                              "type": "integer"
+                            }
                           },
-                          "captured_minor": {
-                            "type": "integer"
-                          },
-                          "created_at": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "currency": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "payment_id": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "receipt_url": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "refunded_minor": {
-                            "type": "integer"
-                          }
+                          "required": [
+                            "payment_id",
+                            "currency",
+                            "amount_minor",
+                            "captured_minor",
+                            "refunded_minor",
+                            "receipt_url",
+                            "created_at"
+                          ],
+                          "type": "object"
                         },
-                        "required": [
-                          "payment_id",
-                          "currency",
-                          "amount_minor",
-                          "captured_minor",
-                          "refunded_minor",
-                          "receipt_url",
-                          "created_at"
-                        ],
-                        "type": [
-                          "object",
-                          "null"
-                        ]
+                        "type": "array"
                       },
                       "overbooked": {
                         "type": "boolean"
@@ -55278,7 +55278,7 @@
                       "updated_at",
                       "guest_image_url",
                       "payments",
-                      "online_payment",
+                      "online_payments",
                       "paid_minor",
                       "payment_status"
                     ],
@@ -127423,7 +127423,7 @@
         "cancel_product_booking": "sha256:4649ba23b5d73655c2ba9b2f26ef92757c2c7a809b1dceda3e7caed8ff49b08a",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_product_booking": "sha256:606cd9d6feb131c6de34eed79ffc5127e022fff4063c2f4d17c0fbc1e240450b",
+        "get_product_booking": "sha256:e18d6d013e88273118bb76b0b7537581314ccae436d9993104f509cca6407c63",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",
