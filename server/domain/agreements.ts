@@ -12,6 +12,7 @@ import { guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readR2Object } from '~/server/utils/cloudflare-r2'
+import { depositQuery, presentDeposit } from '~/server/domain/deposits'
 import { getPlatformDomain, platformOrigin } from '~/server/utils/dashboard-notification-links'
 import { getEmailDeliveryMode } from '~/server/utils/email-delivery'
 import { buildMediaPlacementInsertQuery } from '~/server/utils/media-asset-manager'
@@ -123,19 +124,15 @@ function signersQuery(target: AgreementTarget): BatchQuery {
  * the booking appends these to its own batch.
  */
 export function agreementQueries(target: AgreementTarget, withSigners = false): BatchQuery[] {
-  return [bookingQuery(target), recordsQuery(target), listingQuery(target), ...(withSigners ? [signersQuery(target)] : [])]
-}
-
-/** How many statements `agreementQueries` adds to a batch. */
-export function agreementQueryCount(withSigners = false): number {
-  return withSigners ? 4 : 3
+  // The booking's deposit is one of its agreed terms, so it rides in the same read.
+  return [bookingQuery(target), recordsQuery(target), listingQuery(target), depositQuery(target), ...(withSigners ? [signersQuery(target)] : [])]
 }
 
 type SignerRow = { user_id: string; name: string | null; anonymous: number; booked_name: string | null; booked_email: string | null }
 
 /** The batch results of `agreementQueries`, in their order. */
 export function agreementFromResults(results: { results: unknown[] }[]) {
-  const [bookingRows, records, listing, signers] = results
+  const [bookingRows, records, listing, deposit, signers] = results
   const row = bookingRows?.results[0] as { conversation_id: string; booking_id: string; organization_id: string; product_id: string; kind: ProductKind; status: string; ends_at: string; user_id: string | null; guest_name: string | null } | undefined
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found', data: { code: 'BOOKING_NOT_FOUND', field: 'booking_id' } })
   const booking: AgreementBooking = {
@@ -147,6 +144,7 @@ export function agreementFromResults(results: { results: unknown[] }[]) {
     records: records!.results as AgreementRecord[],
     listing: (listing!.results[0] as ListingDocument | undefined) ?? null,
     signerRows: signers ? signers.results as SignerRow[] : null,
+    deposit: presentDeposit(deposit!.results[0]),
   }
 }
 
@@ -248,6 +246,7 @@ export function bookingAgreementFromRows(rows: { results: unknown[] }[], viewer:
   const read = agreementFromResults(rows)
   return {
     agreement: presentBookingAgreement(read, viewer),
+    deposit: read.deposit,
     ...(viewer.canManage && read.signerRows && actor ? { agreement_signers: availableSigners(read.signerRows, actor) } : {}),
   }
 }
@@ -255,7 +254,7 @@ export function bookingAgreementFromRows(rows: { results: unknown[] }[], viewer:
 /** The agreement, and for the business who it may ask to sign, in one D1 round trip. */
 export async function readBookingAgreement(db: DbClient, conversation: Pick<ConversationRow, 'id' | 'organization_id' | 'booking_id' | 'kind'>, viewer: AgreementViewer, actor: AgreementActor) {
   const read = await readAgreement(db, conversation, viewer.canManage)
-  return { agreement: presentBookingAgreement(read, viewer), available_signers: read.signerRows ? availableSigners(read.signerRows, actor) : null }
+  return { agreement: presentBookingAgreement(read, viewer), deposit: read.deposit, available_signers: read.signerRows ? availableSigners(read.signerRows, actor) : null }
 }
 
 async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {

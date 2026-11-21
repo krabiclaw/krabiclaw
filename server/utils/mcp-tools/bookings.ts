@@ -3,7 +3,7 @@ import { chatgptFileInput, paginationInputSchema, pageInfoObject, organizationTo
 import { PRODUCT_KINDS } from '~/shared/product-details'
 import { HTTPError } from 'nitro'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
-import { assertResourceAccess, assertProductAccess, assertAssignedBookingAccess, assignedMemberSql, roleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
+import { assertResourceAccess, assertProductAccess, assertAssignedBookingAccess, assertRoleAllows, assignedMemberSql, roleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
 import { queryAll, queryFirst } from '~/server/db'
 import { createSession, findBookableSession, listScheduleSessions, updateSession } from '~/server/utils/availability'
 import { mcpPageInfo, mcpPageWindow, paginateMcpCollection } from '~/server/utils/mcp-pagination'
@@ -19,6 +19,7 @@ import { setBookingNote } from '~/server/domain/bookings'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { NOT_HANDLED, requiredString, optionalString, resolveUserUploadedMediaFile, toolFileReference, type McpExecutorContext } from './execution'
 import { readBookingAgreement, sendAgreement } from '~/server/domain/agreements'
+import { deleteDepositEntry, recordDepositEntry, setBookingDeposit } from '~/server/domain/deposits'
 import type { ConversationRow } from '~/server/domain/conversations'
 import { BOOKING_STATUSES, isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { formAnswerInputJsonSchema, formAnswerSnapshotsJsonSchema, formAnswerSnapshotsSchema } from '~/shared/form-questions'
@@ -47,6 +48,9 @@ function mcpBookingRecord(record: ThreadOperationalRecord) {
 function mcpBookingProvenance(provenance: ThreadPayload['provenance'] | null) {
   return provenance ? { source: provenance.source, external_reference: provenance.external_reference, guest_acknowledgement: provenance.guest_acknowledgement } : null
 }
+
+const depositOutput = { type: ['object', 'null'], description: 'The booking’s refundable deposit: what the business asks for (required_minor), holds now (held_minor), returned and kept, and each recorded entry. Null when it asks for none.' }
+const depositEntryKinds = ['received', 'returned', 'withheld']
 
 export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'create_product_session', domain: 'bookings', minimumRole: 'member', description: 'Add a dated time at a location for an existing bookable offering using its actual start and end. Online offerings take no dated sessions: they are booked in their provider\'s working hours. A restaurant\'s tables take none either: they are seated through their location\'s opening hours.',
@@ -83,8 +87,8 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     }, required: ['product_slug', 'guest_name', 'guest_email', 'idempotency_key'],
   }),
   organizationTool({ name: 'get_product_booking', outputSchema: { type: 'object', anyOf: [
-    { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, conversation_id: text, version, updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record , agreement: { type: ['object', 'null'], description: 'The booking’s agreement: its document, who signed and when, and what is still waiting.' }, agreement_signers: { type: 'array', description: 'Who the business may ask to sign, as keys for send_booking_agreement.', items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } } }, required: ['booking_id', 'unit', 'conversation_id', 'version', 'updated_at', 'guest', 'answers', 'provenance', 'record'] },
-    { type: 'object', description: 'A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.', properties: { booking_id: text, unit: { const: 'nights' }, record: { anyOf: [stayDetail, stayTurnover] }, agreement: { type: ['object', 'null'], description: 'The booking’s agreement: its document, who signed and when, and what is still waiting.' }, agreement_signers: { type: 'array', description: 'Who the business may ask to sign, as keys for send_booking_agreement.', items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } } }, required: ['booking_id', 'unit', 'record'], additionalProperties: false },
+    { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, conversation_id: text, version, updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record , agreement: { type: ['object', 'null'], description: 'The booking’s agreement: its document, who signed and when, and what is still waiting.' }, deposit: depositOutput, agreement_signers: { type: 'array', description: 'Who the business may ask to sign, as keys for send_booking_agreement.', items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } } }, required: ['booking_id', 'unit', 'conversation_id', 'version', 'updated_at', 'guest', 'answers', 'provenance', 'record'] },
+    { type: 'object', description: 'A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.', properties: { booking_id: text, unit: { const: 'nights' }, record: { anyOf: [stayDetail, stayTurnover] }, agreement: { type: ['object', 'null'], description: 'The booking’s agreement: its document, who signed and when, and what is still waiting.' }, deposit: depositOutput, agreement_signers: { type: 'array', description: 'Who the business may ask to sign, as keys for send_booking_agreement.', items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } } }, required: ['booking_id', 'unit', 'record'], additionalProperties: false },
   ] }, domain: 'bookings', minimumRole: 'member', description: 'Read one booking — an experience, consultation, table or stay at a home — when the user wants its guest details, answers to the offering\'s questions, status or current session. Use the booking version when making a change.', inputSchema: { booking_id: bookingId }, required: ['booking_id'],
   }),
   ...([
@@ -113,6 +117,26 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     },
     required: ['booking_id', 'file', 'signers', 'fields'], fileParams: ['file'],
     outputSchema: { type: 'object', properties: { sent: { const: true }, agreement: { type: ['object', 'null'] } }, required: ['sent', 'agreement'] },
+  }),
+  organizationTool({ name: 'set_booking_deposit', domain: 'bookings', minimumRole: 'admin',
+    description: 'Set the refundable deposit a booking asks for — a security deposit, or for a law firm a retainer held in trust — in the booking’s currency, or null for none. It is not part of the booking total and never counts as revenue. Recorded entries stay.',
+    inputSchema: { booking_id: bookingId, deposit_minor: { type: ['integer', 'null'], minimum: 1, description: 'Amount in the smallest currency unit, or null.' } },
+    required: ['booking_id', 'deposit_minor'], outputSchema: { type: 'object', properties: { deposit: depositOutput }, required: ['deposit'] },
+  }),
+  organizationTool({ name: 'record_booking_deposit', domain: 'bookings', minimumRole: 'admin',
+    description: 'Record deposit money received, returned to the guest or client, or withheld (kept for damage or unpaid charges, with the reason in note). Blawby moves no money; this records what happened outside it. Only what is held can be returned or withheld; withheld becomes paid revenue.',
+    inputSchema: {
+      booking_id: bookingId, kind: { type: 'string', enum: depositEntryKinds }, amount_minor: { type: 'integer', minimum: 1 },
+      method: { type: 'string', enum: ['cash', 'bank_transfer', 'card_external', 'other'], description: 'How the money moved; ignored for withheld.' },
+      paid_on: { type: 'string', description: 'YYYY-MM-DD' }, reference: text, note: { ...text, description: 'Required for withheld: what it was kept for.' }, idempotency_key: key,
+    },
+    required: ['booking_id', 'kind', 'amount_minor', 'paid_on', 'idempotency_key'],
+    outputSchema: { type: 'object', properties: { deposit: depositOutput, entry: { type: 'object' } }, required: ['deposit', 'entry'] },
+  }),
+  organizationTool({ name: 'delete_booking_deposit_entry', domain: 'bookings', minimumRole: 'admin',
+    description: 'Remove a deposit entry recorded by mistake. A receipt already partly returned or withheld stays until those entries are removed.',
+    inputSchema: { booking_id: bookingId, entry_id: { ...text, description: 'ID from get_product_booking → deposit.entries[].id.' } },
+    required: ['booking_id', 'entry_id'], outputSchema: { type: 'object', properties: { deposit: depositOutput }, required: ['deposit'] },
   }),
   organizationTool({ name: 'update_product_booking', outputSchema: { type: 'object', anyOf: [nightBookingReceipt,
     { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, version, private_notes: nullableText }, required: ['booking_id', 'unit', 'version', 'private_notes'] }] }, domain: 'bookings', minimumRole: 'member',
@@ -225,6 +249,14 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     if (!actorRow) throw new HTTPError({ statusCode: 401, message: 'The signed-in account was not found' })
     return { userId: organization.userId, name: actorRow.name }
   }
+  if (toolName === 'set_booking_deposit' || toolName === 'record_booking_deposit' || toolName === 'delete_booking_deposit_entry') {
+    await assertRoleAllows({ ...principal, permissions: { payments: ['refund'] } })
+    const id = requiredString(args, 'booking_id')
+    const actor = { organizationId, actorId: organization.userId }
+    if (toolName === 'set_booking_deposit') return { deposit: await setBookingDeposit(db, actor, id, args.deposit_minor ?? null) }
+    if (toolName === 'record_booking_deposit') return await recordDepositEntry(db, actor, id, args)
+    return { deposit: await deleteDepositEntry(db, actor, id, requiredString(args, 'entry_id')) }
+  }
   if (toolName === 'send_booking_agreement') {
     const id = requiredString(args, 'booking_id')
     await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: 'update' })
@@ -269,7 +301,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     })
     const read = await readBookingAgreement(db, { id: row.conversation_id, organization_id: organizationId, booking_id: id, kind: 'booking' },
       { userId: organization.userId, verifiedEmail: null, canManage }, await agreementActor())
-    return { agreement: read.agreement, ...(read.available_signers ? { agreement_signers: read.available_signers } : {}) }
+    return { agreement: read.agreement, deposit: read.deposit, ...(read.available_signers ? { agreement_signers: read.available_signers } : {}) }
   }
   if (access && toolName === 'get_product_booking') return { booking_id: id, unit: 'nights', record: await getStay(db, access, id), ...await agreementFields() }
   const thread = await getGuestRequest(db, row.conversation_id, organizationId, 'booking')

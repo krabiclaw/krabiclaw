@@ -1326,8 +1326,9 @@ export function stayDetailSelection(organization: BatchQuery, stayId: string, ma
   const paymentColumns = manage ? `,
     (SELECT json_group_array(json_object('id', id, 'booking_id', booking_id, 'amount_minor', amount_minor, 'currency', currency,
       'method', method, 'paid_on', paid_on, 'reference', reference, 'note', note, 'created_at', created_at, 'created_by', created_by))
-      FROM (SELECT * FROM offline_payments WHERE organization_id = s.organization_id AND booking_id = s.id ORDER BY paid_on, created_at)
+      FROM (SELECT * FROM offline_payments WHERE organization_id = s.organization_id AND booking_id = s.id AND purpose = 'payment' ORDER BY paid_on, created_at)
     ) AS offline_payments_json,
+    (SELECT COALESCE(SUM(amount_minor), 0) FROM offline_payments WHERE organization_id = s.organization_id AND booking_id = s.id AND purpose = 'deposit_withheld') AS deposit_withheld_minor,
     (SELECT json_group_array(json_object('payment_id', id, 'currency', currency, 'amount_minor', amount, 'captured_minor', captured_amount,
       'refunded_minor', refunded_amount, 'receipt_url', receipt_url, 'created_at', created_at))
       FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id
@@ -1342,8 +1343,8 @@ export function stayDetailSelection(organization: BatchQuery, stayId: string, ma
 
 export function stayDetailFrom<A extends StayAccess>(access: A, row: unknown): StayDetailView<A> {
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
-  const { offline_payments_json: offline, online_payments_json: online, guest_image_url, ...record } = row as Record<string, unknown>
-    & Pick<StayDetail, 'guest_image_url'> & { offline_payments_json?: string; online_payments_json?: string }
+  const { offline_payments_json: offline, online_payments_json: online, deposit_withheld_minor: withheld, guest_image_url, ...record } = row as Record<string, unknown>
+    & Pick<StayDetail, 'guest_image_url'> & { offline_payments_json?: string; online_payments_json?: string; deposit_withheld_minor?: number }
   const stay = mapStay(record)
   if (!access.manage) return stayTurnover(stay) as StayDetailView<A>
   if (offline === undefined || online === undefined) throw new Error('The stay detail query did not return its payment data')
@@ -1351,7 +1352,8 @@ export function stayDetailFrom<A extends StayAccess>(access: A, row: unknown): S
   const onlinePayments = JSON.parse(online) as StayOnlinePayment[]
   if (onlinePayments.length > 1) fail(500, 'STAY_PAYMENT_AMBIGUOUS', 'This stay has more than one online payment', 'online_payment')
   const online_payment = onlinePayments[0] ?? null
-  const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (online_payment ? online_payment.captured_minor - online_payment.refunded_minor : 0)
+  // A deposit kept for damage is the business's money; the deposit itself is not.
+  const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (withheld ?? 0) + (online_payment ? online_payment.captured_minor - online_payment.refunded_minor : 0)
   const status = isChannelManagedStay(stay) ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
   return { ...stay, guest_image_url, payments, online_payment, paid_minor: paid, payment_status: status } as StayDetailView<A>
@@ -2486,7 +2488,7 @@ export async function readStayReservationHome(db: DbClient, input: Parameters<ty
 export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
-  stay: StayDetail & { agreement: import('~/shared/agreements').BookingAgreement | null }
+  stay: StayDetail & { agreement: import('~/shared/agreements').BookingAgreement | null; deposit: import('~/shared/deposits').BookingDeposit | null }
   home: Omit<StayReservationHome, 'internal_name'>
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
@@ -2525,8 +2527,8 @@ export async function readGuestStay(db: DbClient, viewer: { userId: string; veri
   const paidStay = stay.status !== 'cancelled' && owned.paid_online === 1 && home.check_in_time !== null
     ? await ownedPaidStay(db, owned.organization_id, owned.id, buyerUserId) : null
   const cancellation = paidStay ? await guestStayCancellationQuote(db, paidStay.stay, paidStay.payment, now.toISOString()) : null
-  const { agreement } = bookingAgreementFromRows(agreementRows, { ...viewer, canManage: false }, null)
-  return { organization_id: owned.organization_id, stay: { ...stay, agreement }, home, cancellation, payment_processing: owned.payment_processing === 1 }
+  const { agreement, deposit } = bookingAgreementFromRows(agreementRows, { ...viewer, canManage: false }, null)
+  return { organization_id: owned.organization_id, stay: { ...stay, agreement, deposit }, home, cancellation, payment_processing: owned.payment_processing === 1 }
 }
 
 /**

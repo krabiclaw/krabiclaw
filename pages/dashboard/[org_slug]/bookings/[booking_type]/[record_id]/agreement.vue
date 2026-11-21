@@ -53,6 +53,14 @@
             </dl>
           </div>
 
+          <NuxtLink v-if="depositLine" :to="{ path: route.path.replace(/\/agreement$/, '/deposit'), query: route.query }" :class="cardClass" data-testid="card-deposit">
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-semibold text-highlighted">{{ editor?.deposit.value?.current.label }}</span>
+              <span class="mt-1 block text-sm text-muted">{{ depositLine }}</span>
+            </span>
+            <span class="text-sm font-semibold text-highlighted underline underline-offset-4">Edit</span>
+          </NuxtLink>
+
           <UButton block size="lg" color="neutral" label="Next: mark where everyone signs" :disabled="!draftReady" :loading="opening" data-testid="booking-agreement-prepare" @click="openWorkspace" />
           <p v-if="!draftReady" class="text-center text-sm text-muted">{{ draft.file ? 'Choose at least one guest to sign.' : 'Choose the PDF to sign.' }}</p>
 
@@ -174,6 +182,9 @@ import BookingAgreement from '~/components/booking/BookingAgreement.vue'
 import AgreementSignSheet from '~/components/booking/AgreementSignSheet.vue'
 import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
 import type { AgreementField, BookingAgreement as BookingAgreementRecord } from '~/shared/agreements'
+import { isCurrencyCode } from '~/shared/currencies'
+import { depositStatusLine } from '~/shared/deposits'
+import { formatMinorAmount } from '~/shared/prices'
 import { isRecord } from '~/utils/api-clients'
 import { getErrorMessage } from '~/utils/errors'
 
@@ -187,7 +198,16 @@ const rowClass = 'flex w-full items-center gap-3 py-4 text-left text-sm text-hig
 const cardClass = 'flex w-full items-center gap-4 rounded-xl border border-default p-4 text-left hover:bg-elevated'
 
 const editor = inject(bookingEditorKey, null)
+const route = useRoute()
 const context = computed(() => editor?.agreement.value ?? null)
+/** The deposit the lease states, set on its own leaf; absent for a booking with no price. */
+const depositLine = computed(() => {
+  const deposit = editor?.deposit.value?.current
+  if (!deposit) return null
+  const currency = deposit.currency
+  if (!isCurrencyCode(currency)) throw new Error(`Unsupported deposit currency ${currency}`)
+  return depositStatusLine(deposit, minor => formatMinorAmount(minor, currency))
+})
 const leadLine = computed(() => context.value?.current ? 'The document for this booking and who has signed it.' : 'Send a PDF for this booking’s guests to sign. You sign last.')
 
 const error = ref('')

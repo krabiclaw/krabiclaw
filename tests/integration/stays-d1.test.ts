@@ -7,6 +7,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { Miniflare } from 'miniflare'
 import { bindDatabaseEvents } from '../../server/db/index.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
+import { deleteDepositEntry, readBookingDeposit, recordDepositEntry, setBookingDeposit } from '../../server/domain/deposits.ts'
 import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, readHomeCalendar, readStayCalendar, readStayHome, recordStayPayment, importStayNights, quoteStay, setStayNights, stayCheckoutPolicy, updateStay, updateStayHome, type GuestStay, type StayAccess, cancelStayAsGuest, createStayRequest, dispatchStayCheckoutDeadlines, readPublicStayHome, type PublicStayCalendar  } from '../../server/domain/stays.ts'
 import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
@@ -306,6 +307,26 @@ test('a channel stay is read-only here and is paid through its channel; an app s
     const removed = await deleteStayPayment(db, env, manager, stay.id, refunded.payment.id)
     assert.deepEqual([removed.paid_minor, removed.payment_status], [45_000, 'paid'])
     await assert.rejects(deleteStayPayment(db, env, manager, stay.id, 'missing'), code('PAYMENT_NOT_FOUND'))
+
+    // The deposit is a liability: it never counts as paid, and only what is held can go back or be kept.
+    const depositor = { organizationId: ORG, actorId: OWNER }
+    assert.equal((await setBookingDeposit(db, depositor, stay.id, 50_000))?.required_minor, 50_000)
+    const received = await recordDepositEntry(db, depositor, stay.id, { kind: 'received', amount_minor: 50_000, method: 'bank_transfer', paid_on: '2026-11-01', idempotency_key: 'dep-1' })
+    assert.deepEqual([received.deposit.held_minor, (await getStay(db, manager, stay.id)).paid_minor], [50_000, 45_000])
+    await assert.rejects(recordDepositEntry(db, depositor, stay.id, { kind: 'withheld', amount_minor: 10_000, paid_on: '2026-11-05', idempotency_key: 'dep-x' }), code('VALIDATION_ERROR'))
+    await assert.rejects(recordDepositEntry(db, depositor, stay.id, { kind: 'withheld', amount_minor: 60_000, paid_on: '2026-11-05', note: 'Too much', idempotency_key: 'dep-y' }), code('DEPOSIT_INSUFFICIENT'))
+    const kept = await recordDepositEntry(db, depositor, stay.id, { kind: 'withheld', amount_minor: 10_000, paid_on: '2026-11-05', note: 'Broken lamp', idempotency_key: 'dep-2' })
+    assert.deepEqual([kept.deposit.held_minor, kept.deposit.withheld_minor], [40_000, 10_000])
+    // What was kept is the business's money.
+    assert.equal((await getStay(db, manager, stay.id)).paid_minor, 55_000)
+    // Two returns of everything at once: only one can take what is held.
+    const returns = await Promise.allSettled(['dep-3', 'dep-4'].map(key => recordDepositEntry(db, depositor, stay.id, { kind: 'returned', amount_minor: 40_000, method: 'bank_transfer', paid_on: '2026-11-06', idempotency_key: key })))
+    assert.deepEqual(returns.map(result => result.status).sort(), ['fulfilled', 'rejected'])
+    assert.deepEqual(await db.prepare("SELECT purpose, amount_minor FROM offline_payments WHERE booking_id = ? AND purpose <> 'payment' ORDER BY created_at").bind(stay.id).all().then(rows => rows.results),
+      [{ purpose: 'deposit', amount_minor: 50_000 }, { purpose: 'deposit_withheld', amount_minor: 10_000 }, { purpose: 'deposit', amount_minor: -40_000 }])
+    // A receipt already returned or kept stays until those entries go.
+    await assert.rejects(deleteDepositEntry(db, depositor, stay.id, received.entry.id), code('DEPOSIT_IN_USE'))
+    assert.equal((await readBookingDeposit(db, ORG, stay.id))?.held_minor, 0)
 
     // A guest who already paid: the stay and its first payment are one write, and a replay adds no second payment.
     const withPayment = { product_id: cabin.id, idempotency_key: 'paid-up-front', check_in_date: '2026-12-10', check_out_date: '2026-12-12', ...guest, payment: { amount_minor: 45_000, method: 'cash', paid_on: '2026-12-01', reference: 'cash at the door' } }

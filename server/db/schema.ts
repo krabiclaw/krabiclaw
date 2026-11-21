@@ -1065,6 +1065,12 @@ export const bookings = sqliteTable("bookings", {
 	policy_json: text().notNull(),
 	total_minor: integer(),
 	currency: text(),
+	// The refundable deposit the business asks for on this booking, in its
+	// currency: a stay's security deposit, a client's retainer held in trust.
+	// Not part of total_minor. What was received, returned or kept is its
+	// offline_payments rows (purpose deposit / deposit_withheld).
+	// server/domain/deposits.ts writes it; >0 when set.
+	deposit_minor: integer(),
 	idempotency_key: text(),
 	version: integer().default(1).notNull(),
 	channel: text().$type<'airbnb' | 'vrbo' | 'booking_com' | 'direct'>().default("direct").notNull(),
@@ -1371,6 +1377,11 @@ export const occupied_stay_nights = sqliteView('occupied_stay_nights', {
 //   PaymentIntent (account, mode, captured and refunded amounts kept by
 //   webhooks); this has none of those, so it is its own row of Payments.
 // `idempotency_key` makes a retried record the same row, never a second payment.
+// purpose: 'payment' is money toward the booking's total. 'deposit' is the
+//   booking's refundable deposit received (positive) or returned (negative); it
+//   is a liability, never revenue. 'deposit_withheld' moves that much of the
+//   held deposit to the business (damage, unpaid charges) and counts as paid.
+//   Validated by server/domain/deposits.ts, not a CHECK.
 // Deletion: cascades from the booking. A mistaken entry is deleted by the host.
 export const offline_payments = sqliteTable("offline_payments", {
 	id: text().primaryKey(),
@@ -1382,6 +1393,7 @@ export const offline_payments = sqliteTable("offline_payments", {
 	paid_on: text().notNull(),
 	reference: text(),
 	note: text(),
+	purpose: text().$type<'payment' | 'deposit' | 'deposit_withheld'>().default("payment").notNull(),
 	idempotency_key: text().notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text().notNull(),

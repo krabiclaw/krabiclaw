@@ -172,11 +172,12 @@
             </p>
           </div>
 
-          <div v-if="conversationId && agreementRead && (agreementRead.agreement || !personalScope)" id="booking-agreement-section" :class="sectionClass">
-            <h2 class="text-lg font-semibold text-highlighted">{{ agreementLabelText }}</h2>
+          <div v-if="showAgreementRow || showDepositRow" id="booking-agreement-section" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">{{ showAgreementRow ? agreementLabelText : depositRead?.label }}</h2>
             <div class="mt-3">
               <component
                 :is="personalScope ? 'button' : NuxtLink"
+                v-if="showAgreementRow"
                 :to="personalScope ? undefined : { path: `${editorPath}/agreement`, query: route.query }"
                 type="button"
                 :class="rowClass"
@@ -191,7 +192,21 @@
                 <UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
               </component>
             </div>
-            <DashboardListItemDialog v-if="personalScope && guestAgreementOpen" v-model:open="guestAgreementOpen" :title="agreementLabelText ?? ''" :show-actions="false">
+            <component
+              :is="personalScope ? 'div' : NuxtLink"
+              v-if="showDepositRow && depositRead"
+              :to="personalScope ? undefined : { path: `${editorPath}/deposit`, query: route.query }"
+              :class="rowClass"
+              data-testid="booking-deposit-row"
+            >
+              <UIcon name="i-lucide-shield-check" class="size-4 shrink-0 text-highlighted" />
+              <span class="min-w-0 flex-1">
+                <span class="block font-medium">{{ depositRead.label }}</span>
+                <span class="block text-xs text-muted" data-testid="booking-deposit-status">{{ depositSummary }}</span>
+              </span>
+              <UIcon v-if="!personalScope" name="i-lucide-chevron-right" class="size-4 text-muted" />
+            </component>
+            <DashboardListItemDialog v-if="personalScope && guestAgreementOpen && conversationId && agreementRead" v-model:open="guestAgreementOpen" :title="agreementLabelText ?? ''" :show-actions="false">
               <BookingAgreement
                 :conversation-id="conversationId"
                 :preloaded="{ agreement: agreementRead.agreement, canManage: false }"
@@ -456,6 +471,8 @@ export interface BookingEditor {
     current: import('~/shared/agreements').BookingAgreement | null
     signers: { key: string; name: string; role: 'guest' | 'host' }[]
   } | null>
+  /** The booking's refundable deposit for the business's Deposit leaf; null where the booking has no currency or the viewer is the guest. */
+  deposit: ComputedRef<{ bookingId: string; current: import('~/shared/deposits').BookingDeposit; today: string } | null>
   /** A stay's Change reservation step: what it is now, and the write. */
   stayChange: { stay: ComputedRef<{ check_in_date: string; check_out_date: string; adults: number; children: number } | null>; save: (input: { check_in_date: string; check_out_date: string; adults: number; children: number }) => Promise<void> }
 }
@@ -492,6 +509,7 @@ import StaySetupMap from './StaySetupMap.client.vue'
 import BookingAgreement from '~/components/booking/BookingAgreement.vue'
 import AgreementSignSheet from '~/components/booking/AgreementSignSheet.vue'
 import { agreementLabel, agreementStatusLine, type BookingAgreement as BookingAgreementRecord } from '~/shared/agreements'
+import { depositStatusLine } from '~/shared/deposits'
 import { ApiClientError } from '~/utils/api-clients'
 
 const props = defineProps<{
@@ -614,6 +632,21 @@ const agreementRead = computed(() => {
   return { agreement: record.agreement, signers: 'agreement_signers' in record ? record.agreement_signers ?? null : null }
 })
 const signingAgreement = ref<BookingAgreementRecord | null>(null)
+/** The deposit the booking's read carries: null for a booking with no price, absent where the read carries none. */
+const depositRead = computed(() => {
+  const record = booking.value ?? detail.value
+  return record && 'deposit' in record ? record.deposit ?? null : null
+})
+const showAgreementRow = computed(() => Boolean(conversationId.value && agreementRead.value && (agreementRead.value.agreement || !props.personalScope)))
+// A guest sees the deposit once the business asks for one; the business always sees where to set it.
+const showDepositRow = computed(() => Boolean(depositRead.value && (!props.personalScope || depositRead.value.required_minor !== null || depositRead.value.entries.length)))
+const depositSummary = computed(() => {
+  const value = depositRead.value
+  if (!value) return null
+  const currency = value.currency
+  if (!isCurrencyCode(currency)) throw new Error(`Unsupported deposit currency ${currency}`)
+  return depositStatusLine(value, minor => formatMinorAmount(minor, currency))
+})
 const guestAgreementOpen = ref(false)
 const signingOpen = ref(false)
 /** The business's word for the document: the agreement's own, or the booking's kind's before one exists. */
@@ -1248,6 +1281,13 @@ provide(bookingEditorKey, {
     const view = panel.value
     if (!read?.signers || !conversationId.value || !agreementLabelText.value || !view) return null
     return { conversationId: conversationId.value, label: agreementLabelText.value, title: view.title ?? agreementLabelText.value, when: view.when, current: read.agreement, signers: read.signers }
+  }),
+  deposit: computed(() => {
+    const current = depositRead.value
+    if (props.personalScope || !current) return null
+    const timezone = stay.value?.timezone ?? booking.value?.timezone
+    if (!timezone) throw new Error('A booking with a deposit has no timezone to date its entries in')
+    return { bookingId: props.bookingId, current, today: localDateAt(new Date(), timezone) }
   }),
   stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },
 })

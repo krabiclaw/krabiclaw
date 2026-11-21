@@ -830,7 +830,7 @@ export function bookedRecordsInRange(viewer: ViewerTerms, range: {
   const calendar = range.includeCalendarGrants && viewer.role ? listingGrantSql('b.organization_id', 'b.product_id', viewer.member, 'calendar', viewer.role) : '0'
   const privateColumn = (expression: string) => range.guest ? expression : `CASE WHEN ${known} THEN ${expression} END`
   const paid = range.includePayments && viewer.role ? `CASE WHEN ${roleMatchesSql(viewer.role, workspaceManagementRoles)} THEN
-    (SELECT COALESCE(SUM(o.amount_minor), 0) FROM offline_payments o WHERE o.organization_id = b.organization_id AND o.booking_id = b.id)
+    (SELECT COALESCE(SUM(o.amount_minor), 0) FROM offline_payments o WHERE o.organization_id = b.organization_id AND o.booking_id = b.id AND o.purpose <> 'deposit')
       + (SELECT COALESCE(SUM(pay.captured_amount - pay.refunded_amount), 0) FROM payments pay WHERE pay.organization_id = b.organization_id AND pay.subject_type = 'booking' AND pay.subject_id = b.id)
     ELSE 0 END` : '0'
   const whose = range.guest

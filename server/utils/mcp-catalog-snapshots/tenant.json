@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:9438c30146b970c78a85afa341823931a694a8df5796d4c9f46b431ac2657264",
-  "documentationFingerprint": "sha256:6bafab9254704556654849e037acb05bcb75be5a11a6d13183516eccb38f288a",
+  "fingerprint": "sha256:1c8d1f769e691ee5acb936e27cb3460eeaefbe0f7f578efef0654812a2ae6967",
+  "documentationFingerprint": "sha256:7087f147d259ee40a23b43ba20a3cc5359bff8e019f3ef9179e0fd0492d00269",
   "tools": [
     {
       "name": "add_organization_language",
@@ -37610,6 +37610,72 @@
       "uiResourceUri": null
     },
     {
+      "name": "delete_booking_deposit_entry",
+      "title": "Delete booking deposit entry",
+      "description": "Remove a deposit entry recorded by mistake. A receipt already partly returned or withheld stays until those entries are removed.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
+            "type": "string"
+          },
+          "entry_id": {
+            "description": "ID from get_product_booking → deposit.entries[].id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "booking_id",
+          "entry_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "deposit": {
+            "description": "The booking’s refundable deposit: what the business asks for (required_minor), holds now (held_minor), returned and kept, and each recorded entry. Null when it asks for none.",
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "deposit"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Delete booking deposit entry"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "bookings",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "delete_channel_post",
       "title": "Delete channel post",
       "description": "Permanently delete exactly the provider_post_id on the explicitly selected connected Facebook Page, or the Blawby bot's message in the connected Discord channel. Keeps the website post and marks its publication receipt removed. Read get_social_connections and list_channel_posts first. Instagram deletion is unavailable with this app's Instagram Login connection; delete Instagram posts in Instagram. Use delete_post to remove website content separately.",
@@ -54493,6 +54559,13 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "deposit": {
+                "description": "The booking’s refundable deposit: what the business asks for (required_minor), holds now (held_minor), returned and kept, and each recorded entry. Null when it asks for none.",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "guest": {
                 "properties": {
                   "email": {
@@ -54699,6 +54772,13 @@
               "booking_id": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "deposit": {
+                "description": "The booking’s refundable deposit: what the business asks for (required_minor), holds now (held_minor), returned and kept, and each recorded entry. Null when it asks for none.",
+                "type": [
+                  "object",
+                  "null"
+                ]
               },
               "record": {
                 "anyOf": [
@@ -87343,6 +87423,116 @@
       "uiResourceUri": null
     },
     {
+      "name": "record_booking_deposit",
+      "title": "Record booking deposit",
+      "description": "Record deposit money received, returned to the guest or client, or withheld (kept for damage or unpaid charges, with the reason in note). Blawby moves no money; this records what happened outside it. Only what is held can be returned or withheld; withheld becomes paid revenue.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "amount_minor": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "received",
+              "returned",
+              "withheld"
+            ],
+            "type": "string"
+          },
+          "method": {
+            "description": "How the money moved; ignored for withheld.",
+            "enum": [
+              "cash",
+              "bank_transfer",
+              "card_external",
+              "other"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "description": "Required for withheld: what it was kept for.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "paid_on": {
+            "description": "YYYY-MM-DD",
+            "type": "string"
+          },
+          "reference": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "booking_id",
+          "kind",
+          "amount_minor",
+          "paid_on",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "deposit": {
+            "description": "The booking’s refundable deposit: what the business asks for (required_minor), holds now (held_minor), returned and kept, and each recorded entry. Null when it asks for none.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "entry": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "deposit",
+          "entry"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Record booking deposit"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "bookings",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "record_stay_payment",
       "title": "Record stay payment",
       "description": "Record money received outside Blawby for a host-entered stay, such as cash or a bank transfer. Read get_product_booking for the stay ID and currency. A negative amount records an offline refund. Returns the exact recorded payment and current paid amount/status, without unrelated guest details or payment history. Moves no money.",
@@ -98873,6 +99063,76 @@
       "fileParams": [
         "file"
       ],
+      "uiResourceUri": null
+    },
+    {
+      "name": "set_booking_deposit",
+      "title": "Set booking deposit",
+      "description": "Set the refundable deposit a booking asks for — a security deposit, or for a law firm a retainer held in trust — in the booking’s currency, or null for none. It is not part of the booking total and never counts as revenue. Recorded entries stay.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "booking_id": {
+            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
+            "type": "string"
+          },
+          "deposit_minor": {
+            "description": "Amount in the smallest currency unit, or null.",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "booking_id",
+          "deposit_minor"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "deposit": {
+            "description": "The booking’s refundable deposit: what the business asks for (required_minor), holds now (held_minor), returned and kept, and each recorded entry. Null when it asks for none.",
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "deposit"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Set booking deposit"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "bookings",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
       "uiResourceUri": null
     },
     {
@@ -127010,7 +127270,7 @@
         "cancel_product_booking": "sha256:4649ba23b5d73655c2ba9b2f26ef92757c2c7a809b1dceda3e7caed8ff49b08a",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_product_booking": "sha256:dcc26fe72974dcbcda6ad5c582435c7261a4fa1d06cbc8bcd4cfc4b4106ad5e0",
+        "get_product_booking": "sha256:606cd9d6feb131c6de34eed79ffc5127e022fff4063c2f4d17c0fbc1e240450b",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",
