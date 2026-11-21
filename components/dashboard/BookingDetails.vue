@@ -288,7 +288,7 @@
             </div>
           </div>
 
-          <div v-if="detail || isLongTerm || (booking?.type === 'booking' && booking.payments !== null) || booking?.payments?.length" :class="sectionClass">
+          <div v-if="detail || (booking?.type === 'booking' && booking.payments !== null) || booking?.payments?.length" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Payment info</h2>
             <template v-if="detail">
               <h3 class="mt-5 text-sm font-semibold text-highlighted">Amount paid</h3>
@@ -320,48 +320,7 @@
               </a>
             </template>
 
-            <!-- Security Deposit Escrow (#1908) -->
-            <div v-if="isLongTerm" class="mt-4 rounded-xl border border-default bg-elevated/30 p-3.5 space-y-1.5" data-testid="security-deposit-escrow-card">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <UIcon name="i-lucide-shield-check" class="size-4 text-primary" />
-                  <span class="text-xs font-semibold text-highlighted">{{ booking?.vertical === 'service' ? 'Retainer (trust escrow)' : 'Security deposit (escrow)' }}</span>
-                </div>
-                <span class="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                  Held in escrow
-                </span>
-              </div>
-              <p class="text-xs text-muted">
-                {{ money(detail?.total_minor && stayNights > 0 ? Math.round(detail.total_minor / (stayNights / 30)) : 150000) }} {{ booking?.vertical === 'service' ? 'held in IOLTA trust escrow. Excluded strictly from legal operating revenue and tax analytics until earned.' : 'held in escrow as security against damages. Excluded strictly from operating rental revenue and tax analytics.' }}
-              </p>
-            </div>
-
-            <!-- Monthly Payment Schedule & Rent Ledger (#1907) -->
-            <div v-if="monthlySchedule.length > 1" class="mt-4 space-y-2" data-testid="monthly-rent-schedule-card">
-              <h4 class="text-xs font-semibold uppercase tracking-wider text-muted">Monthly rent schedule</h4>
-              <div class="space-y-1.5">
-                <div
-                  v-for="period in monthlySchedule"
-                  :key="period.period"
-                  class="flex items-center justify-between rounded-lg border border-default bg-default px-3 py-2 text-xs shadow-2xs"
-                >
-                  <div>
-                    <span class="font-medium text-highlighted">Month {{ period.period }}</span>
-                    <span class="text-muted ml-2">Due {{ formatCalendarDate(period.due_date, 'en') }}</span>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span class="font-mono font-medium text-highlighted">{{ money(period.amount_minor) }}</span>
-                    <span
-                      class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-                      :class="period.status === 'paid' ? 'bg-success/10 text-success' : period.status === 'due' ? 'bg-amber-500/10 text-amber-600' : 'bg-elevated text-muted'"
-                    >
-                      {{ period.status }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <p v-else-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
+            <p v-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
             <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds">
               <template v-if="!personalScope && entry.payment.captured_amount > entry.payment.refunded_amount" #actions>
                 <NuxtLink :to="{ path: `${editorPath}/refund`, query: { ...route.query, payment: entry.payment.id } }" :class="rowClass">
@@ -524,7 +483,6 @@ import StaySetupMap from './StaySetupMap.client.vue'
 import BookingAgreement from '~/components/booking/BookingAgreement.vue'
 import AgreementSignSheet from '~/components/booking/AgreementSignSheet.vue'
 import { ApiClientError } from '~/utils/api-clients'
-import { calculateMonthlyPaymentSchedule } from '~/shared/agreements'
 
 const props = defineProps<{
   bookingType: DashboardRecordType
@@ -672,43 +630,6 @@ const agreementRowSummary = computed(() => {
   if (agr.status === 'signed') return `All parties signed on ${day(agr.completed_at!)}`
   const waiting = agr.signers.filter(signer => !signer.signed_at).map(signer => signer.key === agr.viewer_signer_key ? 'you' : signer.name.split(' ')[0]!)
   return `Waiting on ${agreementSignerNames(waiting)}`
-})
-const stayNights = computed(() => {
-  if (!detail.value) return 0
-  const cin = new Date(detail.value.check_in_date).getTime()
-  const cout = new Date(detail.value.check_out_date).getTime()
-  return Math.max(0, Math.round((cout - cin) / (1000 * 60 * 60 * 24)))
-})
-
-const isLongTerm = computed(() => {
-  if (stay.value && detail.value && stayNights.value >= 28) return true
-  if (agreementRead.value?.agreement) return true
-  return false
-})
-
-const monthlySchedule = computed(() => {
-  if (!isLongTerm.value) return []
-  if (detail.value) {
-    const totalPaid = detail.value.payments.reduce((s, p) => s + p.amount_minor, 0)
-      + (detail.value.online_payment ? detail.value.online_payment.captured_minor - detail.value.online_payment.refunded_minor : 0)
-    const monthlyRent = detail.value.total_minor && stayNights.value > 0
-      ? Math.round(detail.value.total_minor / (stayNights.value / 30))
-      : 150000
-    return calculateMonthlyPaymentSchedule(
-      detail.value.check_in_date,
-      detail.value.check_out_date,
-      monthlyRent,
-      totalPaid,
-    )
-  }
-  const today = new Date().toISOString().slice(0, 10)
-  const oneYearLater = new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10)
-  return calculateMonthlyPaymentSchedule(
-    today,
-    oneYearLater,
-    150000,
-    0,
-  )
 })
 
 const messageTo = computed(() => {

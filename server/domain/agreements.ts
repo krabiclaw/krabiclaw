@@ -164,11 +164,11 @@ function payload(record: Pick<MessageRow, 'payload_json'>): unknown {
   return JSON.parse(record.payload_json)
 }
 
-function viewerSigns(signer: { key: string }, viewer: AgreementViewer | null, signers?: SignerRow[] | null): boolean {
+function viewerSigns(signer: { key: string }, viewer: AgreementViewer | null, signers?: SignerRow[] | null, bookerUserId?: string | null): boolean {
   if (!viewer) return false
   if (signer.key === `user:${viewer.userId}`) return true
   if (viewer.verifiedEmail !== null && signer.key === `email:${viewer.verifiedEmail.toLowerCase()}`) return true
-  if (signer.key.startsWith('email:') && signers?.some(row => row.user_id === viewer.userId && row.booked_email && signer.key === `email:${row.booked_email.trim().toLowerCase()}`)) return true
+  if (signer.key.startsWith('email:') && viewer.userId === bookerUserId && signers?.some(row => row.user_id === viewer.userId && row.booked_email && signer.key === `email:${row.booked_email.trim().toLowerCase()}`)) return true
   return false
 }
 
@@ -183,7 +183,8 @@ interface AgreementState {
 
 function agreementState(records: AgreementRecord[], listing: ListingDocument | null, booking: AgreementBooking, now: string): AgreementState | null {
   const cancelled = new Set(records.filter(record => record.event_name === 'agreement.cancelled').map(record => cancelledSchema.parse(payload(record)).request_id))
-  const request = [...records].reverse().find(record => (record.event_name === 'agreement.stored' || record.event_name === 'agreement.sent') && !cancelled.has(record.id)) ?? null
+  const latestRequest = [...records].reverse().find(record => record.event_name === 'agreement.stored' || record.event_name === 'agreement.sent') ?? null
+  const request = latestRequest && !cancelled.has(latestRequest.id) ? latestRequest : null
   const signatures = records.filter(record => record.event_name === 'agreement.signed').map(record => ({ record, signed: signedSchema.parse(payload(record)) }))
   if (request) {
     if (!request.asset_id) throw new Error(`Agreement message ${request.id} has no document`)
@@ -210,7 +211,7 @@ function agreementState(records: AgreementRecord[], listing: ListingDocument | n
 function presentAgreement(state: AgreementState, booking: AgreementBooking, viewer: AgreementViewer | null, signersRows?: SignerRow[] | null): BookingAgreement {
   const signers: AgreementSigner[] = state.signers.map(signer => ({ key: signer.key, name: signer.name, role: signer.role, signed_at: signer.signature?.occurred_at ?? null }))
   const complete = signers.length > 0 && signers.every(signer => signer.signed_at !== null)
-  const own = state.signers.find(signer => viewerSigns(signer, viewer, signersRows)) ?? null
+  const own = state.signers.find(signer => viewerSigns(signer, viewer, signersRows, booking.bookingUserId)) ?? null
   const guestsSigned = signers.every(signer => signer.role === 'host' || signer.signed_at !== null)
   const document = state.request ?? state.listingSignature
   const base = { label: agreementLabel(booking.productKind), fields: state.fields, viewer_signer_key: own?.key ?? null, can_manage: viewer?.canManage === true }

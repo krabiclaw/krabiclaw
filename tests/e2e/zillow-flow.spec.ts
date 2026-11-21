@@ -1,11 +1,16 @@
-import { expect, test, type Page } from '@playwright/test'
+import fs from 'node:fs'
 import path from 'node:path'
+import { expect, test, type Page } from '@playwright/test'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { seededTenant } from './seed/manifest'
 import { seededSiteHeaders, seededSiteURL } from './test-env'
 import { loginAs } from './helpers/auth'
 
-const SCREENSHOT_DIR = '/Users/paulchrisluke/.gemini/antigravity/brain/528cd9a5-d63f-4437-b153-d904fcf58b3c/screenshots'
+const DEFAULT_ARTIFACT_DIR = '/Users/paulchrisluke/.gemini/antigravity/brain/528cd9a5-d63f-4437-b153-d904fcf58b3c/screenshots'
+const SCREENSHOT_DIR = process.env.SCREENSHOT_DIR || (fs.existsSync(DEFAULT_ARTIFACT_DIR) ? DEFAULT_ARTIFACT_DIR : path.resolve(process.cwd(), '.screenshots'))
+if (!fs.existsSync(SCREENSHOT_DIR)) {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true })
+}
 
 async function chooseFirstAvailableTime(page: Page) {
   const slot = page.getByRole('button', { name: /\bAvailable$/ }).first()
@@ -127,16 +132,10 @@ test('Capture full Zillow-parity agreement preparation, full-screen signing, esc
   // Screenshot 3: Full-Screen Tenant Document Review & Sign Experience
   await guestPage.screenshot({ path: path.join(SCREENSHOT_DIR, '03-zillow-fullscreen-tenant-signing.png') })
 
-  // Open Signature Adoption Modal (via Next signature helper or field stamp)
+  // Open Signature Adoption Modal (via Next signature helper)
   const nextSigBtn = guestPage.locator('[data-testid="next-signature-button"]')
-  if (await nextSigBtn.isVisible()) {
-    await nextSigBtn.click()
-  } else {
-    const signHereBadge = guestPage.locator('[data-testid="field-stamp-box"]').first()
-    await signHereBadge.scrollIntoViewIfNeeded()
-    await signHereBadge.click({ force: true })
-  }
-  await guestPage.waitForTimeout(1000)
+  await expect(nextSigBtn).toBeVisible({ timeout: 15_000 })
+  await nextSigBtn.click()
 
   // Fill legal name & consent in adoption modal
   const nameInput = guestPage.locator('[data-testid="agreement-name"]')
@@ -154,24 +153,24 @@ test('Capture full Zillow-parity agreement preparation, full-screen signing, esc
   await adoptBtn.click()
   await guestPage.waitForTimeout(1000)
 
-  // Submit signed document
+  // Submit signed document and assert 200 response
   const finishBtn = guestPage.locator('[data-testid="agreement-submit"]')
   await expect(finishBtn).toBeEnabled({ timeout: 10_000 })
+  const signPromise = guestPage.waitForResponse(r => r.request().method() === 'POST' && r.url().includes('/agreement/sign'))
   await finishBtn.click()
-  await guestPage.waitForTimeout(3000)
+  const signRes = await signPromise
+  expect(signRes.status()).toBe(200)
 
-  // 6. OPERATOR BOOKING DETAILS: Escrow (#1908) & Monthly Rent Ledger (#1907)
+  // 6. OPERATOR BOOKING DETAILS: Executed Agreement row
   await adminPage.goto(`${baseURL}/dashboard/${studio.slug}/messages/${booked.conversation_id}`)
   await waitForNuxtHydration(adminPage)
-  await adminPage.waitForTimeout(1500)
 
-  // Scroll right pane to reveal Escrow Deposit card (#1908) and Monthly Ledger (#1907)
-  const escrowCard = adminPage.locator('[data-testid="security-deposit-escrow-card"]')
-  await expect(escrowCard).toBeVisible({ timeout: 15_000 })
-  await escrowCard.scrollIntoViewIfNeeded()
-  await adminPage.waitForTimeout(1000)
+  // Verify executed agreement is visible on booking details
+  const finalAgreementRow = adminPage.locator('[data-testid="booking-agreement-row"]')
+  await expect(finalAgreementRow).toBeVisible({ timeout: 15_000 })
+  await finalAgreementRow.scrollIntoViewIfNeeded()
 
-  // Screenshot 5: Operator CMS with Agreement row, Escrow Deposit card & Monthly Ledger
+  // Screenshot 5: Operator CMS with Agreement row
   await adminPage.screenshot({ path: path.join(SCREENSHOT_DIR, '05-zillow-booking-details-escrow-ledger.png') })
 
   await adminContext.close()

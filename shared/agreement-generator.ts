@@ -32,6 +32,25 @@ function formatMoney(minor: number, currency: string): string {
  * Includes rent schedule terms (#1907) and security deposit escrow provisions (#1908).
  * Automatically places signature and date fields precisely on the signature blocks.
  */
+function sanitizeWinAnsi(text: string): string {
+  let result = ''
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if ((code >= 32 && code <= 126) || (code >= 160 && code <= 255) || code === 10 || code === 9) {
+      result += text[i]
+    } else {
+      const decomposed = text[i].normalize('NFKD')
+      let replaced = ''
+      for (let j = 0; j < decomposed.length; j++) {
+        const dCode = decomposed.charCodeAt(j)
+        if ((dCode >= 32 && dCode <= 126) || (dCode >= 160 && dCode <= 255)) replaced += decomposed[j]
+      }
+      result += replaced || '?'
+    }
+  }
+  return result
+}
+
 export async function generateAgreementPdf(options: GenerateAgreementOptions): Promise<{
   bytes: Uint8Array
   fileName: string
@@ -56,12 +75,14 @@ export async function generateAgreementPdf(options: GenerateAgreementOptions): P
     size = 10,
     color = rgb(0.12, 0.14, 0.17),
   ) => {
-    page.drawText(text, { x: MARGIN, y: cursorY, font, size, color })
+    const safeText = sanitizeWinAnsi(text)
+    page.drawText(safeText, { x: MARGIN, y: cursorY, font, size, color })
     cursorY -= size + 5
   }
 
   const drawParagraph = (text: string, font = fontRegular, size = 9.5, lineHeight = 14) => {
-    const words = text.split(' ')
+    const safeText = sanitizeWinAnsi(text)
+    const words = safeText.split(' ')
     let line = ''
     for (const word of words) {
       const testLine = line ? `${line} ${word}` : word

@@ -114,6 +114,21 @@
         </div>
       </div>
 
+      <!-- Error banner if submit fails outside adoption modal -->
+      <div
+        v-if="error && !adoptionModalOpen"
+        class="border-t border-error/20 bg-error/10 px-4 py-2.5 text-xs text-error flex items-center justify-between shrink-0"
+        role="alert"
+      >
+        <div class="flex items-center gap-2">
+          <UIcon name="i-lucide-circle-alert" class="size-4 shrink-0" />
+          <span>{{ error }}</span>
+        </div>
+        <button type="button" class="p-1 hover:opacity-75" aria-label="Dismiss error" @click="error = ''">
+          <UIcon name="i-lucide-x" class="size-4" />
+        </button>
+      </div>
+
       <!-- Sticky Bottom Action Bar -->
       <footer class="flex h-16 shrink-0 items-center justify-between border-t border-default bg-default px-4 sm:px-6 shadow-xs">
         <div class="min-w-0 pr-4">

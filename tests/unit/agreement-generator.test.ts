@@ -23,7 +23,16 @@ test('generateAgreementPdf creates valid PDF and accurately pre-positions signat
 
   assert.ok(result.bytes.byteLength > 1000, 'PDF bytes should be non-empty')
   assert.equal(result.fileName, 'stay-agreement.pdf')
-  assert.equal(result.fields.length, 4, 'Should generate 4 fields (2 signature, 2 date)')
+  assert.deepEqual(
+    result.fields.map(f => ({ signer_key: f.signer_key, kind: f.kind })),
+    [
+      { signer_key: 'user:harold', kind: 'signature' },
+      { signer_key: 'user:harold', kind: 'date' },
+      { signer_key: 'user:host', kind: 'signature' },
+      { signer_key: 'user:host', kind: 'date' },
+    ],
+    'Should generate exact 4 signer/kind field pairs',
+  )
 
   const haroldSig = result.fields.find(f => f.signer_key === 'user:harold' && f.kind === 'signature')
   assert.ok(haroldSig, 'Harold signature field should exist')
@@ -31,6 +40,22 @@ test('generateAgreementPdf creates valid PDF and accurately pre-positions signat
   assert.ok(haroldSig.y > 0 && haroldSig.y < 1)
   assert.ok(haroldSig.width > 0 && haroldSig.width < 1)
   assert.ok(haroldSig.height > 0 && haroldSig.height < 1)
+})
+
+test('generateAgreementPdf safely handles non-Latin party names without throwing WinAnsi error', async () => {
+  const result = await generateAgreementPdf({
+    templateKind: 'service',
+    agreementName: 'Engagement Letter',
+    businessName: 'Blawby Legal',
+    counterpartyName: '山田太郎 (สมชาย, Nguyễn Văn An)',
+    propertyOrMatter: 'Intellectual Property Protection (特許申請)',
+    hostSignerKey: 'user:attorney',
+    guestSignerKey: 'user:client',
+    currency: 'USD',
+  })
+
+  assert.ok(result.bytes.byteLength > 1000, 'PDF bytes should be non-empty')
+  assert.equal(result.fields.length, 4)
 })
 
 test('calculateMonthlyPaymentSchedule correctly creates installment periods and tracks paid status', () => {
