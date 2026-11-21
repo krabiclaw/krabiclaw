@@ -1,6 +1,6 @@
 import { RESOURCE_LOCALIZATIONS_SQL } from '~/shared/content-registries'
 import { HTTPError } from 'nitro'
-import { queryFirst, type DbClient } from '~/server/db'
+import { queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
@@ -36,8 +36,7 @@ export async function readFormQuestions(db: DbClient, owner: FormQuestionOwner):
   if (owner.kind === 'inquiry') {
     const row = await queryFirst<{ questions: string | null }>(db, "SELECT json_extract(settings_json, '$.inquiry.questions') AS questions FROM organization WHERE id = ?", [owner.organizationId])
     if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND' } })
-    // An organization that never saved inquiry questions asks none.
-    return row.questions === null ? [] : parseStoredFormQuestions(row.questions)
+    return inquiryQuestions(row.questions)
   }
   const row = await queryFirst<{ questions: string }>(db, 'SELECT questions FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [owner.organizationId, owner.productId])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'This product does not take bookings', data: { code: 'FORM_QUESTIONS_OWNER_NOT_FOUND', field: owner.kind } })
@@ -64,8 +63,7 @@ export async function localizeStoredFormQuestions(
   const { resourceType, resourceId, field } = formQuestionLocalizationField(owner)
   const row = await queryFirst<{ wording: string | null }>(db, `SELECT json_extract(values_json, '$.' || ?) AS wording FROM ${RESOURCE_LOCALIZATIONS_SQL}
     WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND locale = ?`, [field, owner.organizationId, resourceType, resourceId, translatedLocale])
-  const localization = row?.wording ? formQuestionLocalizationSchema.parse(JSON.parse(row.wording)) : null
-  return { questions: localizeFormQuestions(questions, localization), questions_revision }
+  return { questions: localizeQuestions(questions, row?.wording), questions_revision }
 }
 
 /**
@@ -125,9 +123,35 @@ export function prepareFormQuestionsWrite(current: readonly FormQuestion[], inpu
   return next
 }
 
-/** The site's inquiry form as a visitor reads it: its questions in their language, and whether the legal practice notice applies. */
-export async function readPublicInquiryForm(db: DbClient, organizationId: string, locale: string): Promise<{ questions: FormQuestion[]; questions_revision: string; consent_required: boolean }> {
-  const organization = await queryFirst<{ vertical: string; theme_id: string | null }>(db, "SELECT vertical, theme_id FROM organization WHERE id = ? AND status = 'active'", [organizationId])
-  if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  return { ...await readLocalizedFormQuestions(db, { kind: 'inquiry', organizationId }, locale), consent_required: isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) }
+function inquiryQuestions(json: string | null) {
+  return json === null ? [] : parseStoredFormQuestions(json)
+}
+
+function localizeQuestions(questions: FormQuestion[], wording?: string | null) {
+  return localizeFormQuestions(questions, wording ? formQuestionLocalizationSchema.parse(JSON.parse(wording)) : null)
+}
+
+/** The site's questions and wording for the current public language. */
+export function preparePublicInquiryForm(organizationId: string | { sql: string }, locale: string | { sql: string }) {
+  const statement: BatchQuery = {
+    query: `SELECT o.vertical, o.theme_id, json_extract(o.settings_json, '$.inquiry.questions') AS questions,
+       (SELECT json_extract(rl.values_json, '$.inquiry_questions') FROM ${RESOURCE_LOCALIZATIONS_SQL} rl
+        WHERE rl.organization_id = o.id AND rl.resource_type = 'organization' AND rl.resource_id = o.id
+          AND rl.locale = ${typeof locale === 'string' ? '?' : locale.sql}
+          AND NOT EXISTS (SELECT 1 FROM organization_locales l WHERE l.organization_id = o.id AND l.is_source = 1 AND l.locale = rl.locale)) AS wording
+       FROM organization o WHERE o.id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND o.status = 'active'`,
+    params: [...(typeof locale === 'string' ? [locale] : []), ...(typeof organizationId === 'string' ? [organizationId] : [])],
+  }
+  return { statement, read(row: unknown) {
+    if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+    const { questions: saved, wording, theme_id, vertical } = row as { questions: string | null; wording: string | null; theme_id: string | null; vertical: string }
+    const questions = inquiryQuestions(saved)
+    return { questions: questions.length ? localizeQuestions(questions, wording) : questions,
+      questions_revision: formQuestionsRevision(questions), consent_required: isLegalPracticeSite({ themeId: theme_id, vertical }) }
+  } }
+}
+
+export async function readPublicInquiryForm(db: DbClient, organizationId: string, locale: string) {
+  const form = preparePublicInquiryForm(organizationId, locale)
+  return form.read(await queryFirst(db, form.statement.query, form.statement.params))
 }

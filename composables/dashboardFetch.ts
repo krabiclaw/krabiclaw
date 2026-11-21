@@ -1,3 +1,4 @@
+import { dashboardProductId, rendersProductArrival, rendersProductCreation, rendersStayHomeSetup, rendersCatalogEditor, rendersWebsiteDocument, websiteBlogPost, websiteSocialPost } from '~/utils/dashboard-document'
 import type { FetchOptions } from 'ofetch'
 import type { MaybeRefOrGetter } from 'vue'
 import { $fetch } from 'ofetch'
@@ -86,13 +87,36 @@ export async function dashboardFetch<T>(
   if (!scope.orgSlug) {
     throw createError({ statusCode: 400, statusMessage: 'Dashboard organization scope is required' })
   }
-  if (import.meta.server && (!options.method || options.method === 'GET') && (
-    request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
+  const postDocument = import.meta.server && (() => {
+    const url = useRequestURL()
+    const panel = url.pathname.replace(/^\/dashboard\/[^/]+/, '')
+    return websiteSocialPost(panel) && rendersWebsiteDocument(panel, Object.fromEntries(url.searchParams))
+  })()
+  const homeSetupDocument = import.meta.server && request === '/api/dashboard/stay-homes/setup' && options.method === 'POST'
+    && options.body !== null && typeof options.body === 'object' && Object.keys(options.body).length === 0
+    && rendersStayHomeSetup(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''), Object.fromEntries(useRequestURL().searchParams))
+  if (import.meta.server && (homeSetupDocument || (!options.method || options.method === 'GET') && (
+    (/^\/api\/editor\/organizations\/[^/]+\/(?:locations\/[^/]+\/)?products\/[^/]+(?:\/availability)?$/.test(request)
+      && Boolean(dashboardProductId(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
+    || (/^\/api\/editor\/organizations\/[^/]+\/products$/.test(request) && options.query?.include === 'collections' && rendersCatalogEditor(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, '')))
+    || (/^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(request) && options.query?.view === 'assignment')
+    || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(request)
+    || (request === '/api/dashboard/locations' && (rendersCatalogEditor(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, '')) || /^\/dashboard\/[^/]+\/locations(?:\/|$)/.test(useRequestURL().pathname) && options.query?.status !== 'all' || rendersProductCreation(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''), Object.fromEntries(useRequestURL().searchParams))))
+    || (/^\/api\/organizations\/[^/]+\/domains$/.test(request) && /\/website\/preferences\/domains\/?$/.test(useRequestURL().pathname))
+    || (/^\/api\/editor\/organizations\/[^/]+\/locales$/.test(request) && /\/website\/preferences\/localization\/?$/.test(useRequestURL().pathname))
+    || (/^\/api\/dashboard\/stay-homes\/[^/]+$/.test(request) && rendersProductArrival(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''), Object.fromEntries(useRequestURL().searchParams)))
+    || (/^\/api\/organizations\/[^/]+\/billing\/homes$/.test(request) && /^\/dashboard\/[^/]+\/products\/[^/]+\/publication(?:\/|$)/.test(useRequestURL().pathname))
+    || request === '/api/dashboard/agenda' || request === '/api/dashboard/bookings/calendar'
     || (request === '/api/dashboard/stay-homes' && options.query?.view === 'calendar')
     || (request === '/api/dashboard/payments' && (options.query?.view === 'performance' || options.query?.view === 'payouts'))
-    || (request === '/api/dashboard/settings' && options.query?.connections === '1')
+    || (request === '/api/dashboard/settings' && (options.query?.connections === '1' || options.query?.view === 'website'))
+    || (/^\/api\/editor\/organizations\/[^/]+\/media$/.test(request) && /^\/dashboard\/[^/]+\/locations\/[^/]+\/photos\/?$/.test(useRequestURL().pathname))
+    || /^\/api\/editor\/organizations\/[^/]+\/(?:reviews|blog\/[^/]+|posts|qa|locations\/[^/]+\/qa|pages\/[^/]+)$/.test(request)
+      && (!request.endsWith('/blog/categories') || /\/website\/blog\/categories(?:\/|$)/.test(useRequestURL().pathname) || Boolean(websiteBlogPost(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))))
+    || (postDocument && (request === '/api/integrations/social-connections' || request === '/api/dashboard/locations' && options.query?.organization === 'true'
+      || /^\/api\/editor\/organizations\/[^/]+\/posts\/[^/]+$/.test(request)))
     || request === '/api/dashboard/integrations/google-calendar'
-  )) {
+  ))) {
     const provider = useRequestEvent()?.context.dashboardDocumentProvider as {
       read: (orgSlug: string, resource: string, query: Record<string, unknown>) => Promise<unknown>
     } | undefined
@@ -147,6 +171,13 @@ export async function applicationFetch<T>(
   request: string,
   options: DashboardFetchOptions<T>,
 ): Promise<T> {
+  if (import.meta.server && (!options.method || options.method === 'GET') && ((/^\/api\/organizations\/[^/]+\/members\/scheduling$/.test(request) && options.query?.view === 'assignment')
+      || /^\/api\/messages\/listings\/[^/]+\/participants$/.test(request))
+    && dashboardProductId(useRequestURL().pathname.replace(/^\/dashboard\/[^/]+/, ''))) {
+    const slug = useRoute().params.org_slug
+    if (typeof slug !== 'string') throw createError({ statusCode: 400, statusMessage: 'Dashboard organization scope is required' })
+    return dashboardFetch(request, { orgSlug: slug }, options)
+  }
   // See the comment in dashboardFetch above: a bare relative path is only
   // resolvable during SSR when we give ofetch an explicit baseURL.
   const baseURL = useRequestURL().origin

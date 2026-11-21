@@ -17,7 +17,6 @@ export const staffInviteScreen = z.object({
   no_access_label: z.string(),
   save_label: z.string(),
   resend_label: z.string(),
-  default_role: z.string().refine(isOrganizationRole),
   roles: z.array(role).min(1),
   listings: z.array(z.object({ listing_id: z.string(), label: z.string() })),
 })

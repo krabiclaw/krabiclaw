@@ -178,6 +178,18 @@ export async function getOrganizationPlan(
   return plan.read(result!)
 }
 
+export type OrganizationSubscriptionTerms = EntitlementRow & { stripeCustomerId: string | null; stripeSubscriptionId: string | null }
+
+/** The subscription facts a live homes quote needs, read beside its usage. */
+export function prepareOrganizationSubscriptionTerms(organizationId: string | { sql: string }) {
+  return { query: { query: `SELECT id, referenceId, plan, status, periodEnd, stripeCustomerId, stripeSubscriptionId FROM subscription
+    WHERE referenceId = ${typeof organizationId === 'string' ? '?' : organizationId.sql}`, params: typeof organizationId === 'string' ? [organizationId] : [] },
+    read(result: D1Result): OrganizationSubscriptionTerms[] {
+      const rows = result.results as Array<Omit<OrganizationSubscriptionTerms, 'periodEnd'> & { periodEnd: number | null }>
+      return rows.map(row => ({ ...row, periodEnd: row.periodEnd === null ? null : new Date(row.periodEnd * 1000) }))
+    } }
+}
+
 export function prepareOrganizationPlan(organizationId: string | { sql: string }, now = new Date()) {
   const query = {
     query: `SELECT id, referenceId, plan, status, periodEnd FROM subscription

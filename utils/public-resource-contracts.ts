@@ -107,9 +107,6 @@ export const isPublicShellPayload = (value: unknown): value is PublicShellPayloa
 
 export interface PublicPagePayload<T = Product> {
   kind: string
-  shell: PublicShellPayload
-  content: ApiRecord[]
-  content_blocks: ApiRecord[]
   tenant_page: PublicTenantPage | null
   location_reviews: ApiRecord[]
   global_reviews: ApiRecord[]
@@ -195,11 +192,7 @@ export function isPublicPagePayload<T>(value: unknown, expectedKind: string | nu
 export function isPublicPagePayload<T>(value: unknown, expectedKind?: string | null, validProduct: (value: unknown) => boolean = isPublicProduct): value is PublicPagePayload<T> {
   return isRecord(value)
   && typeof value.kind === 'string'
-  && isPublicShellPayload(value.shell)
   && (!expectedKind || value.kind === expectedKind)
-  && Array.isArray(value.content)
-  && value.content.every(item => isRecord(item) && typeof item.field === 'string')
-  && Array.isArray(value.content_blocks)
   && (value.tenant_page === null || (isRecord(value.tenant_page)
     && typeof value.tenant_page.id === 'string'
     && typeof value.tenant_page.path === 'string'

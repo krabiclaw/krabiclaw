@@ -410,9 +410,10 @@ export async function updateLocation(
   env: CloudflareEnv,
   /** Statements that run first in the same batch: a caller's guard, or the rest of an import this write is part of. */
   writeGuard?: BatchQuery | BatchQuery[],
-  options: { allowHomeActivation?: boolean } = {},
+  options: { allowHomeActivation?: boolean; current?: LocationRecord & { organization_id: string } } = {},
 ) {
-  const existing = await loadLocation(db, organizationId, locationIdOrSlug);
+  if (options.current && (options.current.organization_id !== organizationId || options.current.id !== locationIdOrSlug && options.current.slug !== locationIdOrSlug)) throw new HTTPError({ statusCode: 400, message: 'Location update snapshot does not match its target' })
+  const existing = options.current ?? await loadLocation(db, organizationId, locationIdOrSlug);
   if (!existing) {
     return { status: 404, data: { error: "Location not found.", code: 'LOCATION_NOT_FOUND', field: 'location_id' } };
   }
@@ -581,6 +582,7 @@ export async function updateLocation(
   const expectedUpdatedAt = input.updated_at ?? existing.updated_at;
   const version = { query: 'EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND updated_at = ?)', params: [locationId, organizationId, expectedUpdatedAt] };
   if (!changedFields.length) {
+    if (!preceding.length) return { status: 200, data: { success: true, location: existing } };
     // The caller's statements land only on the row it read, as an update would.
     if (preceding.length) {
       const landed = await executeBatch(db, [{ query: `SELECT CASE WHEN (${version.query}) THEN NULL ELSE json_extract('{}', 'LOCATION_VERSION_CONFLICT') END`, params: version.params }, ...preceding])
@@ -598,13 +600,13 @@ export async function updateLocation(
   // the row it read. With the caller's updated_at in the WHERE, a row that
   // moved since matches nothing and the write is refused rather than applied
   // over someone else's.
-  const runUpdate = async (boundParams: Array<string | number | null>): Promise<boolean> => {
+  const runUpdate = async (boundParams: Array<string | number | null>): Promise<LocationRecord | null> => {
     const statements: BatchQuery[] = [publicResourceCacheInvalidationQuery(organizationId, 'location_updated', version)];
     statements.push({
       query: `
         UPDATE business_locations
         SET ${sets.join(", ")}
-        WHERE id = ? AND organization_id = ? AND (${version.query})
+        WHERE id = ? AND organization_id = ? AND (${version.query}) RETURNING *
       `,
       params: [...boundParams, ...version.params!],
     });
@@ -626,23 +628,28 @@ export async function updateLocation(
     }));
     // An inactive location takes its homes off the live count. Making it
     // active again is guarded by the same home-activation boundary.
-    const results = await executeWithinCapacity(env, db, organizationId, [...preceding, ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
+    const results = await (input.status === undefined
+      ? executeBatch(db, [...preceding, ...statements], { operation: 'Update location fields' })
+      : executeWithinCapacity(env, db, organizationId, [...preceding, ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation }));
     const changed = (results[preceding.length + 1]?.meta?.changes ?? 0) === 1;
     // The saved privacy mode must be visible even if readback or card work fails.
     if (changed) await purgePublicResourceCacheNow(env, organizationId);
-    return changed;
+    if (!changed) return null;
+    const location = results[preceding.length + 1]?.results[0] as LocationRecord | undefined;
+    if (!location) throw new Error('Updated location was not returned');
+    return location;
   };
 
   params.push(locationId, organizationId);
+  let location: LocationRecord | null;
   try {
-    if (!(await runUpdate(params))) return stale;
+    location = await runUpdate(params);
+    if (!location) return stale;
   } catch (error) {
     const refusal = capacityRefusalOf(error);
     if (refusal) return refusal;
     throw error;
   }
-  const location = await loadLocation(db, organizationId, locationId);
-  if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
   if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
   await purgePublicResourceCacheNow(env, organizationId);
   await publishHomes(location.updated_at);

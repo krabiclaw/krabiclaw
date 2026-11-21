@@ -54,6 +54,8 @@ export interface InboxRow {
   kind: InboxThreadKind
   title: string
   avatar_initial: string
+  /** The listing's cover photo; null when the conversation is about no listing or it has none. */
+  image_url: string | null
   channel: InboxChannel
   /** The home or location the conversation is about; null for one with the business itself. */
   home: string | null

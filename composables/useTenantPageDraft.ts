@@ -1,4 +1,5 @@
-import { computed, onMounted, toRaw, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { computed, inject, provide, toRaw, toValue, watch, type InjectionKey, type MaybeRefOrGetter } from 'vue'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { slugifyTitle } from '~/utils/post-slugs'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { TenantPageBlock, TenantPageType } from '~/utils/tenant-page-blocks'
@@ -76,6 +77,8 @@ export interface PageTask {
   image_url?: string | null
 }
 
+export const websiteSettingsKey = (slug: string) => `dashboard-website-settings:${slug}`
+
 function isOptionalString(value: unknown): value is string | null {
   return value === null || value === undefined || typeof value === 'string'
 }
@@ -132,11 +135,6 @@ export function isTenantPageListResponse(value: unknown): value is { pages: Tena
       && typeof page.removable === 'boolean')
 }
 
-function isEditorContextResponse(value: unknown): value is { context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } } } {
-  return isRecord(value) && isRecord(value.context) && typeof value.context.preview_token === 'string' && typeof value.context.source_locale === 'string'
-    && isRecord(value.context.organization)
-}
-
 function emptyDraft(sourceLocale = ''): TenantPageDraft {
   return {
     id: '',
@@ -168,52 +166,36 @@ function toDraft(page: TenantPageResponse): TenantPageDraft {
   }
 }
 
+const tenantPageDraftKey = Symbol('tenant-page-draft') as InjectionKey<ReturnType<typeof createTenantPageDraft>>
+
 export function useTenantPageDraft(organizationId: string, pageId: string) {
+  const current = inject(tenantPageDraftKey, null)
+  if (current?.organizationId === organizationId && current.pageId === pageId) return current
+  const editor = createTenantPageDraft(organizationId, pageId)
+  provide(tenantPageDraftKey, editor)
+  return editor
+}
+
+function createTenantPageDraft(organizationId: string, pageId: string) {
+  const realtime = useDashboardInvalidations()
   const dashboardApi = useDashboardApi()
   const runtimeConfig = useRuntimeConfig()
   const isNew = computed(() => pageId === 'new')
   const key = `tenant-page-${organizationId}-${pageId}`
 
-  // Every level calls this, and Nuxt shares one request and one state per key,
-  // so opening a leaf four levels down costs no fetch the page has not made.
-  // The page level awaits `load`, so every level below renders the loaded page.
-  const load = useAsyncData(
-    key,
-    async () => {
-      const [context, page] = await Promise.all([
-        dashboardApi<{ context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } } }>(
-          `/api/editor/organizations/${organizationId}/context`,
-          { validate: isEditorContextResponse },
-        ),
-        pageId === 'new'
-          ? Promise.resolve(null)
-          : dashboardApi<{ page: TenantPageResponse; public_url: string | null }>(`/api/editor/organizations/${organizationId}/pages/${pageId}`, {
-            validate: (value): value is { page: TenantPageResponse; public_url: string | null } => isTenantPageResponse(value)
-              && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string'),
-          }),
-      ])
-      return { context: context.context, page: page?.page ?? null, public_url: page?.public_url ?? null }
-    },
-    {
-      getCachedData(cacheKey, nuxtApp, ctx) {
-        if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-        return nuxtApp.payload.data[cacheKey] as {
-          context: { preview_token: string; source_locale: string; organization: { subdomain: string | null } }
-          page: TenantPageResponse | null
-          public_url: string | null
-        } | undefined
-      },
-    },
-  )
-  const { data, error } = load
-
-  if (import.meta.client) {
-    onMounted(() => {
-      if (useNuxtApp().payload.data[key]) {
-        void load.refresh()
-      }
+  const settingsKey = websiteSettingsKey(String(useRoute().params.org_slug))
+  const { data: website } = useNuxtData<{ source_locale: string; settings: { subdomain: string | null } }>(settingsKey)
+  type SavedPage = { page: TenantPageResponse | null; public_url: string | null; preview_token: string | null }
+  const load = useWebsiteIndexData<SavedPage>(key, async () => {
+    if (!website.value) throw createError({ statusCode: 500, statusMessage: 'Website settings are unavailable' })
+    if (pageId === 'new') return { page: null, public_url: null, preview_token: null }
+    return dashboardApi(`/api/editor/organizations/${organizationId}/pages/${encodeURIComponent(pageId)}`, {
+      validate: (value): value is SavedPage => isTenantPageResponse(value)
+        && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string')
+        && 'preview_token' in value && (value.preview_token === null || typeof value.preview_token === 'string'),
     })
-  }
+  })
+  const { data, error } = load
 
   const draft = useState<TenantPageDraft>(`${key}-draft`, emptyDraft)
   /** The draft as it was last seeded or committed, so Save knows there is something to save. */
@@ -226,7 +208,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
 
   function seed(page: TenantPageResponse | null) {
     accepted.value = page
-    draft.value = page ? toDraft(page) : emptyDraft(data.value?.context.source_locale)
+    draft.value = page ? toDraft(page) : emptyDraft(website.value?.source_locale)
     baseline.value = JSON.stringify(draft.value)
     seededFrom.value = page?.document.updated_at ?? 'new'
   }
@@ -242,12 +224,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
       accepted.value = value.page
       return
     }
-    // Every level that opens re-reads this key, so a read can still be in
-    // flight when the level above it writes. Landing afterwards, that read is
-    // not an update — it is the page as it was before the write, and seeding it
-    // put the editor back a step: a section created a moment ago was gone from
-    // the draft while its row existed in D1, and the route that had just been
-    // sent to it answered "not found".
+    // A refresh started before a save cannot replace the confirmed document.
     if (stamp !== 'new' && seededFrom.value && seededFrom.value !== 'new' && stamp < seededFrom.value) {
       // And it does not get to sit in `data` either, or revert, the saved-block
       // set and the preview would read the page as it was before the write.
@@ -280,10 +257,10 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
    */
   const previewUrl = computed(() => {
     const page = data.value?.page
-    const token = data.value?.context.preview_token
-    const subdomain = data.value?.context.organization.subdomain
+    const token = data.value?.preview_token
+    const subdomain = website.value?.settings.subdomain
     if (!page || !token || !subdomain) return ''
-    const localizedPath = formatTenantLocalePath(page.path, page.locale, data.value!.context.source_locale)
+    const localizedPath = formatTenantLocalePath(page.path, page.locale, website.value!.source_locale)
     const origin = tenantOrganizationOrigin({
       platformDomain: String(runtimeConfig.public.platformDomain),
       freeOrganizationDomain: String(runtimeConfig.public.freeOrganizationDomain),
@@ -333,10 +310,15 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
       : await dashboardApi<{ page: TenantPageResponse }>(`/api/editor/organizations/${organizationId}/pages`, { method: 'POST', body, validate: isTenantPageResponse })
     if (data.value) data.value = { ...data.value, page: response.page }
     seed(response.page)
+    if (data.value && response.page.id === pageId) {
+      const held = realtime.held.begin(`website:${key}`, businessChanged)
+      realtime.held.hold(held, data.value, Date.now() + 30_000, 16)
+    }
+    void refreshNuxtData(settingsKey)
     return response.page
   }
 
-  return { load, data, error, draft, dirty, revert, commit, isNew, savedBlockIds, previewUrl, publicUrl }
+  return { organizationId, pageId, load, data, error, draft, dirty, revert, commit, isNew, savedBlockIds, previewUrl, publicUrl }
 }
 
 /**

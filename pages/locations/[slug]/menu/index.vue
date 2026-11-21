@@ -1,39 +1,9 @@
 <template>
-  <ProductCollectionPage :products="products" :collections="collections" :locations="productLocations" :location-id="locationId" :currency="currency" :presentation="presentation" :vertical="vertical" :title="`${locationTitle} Menu`" :brand-name="brandName" />
+  <TenantCatalog surface="menu" scoped />
 </template>
 
 <script setup lang="ts">
-import ProductCollectionPage from '~/components/products/ProductCollectionPage.vue'
-import { isPublicMenuProduct } from '~/utils/public-resource-contracts'
-import { isCurrencyCode } from '~/shared/currencies'
-import { presentationForSurface } from '~/utils/product-presentation'
+import TenantCatalog from '~/components/products/TenantCatalog.vue'
 
 definePageMeta({ layout: 'tenant' })
-const { products, collections, locations, location, config, organization } = await usePublicPageData({ datasets: ['location', 'menu_cards'], validateProduct: isPublicMenuProduct })
-const currentLocation = location.value
-if (!currentLocation) throw createError({ statusCode: 404 })
-// A section with nothing on it is not a page; the navigation hides it by the same flag.
-if (!currentLocation.sections.menu) throw createError({ statusCode: 404 })
-const brandName = organization.value?.name
-if (typeof brandName !== 'string' || brandName.trim().length === 0) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
-const vertical = String(organization.value?.vertical ?? '')
-const presentation = presentationForSurface(vertical, 'menu')
-if (presentation.locationCollectionSegment !== 'menu') throw createError({ statusCode: 404 })
-const rawCurrency = config.value.default_currency
-if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMessage: 'Unsupported organization currency' })
-const currency = rawCurrency
-const locationId = currentLocation.id
-const locationTitle = currentLocation.title
-const productLocations = computed(() => locations.value.map(item => ({ id: item.id, slug: item.slug, title: item.title, sections: item.sections })))
-useSocialMetadata(() => ({
-  path: `/locations/${encodeURIComponent(currentLocation.slug)}/menu`,
-  title: `${locationTitle} Menu`,
-  description: `Full menu for ${locationTitle}.`,
-  socialImage: location.value?.social_image ?? null,
-  breadcrumbs: [
-    { name: 'Locations', url: '/locations' },
-    { name: locationTitle, url: `/locations/${encodeURIComponent(currentLocation.slug)}` },
-    { name: 'Menu', url: `/locations/${encodeURIComponent(currentLocation.slug)}/menu` },
-  ],
-}))
 </script>

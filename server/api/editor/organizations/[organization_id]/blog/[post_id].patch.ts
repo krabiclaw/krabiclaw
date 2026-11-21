@@ -1,8 +1,7 @@
 import { jsonResponse } from "~/server/utils/api-response";
-import { requireBlogAccess } from "~/server/utils/blog-access";
-import { updateBlogPost, type PlatformBlogUpdateInput } from "~/server/utils/content/publishing";
+import { requireWebsiteAccess, websiteEditorOrganization } from "~/server/utils/tenant-pages-api";
+import { prepareBlogPost, updateBlogPost, type PlatformBlogUpdateInput } from "~/server/utils/content/publishing";
 import { httpErrorDetails } from "~/server/utils/http-error";
-import { finalizeRequestMetrics } from "~/server/utils/request-metrics";
 
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, "organization_id");
@@ -25,12 +24,13 @@ export default defineHandler(async (event) => {
   }
 
   try {
-    const { env, db, session } = await requireBlogAccess(event, organizationId);
+    const article = prepareBlogPost(postId, websiteEditorOrganization);
+    const { env, db, userId, rows } = await requireWebsiteAccess(event, organizationId, article.queries);
 
-    const result = await updateBlogPost(db, postId, body as PlatformBlogUpdateInput, organizationId, session.user.id, env);
+    const result = await updateBlogPost(db, postId, body as PlatformBlogUpdateInput, organizationId, userId, env, article.snapshot(rows));
 
     const payload = { success: true, changed: result.changed, post: result.post };
-    return jsonResponse(finalizeRequestMetrics(event, 'editor-blog-post-update', payload));
+    return jsonResponse(payload);
   } catch (error) {
     console.error("Failed to update blog post:", error);
     const { message, statusCode } = httpErrorDetails(error, "Failed to update blog post");

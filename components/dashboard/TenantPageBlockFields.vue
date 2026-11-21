@@ -28,7 +28,7 @@
 import TenantPageFieldControl from '~/components/dashboard/TenantPageFieldControl.vue'
 import { validateTenantPageBlock } from '~/utils/tenant-page-editor'
 import { tenantPageBlockFieldsForSection } from '~/utils/tenant-page-block-sections'
-import { isTenantPageListResponse, type TenantPageListRow } from '~/composables/useTenantPageDraft'
+import { websiteSettingsKey, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import { isRecord } from '~/utils/api-clients'
 import type { TenantPageField } from '~/utils/tenant-page-blocks'
 
@@ -62,7 +62,6 @@ const validationErrors = computed(() => validateTenantPageBlock(block.value))
 // ── Records a reference field may point at ──────────────
 const dashboard = useDashboardOrganization()
 
-const needsPages = computed(() => fields.value.some(entry => entry.field.reference === 'page'))
 const needsProducts = computed(() => fields.value.some(entry => entry.field.reference === 'product' || entry.field.reference === 'collection'))
 
 interface NamedRow { id: string; name: string }
@@ -73,11 +72,7 @@ const isProductsResponse = (value: unknown): value is { products: NamedRow[] } =
   isRecord(value) && Array.isArray(value.products)
     && value.products.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.name === 'string')
 
-const { data: pagesData } = await useAsyncData(
-  () => `tenant-page-options-${props.organizationId}`,
-  () => useDashboardApi()(`/api/editor/organizations/${props.organizationId}/pages`, { validate: isTenantPageListResponse }),
-  { immediate: needsPages.value, watch: [needsPages], default: () => null },
-)
+const { data: pagesData } = useNuxtData<{ pages: TenantPageListRow[] }>(websiteSettingsKey(String(useRoute().params.org_slug)))
 
 const { data: collectionsData } = await useAsyncData(
   () => `tenant-page-collections-${props.organizationId}`,

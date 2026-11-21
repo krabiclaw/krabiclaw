@@ -8,7 +8,7 @@
           <h2 class="text-sm font-semibold text-muted">{{ scope.title }}</h2>
           <UButton v-if="scope.chooseTo" :to="scope.chooseTo" label="Edit this menu" size="sm" color="neutral" variant="link" />
         </div>
-        <CollectionList :scope="scope.id" :read-only="scope.readOnly" />
+        <CollectionList :catalog="catalog" :scope="scope.id" :read-only="scope.readOnly" />
       </section>
       <!-- A dish in no section is still on the menu's page, so it can be found and placed. -->
       <section v-if="unsectioned.length" data-testid="menu-unsectioned">
@@ -30,13 +30,13 @@ const router = useRouter()
 const level = useRouteLevel()
 const organizationId = useDashboardOrganizationId()
 const locationId = useLocationScope()
-const catalog = useProductCatalog(organizationId, locationId)
+const catalog = useProductCatalog(organizationId, locationId, true, true)
 await catalog.load
 const { locations, error: locationsError } = await useOrganizationLocations({ includeInactive: true })
 const { priceLabel } = useCatalogPrice(locationId, locations)
 const unsectioned = computed(() => {
   const visibleSections = new Set(catalog.collections.value.filter(collection => !locationId.value || collection.location_id === null || collection.location_id === locationId.value).map(collection => collection.id))
-  return catalog.products.value.filter(product => product.kind === 'dish' && !product.collections.some(membership => visibleSections.has(membership.collection_id)))
+  return catalog.products.value.filter(product => !product.collections.some(membership => visibleSections.has(membership.collection_id)))
 })
 
 watchEffect(() => {

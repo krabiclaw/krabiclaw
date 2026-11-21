@@ -155,7 +155,7 @@
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium text-highlighted">{{ article.title }}</p>
                 <p class="truncate text-xs text-muted mt-0.5">
-                  {{ articleSubtitle(article) }}
+                  {{ contentSubtitle(article) }}
                 </p>
               </div>
             </div>
@@ -197,20 +197,12 @@
               class="flex items-center gap-3.5"
             >
               <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#F7F7F7] dark:bg-neutral-800">
-                <img
-                  v-if="post.cover_image_url"
-                  :src="post.cover_image_url"
-                  alt=""
-                  class="size-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <UIcon v-else name="i-lucide-megaphone" class="size-5 text-muted opacity-70" />
+                <UIcon name="i-lucide-megaphone" class="size-5 text-muted opacity-70" />
               </span>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium text-highlighted">{{ post.title }}</p>
                 <p class="truncate text-xs text-muted mt-0.5">
-                  {{ postSubtitle(post) }}
+                  {{ contentSubtitle(post) }}
                 </p>
               </div>
             </div>
@@ -232,6 +224,7 @@
       <!-- Booking Settings Card (Airbnb Parity) -->
       <div v-if="surface === 'settings'" class="mb-6">
         <NuxtLink
+        prefetch-on="interaction"
           :to="`${settingsPath}/booking`"
           class="block w-full text-left rounded-3xl p-6 bg-white dark:bg-neutral-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_6px_28px_rgba(0,0,0,0.09)] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           :class="{ 'ring-2 ring-highlighted': isBookingActive }"
@@ -283,7 +276,6 @@
         </div>
       </div>
 
-      <UAlert v-if="preferencesError" color="error" variant="soft" :description="getErrorMessage(preferencesError, 'Preferences could not be loaded')" />
       <EditorNavigationList :groups="navigationGroups" :active-item="detailKey" />
 
       <!-- Airbnb Parity: Featured Brand ("About the business") card -->
@@ -435,7 +427,7 @@
   </UModal>
 
   <!-- Page Tasks Modal (Airbnb Parity) -->
-  <PageTasksModal v-model="pageTasksModalOpen" :tasks="pageTasks" @dismiss="dismissPageTask" />
+  <PageTasksModal v-if="pageTasksModalOpen" v-model="pageTasksModalOpen" :tasks="pageTasks" @dismiss="dismissPageTask" />
 
   <!-- Translating the brand is a row on the Brand list; this is the sheet it opens. -->
   <DashboardResourceLocalization
@@ -494,19 +486,22 @@ export interface OrganizationSettingsForm {
 export type OrganizationStatus = 'active' | 'inactive' | 'suspended'
 
 export interface OrganizationSettingsResponse {
+  id: string
+  subdomain: string | null
+  timezone: string
   theme?: string
-  public_url?: string | null
+  public_url: string | null
   status: OrganizationStatus
-  name?: string | null
+  name: string
   social_card_refresh: OrganizationSocialCardRefresh | null
   brand_description?: string | null
   announcement: { headline: string; description: string | null; cta_label: string | null; cta_url: string | null; dismissible: boolean; enabled: boolean; format?: 'modal' | 'banner' | null } | null
-  media?: Array<{ asset_id: string; slot: string; public_url?: string | null; presentation?: LogoPresentation | null }>
+  media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null; presentation?: LogoPresentation | null }>
   contact_email?: string | null
   palette: SitePalette | null
   palette_source: 'custom' | 'default' | null
   font_preset?: OrganizationFontPreset
-  default_currency?: string | null
+  default_currency: string
   seo_title: string | null
   seo_description: string | null
   canonical_url: string | null
@@ -550,7 +545,7 @@ export interface OrganizationSettingsEditor {
   consultationMode: ComputedRef<OrganizationSettingsResponse['consultation_mode']>
   lodgingBookingChoices: ComputedRef<LodgingBookingChoice[]>
   /** The saved logo assets' URLs, for previews before a new pick is saved. */
-  logoUrl: (assetId: string | null) => string | null
+  mediaSummary: (assetId: string | null) => NonNullable<OrganizationSettingsResponse['media']>[number] | null
   revert: () => void
   save: () => Promise<void>
   /** The inquiry form's saved questions, or null until the settings have loaded. */
@@ -570,12 +565,14 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette } from '~/shared/site-palette'
 import { getErrorMessage } from '~/utils/errors'
-import { ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
-import PageTasksModal from '~/components/dashboard/PageTasksModal.vue'
-import { isTenantPageListResponse, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
+import { needsWebsiteSettings } from '~/utils/dashboard-document'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
+import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
+import { isTenantPageListResponse, websiteSettingsKey, type PageTask, type TenantPageListRow } from '~/composables/useTenantPageDraft'
 import { getVerticalLabel } from '~/utils/vertical-copy'
-import type { BlogPost } from '~/lib/components/workspace/blog/types'
-import type { CatalogScreen } from '~/shared/catalog-screen'
+import { websitePreferencesRows } from '~/shared/organization-settings'
+
+const PageTasksModal = defineAsyncComponent(() => import('~/components/dashboard/PageTasksModal.vue'))
 
 const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' | 'preferences' }>(), { surface: 'settings' })
 const surface = computed(() => props.surface)
@@ -583,6 +580,7 @@ const dashboardApi = useDashboardApi()
 const route = useRoute()
 const editorError = ref<string | null>(null)
 const dashboard = useDashboardOrganization()
+const realtime = useDashboardInvalidations()
 const organizationDashboardPath = computed(() => `/dashboard/${String(route.params.org_slug)}`)
 const brandPath = computed(() => `${organizationDashboardPath.value}/website/brand`)
 const preferencesPath = computed(() => `${organizationDashboardPath.value}/website/preferences`)
@@ -602,14 +600,38 @@ const level = useRouteLevel()
 
 const organizationId = useDashboardOrganizationId()
 
+interface ContentCard {
+  id: string
+  title: string | null
+  status: string
+  published_at: string | null
+  total: number
+  cover?: { public_url: string | null; thumbnail_url: string | null } | null
+  category?: { name: string } | null
+}
+
 interface SettingsPageResource {
-  settings: { success: boolean; settings: OrganizationSettingsResponse }
+  success: boolean
+  settings: OrganizationSettingsResponse
+  pages: TenantPageListRow[]
+  tasks?: PageTask[]
+  articles: ContentCard[]
+  posts: ContentCard[]
+  source_locale: string
 }
 
 const isSettingsResponse = (value: unknown): value is { success: boolean; settings: OrganizationSettingsResponse } =>
   isRecord(value) && typeof value.success === 'boolean' && isRecord(value.settings)
+  && typeof value.settings.id === 'string' && typeof value.settings.name === 'string'
+  && typeof value.settings.timezone === 'string' && typeof value.settings.default_currency === 'string'
+  && (value.settings.subdomain === null || typeof value.settings.subdomain === 'string')
+  && (value.settings.public_url === null || typeof value.settings.public_url === 'string')
+  && Array.isArray(value.settings.media) && value.settings.media.every(item => isRecord(item)
+    && typeof item.asset_id === 'string' && typeof item.slot === 'string'
+    && (item.public_url === null || typeof item.public_url === 'string')
+    && (item.thumbnail_url === null || typeof item.thumbnail_url === 'string')
+    && (item.kind === null || typeof item.kind === 'string'))
   && (value.settings.social_card_refresh === null || isOrganizationSocialCardRefresh(value.settings.social_card_refresh))
-  && (value.settings.name === undefined || value.settings.name === null || typeof value.settings.name === 'string')
   && (value.settings.announcement === null || (isRecord(value.settings.announcement) && typeof value.settings.announcement.headline === 'string'))
   && (value.settings.font_preset === undefined || isOrganizationFontPreset(value.settings.font_preset))
   && (value.settings.palette === null || isRecord(value.settings.palette))
@@ -710,14 +732,9 @@ const isBookingActive = computed(() => route.path.startsWith(`${settingsPath.val
 const pageTasksModalOpen = ref(false)
 const dismissedPageTaskIds = ref<Set<string>>(new Set())
 
-const { data: pagesResource } = await useAsyncData(
-  `tenant-pages-summary:${String(organizationId)}`,
-  () => dashboardApi<{ pages: TenantPageListRow[]; tasks?: PageTask[] }>(`/api/editor/organizations/${organizationId}/pages`, { validate: isTenantPageListResponse }),
-)
-
-const pagesList = computed(() => pagesResource.value?.pages ?? [])
+const pagesList = computed(() => settingsResource.value?.pages ?? [])
 const pageTasks = computed<PageTask[]>(() => {
-  const all = pagesResource.value?.tasks ?? []
+  const all = settingsResource.value?.tasks ?? []
   return all.filter(t => !dismissedPageTaskIds.value.has(t.id))
 })
 
@@ -751,72 +768,19 @@ const isPagesActive = computed(() => route.path.startsWith(pagesPath.value))
 const isBlogActive = computed(() => route.path.startsWith(blogPath.value))
 const isPostsActive = computed(() => route.path.startsWith(postsPath.value))
 
-const isBlogSummaryResponse = (value: unknown): value is { posts: BlogPost[] } =>
-  isRecord(value) && Array.isArray(value.posts)
+const blogPreviewItems = computed(() => settingsResource.value?.articles ?? [])
+const blogRemainingCount = computed(() => Math.max(0, (blogPreviewItems.value[0]?.total ?? 0) - 3))
 
-interface PostSummaryItem {
-  id: string
-  title: string
-  status: string
-  published_at?: string | null
-  cover_image_url?: string | null
-  channels?: string[]
-}
-
-const isPostsSummaryResponse = (value: unknown): value is { posts: PostSummaryItem[] } =>
-  isRecord(value) && Array.isArray(value.posts)
-
-const { data: blogResource } = await useAsyncData(
-  `tenant-blog-summary:${String(organizationId)}`,
-  () => dashboardApi<{ posts: BlogPost[] }>(`/api/editor/organizations/${organizationId}/blog/posts`, {
-    query: { limit: 50 },
-    validate: isBlogSummaryResponse,
-  }).catch(() => ({ posts: [] })),
-)
-
-const { data: postsResource } = await useAsyncData(
-  `tenant-posts-summary:${String(organizationId)}`,
-  () => dashboardApi<{ posts: PostSummaryItem[] }>(`/api/editor/organizations/${organizationId}/posts`, {
-    query: { limit: 50 },
-    validate: isPostsSummaryResponse,
-  }).catch(() => ({ posts: [] })),
-)
-
-const blogPreviewItems = computed(() => blogResource.value?.posts?.slice(0, 3) ?? [])
-const blogRemainingCount = computed(() => Math.max(0, (blogResource.value?.posts?.length ?? 0) - 3))
-
-const postPreviewItems = computed(() => postsResource.value?.posts?.slice(0, 3) ?? [])
-const postRemainingCount = computed(() => Math.max(0, (postsResource.value?.posts?.length ?? 0) - 3))
+const postPreviewItems = computed(() => settingsResource.value?.posts ?? [])
+const postRemainingCount = computed(() => Math.max(0, (postPreviewItems.value[0]?.total ?? 0) - 3))
 
 const reviewsPath = computed(() => dashboard.organizationPaths.value?.reviews ?? `${organizationDashboardPath.value}/website/reviews`)
 
-function articleSubtitle(article: BlogPost) {
-  const parts: string[] = []
-  if (article.status === 'draft') parts.push('Draft')
-  else if (article.published_at) {
-    parts.push('Published')
-    parts.push(new Date(article.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
-  } else {
-    parts.push('Published')
-  }
-  if (article.category?.name) parts.push(article.category.name)
-  return parts.join(' · ')
-}
-
-function postSubtitle(post: PostSummaryItem) {
-  const parts: string[] = []
-  if (post.status === 'draft') parts.push('Draft')
-  else if (post.published_at) {
-    parts.push('Published')
-    parts.push(new Date(post.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
-  } else {
-    parts.push('Published')
-  }
-  const channels = Array.isArray(post.channels) ? post.channels.filter((c): c is string => typeof c === 'string' && c.length > 0) : []
-  const firstChannel = channels[0]
-  if (channels.length === 1 && firstChannel) parts.push(firstChannel)
-  else if (channels.length > 1) parts.push(`${channels.length} channels`)
-  return parts.join(' · ')
+function contentSubtitle(card: ContentCard) {
+  const date = card.published_at
+    ? new Date(card.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : null
+  return [card.status === 'draft' ? 'Draft' : 'Published', date, card.category?.name].filter(Boolean).join(' · ')
 }
 
 const settingsItems = computed<EditorNavigationItem[]>(() => [])
@@ -847,7 +811,7 @@ const bookingCardSubtitle = computed(() => {
 })
 
 const brandLogoUrl = computed(() => {
-  if (form.logoAssetId) return logoUrl(form.logoAssetId)
+  if (form.logoAssetId) return mediaSummary(form.logoAssetId)?.public_url ?? null
   return loadedSettings.value?.media?.find(item => item.slot === 'logo')?.public_url
     ?? dashboard.organization.value?.media?.find(item => item.slot === 'logo')?.public_url
     ?? null
@@ -882,17 +846,8 @@ const brandYearsActive = computed(() => {
   return Math.max(1, diff)
 })
 
-const { data: preferences, error: preferencesError, refresh: refreshPreferences } = await useAsyncData(
-  `website-preferences:${organizationId}:${surface.value}`,
-  () => surface.value === 'preferences'
-    ? dashboardApi('/api/dashboard/offering', {
-        query: { view: 'website-preferences' },
-        validate: (value): value is CatalogScreen => isRecord(value) && Array.isArray(value.rows)
-          && value.rows.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.label === 'string'),
-      })
-    : Promise.resolve(null),
-)
-const preferencesItems = computed(() => (preferences.value?.rows ?? []).filter(row => row.to))
+const preferencesItems = computed(() => loadedSettings.value
+  ? websitePreferencesRows(String(route.params.org_slug), loadedSettings.value).filter(row => row.to) : [])
 
 const navigationGroups = computed(() => {
   if (surface.value === 'brand') return [{ id: 'brand', items: brandItems.value }]
@@ -1006,19 +961,22 @@ function resetDraft() {
   originalSignature.value = editorSignature(detailKey.value)
 }
 
-const settingsResourceKey = computed(() => `dashboard-organization-settings:${String(route.params.org_slug)}`)
-const { data: settingsResource, error: settingsResourceError, refresh: refreshSettingsResource } = await useAsyncData<SettingsPageResource>(settingsResourceKey, async () => {
-  const [settings] = await Promise.all([
-    dashboardApi<{ success: boolean; settings: OrganizationSettingsResponse }>('/api/dashboard/settings', { validate: isSettingsResponse }),
-  ])
-  return { settings }
+const readsSettings = computed(() => surface.value !== 'settings' || needsWebsiteSettings(route.path.replace(/^\/dashboard\/[^/]+/, '')))
+const settingsResourceKey = computed(() => `${websiteSettingsKey(String(route.params.org_slug))}${readsSettings.value ? '' : ':closed'}`)
+const { data: settingsResource, error: settingsResourceError, refresh: refreshSettingsResource } = await useWebsiteIndexData(settingsResourceKey, () => dashboardApi('/api/dashboard/settings', {
+    query: { view: 'website' },
+    validate: (value): value is SettingsPageResource => isSettingsResponse(value) && isTenantPageListResponse(value)
+      && 'articles' in value && Array.isArray(value.articles) && 'posts' in value && Array.isArray(value.posts)
+      && 'source_locale' in value && typeof value.source_locale === 'string',
+  }), { enabled: readsSettings })
+const loadedSettings = computed(() => settingsResource.value?.settings ?? null)
+const loadError = computed(() => {
+  const error = settingsResourceError.value
+  return error ? getErrorMessage(error, 'Failed to load website') : null
 })
-// The saved settings are what the request answered; the form is the draft seeded from each answer.
-const loadedSettings = computed(() => settingsResource.value?.settings.settings ?? null)
-const loadError = computed(() => settingsResourceError.value ? getErrorMessage(settingsResourceError.value, 'Failed to load organization settings') : null)
 watch(settingsResource, (resource) => {
   if (!resource) return
-  fillForm(resource.settings.settings)
+  fillForm(resource.settings)
   originalSignature.value = editorSignature(detailKey.value)
 }, { immediate: true })
 watch(detailKey, () => resetDraft())
@@ -1027,11 +985,21 @@ async function patchSettings(body: Record<string, unknown>) {
   const response = await dashboardApi<{ success: boolean; settings: OrganizationSettingsResponse }>('/api/dashboard/settings', { method: 'PATCH', body, validate: isSettingsResponse })
   // Website and Brand read the same settings resource; writing the response
   // through it keeps the other list's rows on the saved values.
-  settingsResource.value = { settings: response }
-  await dashboard.refresh()
-  if (surface.value === 'preferences') {
-    await refreshPreferences()
-    if (preferencesError.value) throw preferencesError.value
+  if (settingsResource.value) {
+    settingsResource.value = { ...settingsResource.value, settings: response.settings }
+    const held = realtime.held.begin(`website:${settingsResourceKey.value}`, businessChanged)
+    realtime.held.hold(held, settingsResource.value, Date.now() + 30_000, 16)
+  }
+  const current = dashboard.state.value
+  const saved = response.settings
+  if (current?.organization.id === saved.id) {
+    useNuxtData<NonNullable<typeof current>>(dashboard.contextKey.value).data.value = { ...current, organization: {
+      ...current.organization, name: saved.name, status: saved.status,
+      default_currency: saved.default_currency, timezone: saved.timezone,
+      subdomain: saved.subdomain, public_url: saved.public_url,
+      media: saved.media.filter(item => LOGO_SLOTS.includes(item.slot as typeof LOGO_SLOTS[number]))
+        .map(item => ({ ...item, presentation: item.presentation ?? ORIGINAL_LOGO_PRESENTATION })),
+    }, workspaces: current.workspaces.map(workspace => workspace.id === saved.id ? { ...workspace, name: saved.name } : workspace) }
   }
 }
 async function refreshSettings() {
@@ -1066,8 +1034,8 @@ async function resetPalette() {
   editorError.value = null
   try { await patchSettings({ palette: null }) } catch (error) { editorError.value = getErrorMessage(error, 'Failed to reset the colors') } finally { saving.value = false }
 }
-function logoUrl(assetId: string | null) {
-  return assetId ? loadedSettings.value?.media?.find(item => item.asset_id === assetId)?.public_url ?? null : null
+function mediaSummary(assetId: string | null) {
+  return assetId ? loadedSettings.value?.media?.find(item => item.asset_id === assetId) ?? null : null
 }
 async function saveCurrentEditor() {
   if (saveDisabled.value || !detailKey.value) return
@@ -1148,7 +1116,7 @@ provide(organizationSettingsEditorKey, {
   resetPalette,
   consultationMode: computed(() => loadedSettings.value?.consultation_mode ?? null),
   lodgingBookingChoices: computed(() => loadedSettings.value?.lodging_booking_choices ?? []),
-  logoUrl,
+  mediaSummary,
   // A cancelled leaf puts the loaded settings back before it closes.
   revert: resetDraft,
   save: saveCurrentEditor,

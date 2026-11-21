@@ -19,9 +19,12 @@ export const listingGrantsSchema = z.array(z.object({
 }).strict()).max(100)
 export type ListingGrant = z.infer<typeof listingGrantsSchema>[number]
 
-export function assertStaffRole(vertical: string | null, role: string): OrganizationRole {
-  const allowed = rolesForVertical(vertical).find(value => value === role)
-  if (!allowed) throw new APIError('BAD_REQUEST', { code: 'INVALID_WORKSPACE_ROLE', message: 'Choose a role available for this workspace.' })
+/** Better Auth stores a member's roles as one comma-separated string; each must be this workspace's. */
+export function assertStaffRoles(vertical: string | null, role: string): OrganizationRole[] {
+  const available = rolesForVertical(vertical)
+  const roles = [...new Set(role.split(',').map(value => value.trim()))]
+  const allowed = roles.flatMap(value => available.filter(candidate => candidate === value))
+  if (!roles.length || allowed.length !== roles.length) throw new APIError('BAD_REQUEST', { code: 'INVALID_WORKSPACE_ROLE', message: 'Choose roles available for this workspace.' })
   return allowed
 }
 
@@ -32,12 +35,22 @@ export function staffListingsQuery(organizationSql: string, verticalSql: string,
     ORDER BY lower(label), p.id`, params }
 }
 
+export function listingAccessGrantsQuery(organization: string | { sql: string }, listingId: string): BatchQuery {
+  return { query: `SELECT member_id, access FROM listing_message_members
+    WHERE organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND listing_id = ? ORDER BY member_id`,
+    params: [...(typeof organization === 'string' ? [organization] : []), listingId] }
+}
+
+export function listingAccessGrantsFromRows(rows: unknown[]) {
+  return rows as Array<{ member_id: string; access: StoredListingAccess }>
+}
+
 export async function staffListings(db: DbClient, organization: { id: string; vertical: string | null }) {
   const query = staffListingsQuery('?', '?', [organization.id, organization.vertical])
   return queryAll<{ listing_id: string; label: string }>(db, query.query, query.params)
 }
 
-export async function validateInvitationGrants(db: DbClient, organization: { id: string; vertical: string | null }, role: OrganizationRole, stored: unknown) {
+export async function validateInvitationGrants(db: DbClient, organization: { id: string; vertical: string | null }, roles: OrganizationRole[], stored: unknown) {
   if (stored == null) return
   const invalid = () => new APIError('BAD_REQUEST', { code: 'INVALID_LISTING_ACCESS', message: 'Choose eligible listings and access for this role.' })
   if (typeof stored !== 'string') throw invalid()
@@ -46,7 +59,7 @@ export async function validateInvitationGrants(db: DbClient, organization: { id:
   const parsed = listingGrantsSchema.safeParse(value)
   if (!parsed.success) throw invalid()
   const distinct = new Set(parsed.data.map(grant => grant.listing_id))
-  if (distinct.size !== parsed.data.length || parsed.data.some(grant => !organizationRoleCards[role].access.includes(grant.access))) throw invalid()
+  if (distinct.size !== parsed.data.length || parsed.data.some(grant => !roles.some(role => organizationRoleCards[role].access.includes(grant.access)))) throw invalid()
   if (!distinct.size) return
   const kind = organization.vertical && listingKinds[organization.vertical]
   const rows = await queryAll<{ id: string }>(db, `SELECT id FROM products

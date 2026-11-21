@@ -109,7 +109,6 @@ export async function getStaffInviteScreen(env: CloudflareEnv, db: DbClient, org
     no_access_label: 'No additional access',
     save_label: 'Send invite',
     resend_label: 'Resend invite',
-    default_role: 'member',
     roles,
     listings: enabled ? await staffListings(db, organization) : [],
   }

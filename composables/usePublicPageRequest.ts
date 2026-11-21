@@ -27,167 +27,45 @@ export interface PublicPageRequest {
   locale: string | null;
 }
 
-export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "locale"> {
+const siteDatasets: Record<string, readonly PublicPageDataset[]> = {
+  home: ['content', 'location', 'products'],
+  locations: ['location'],
+  about: ['content'],
+  contact: ['content'],
+  reservations: ['content', 'products'],
+  qa: ['qa'],
+  reviews: ['reviews'],
+  posts: [],
+  photos: ['photos'],
+  menu: ['products'],
+  products: ['products'],
+  experiences: ['products'],
+  stays: ['products'],
+  blog: [],
+}
+const locationDatasets: Record<string, readonly PublicPageDataset[]> = {
+  location: ['content', 'location', 'products', 'reviews'],
+  contact: ['content', 'location'],
+  products: ['location', 'products'],
+  experiences: ['location', 'products'],
+  menu: ['location', 'products'],
+  reviews: ['location', 'reviews'],
+  photos: ['location', 'photos'],
+  qa: ['location', 'qa'],
+}
 
-  // Location sub-pages: /locations/[slug]/*
-  const locationMatch = path.match(/^\/locations\/([^/]+)/);
-  if (locationMatch) {
-    const slug = locationMatch[1];
-    const segments = path.split("/");
-    const sub = segments.length > 3 ? segments[3] : undefined;
-    const page = sub || "location";
-    const fullData =
-      page === "reviews" || page === "photos" || page === "qa"
-        ? page
-        : null;
-    return {
-      page,
-      location: slug ?? null,
-      datasets: [
-        ...(page === 'location' || page === 'contact' ? ['content'] as const : []),
-        'location',
-        ...(page === 'location' || page === 'menu' || page === 'products' || page === 'experiences' ? ['products'] as const : []),
-        ...(page === "location" ? ['reviews'] as const : []),
-        ...(fullData ? [fullData] as PublicPageDataset[] : []),
-      ],
-      blogSlug: null,
-    };
+export function getPublicPageRequest(path: string): Omit<PublicPageRequest, 'locale'> {
+  const [, root, slug, sub] = path.split('/')
+  if (root === 'locations' && slug) {
+    const page = sub || 'location'
+    return { page, location: slug, datasets: Object.hasOwn(locationDatasets, page) ? locationDatasets[page]! : ['location'], blogSlug: null }
   }
-
-  // Blog post detail: /blog/[slug] — single segment only. Deeper paths like
-  // /blog/[category]/[slug] belong to pages/blog/[category]/[slug].vue and
-  // must not be captured here, or the wrong segment ends up as blogSlug.
-  const blogMatch = path.match(/^\/blog\/([^/]+)\/?$/);
-  if (blogMatch) {
-    return {
-      page: "blog",
-      location: null,
-      datasets: ['blog_post'],
-      blogSlug: blogMatch[1] ?? null,
-    };
+  if (slug && /^\/(?:blog|article)\/[^/]+\/?$/.test(path)) {
+    return { page: 'blog', location: null, datasets: ['blog_post'], blogSlug: slug }
   }
-
-  const articleMatch = path.match(/^\/article\/([^/]+)\/?$/);
-  if (articleMatch) {
-    return {
-      page: "blog",
-      location: null,
-      datasets: ['blog_post'],
-      blogSlug: articleMatch[1] ?? null,
-    };
-  }
-
-  // Top-level pages
-  if (path === "/" || path === "")
-    return {
-      page: "home",
-      location: null,
-      datasets: ['content', 'location', 'products'],
-      blogSlug: null,
-    };
-  if (path.startsWith("/locations"))
-    return {
-      page: "locations",
-      location: null,
-      datasets: ['location'],
-      blogSlug: null,
-    };
-  if (path.startsWith("/about"))
-    return {
-      page: "about",
-      location: null,
-      datasets: ['content'],
-      blogSlug: null,
-    };
-  if (path.startsWith("/contact"))
-    return {
-      page: "contact",
-      location: null,
-      datasets: ['content'],
-      blogSlug: null,
-    };
-  if (path.startsWith("/reservations"))
-    return {
-      page: "reservations",
-      location: null,
-      datasets: ['content', 'products'],
-      blogSlug: null,
-    };
-  if (path.startsWith("/qa"))
-    return {
-      page: "qa",
-      location: null,
-      datasets: ['qa'],
-      blogSlug: null,
-    };
-  if (path.startsWith("/reviews"))
-    return {
-      page: "reviews",
-      location: null,
-      datasets: ['reviews'],
-      blogSlug: null,
-    };
-  if (path.startsWith("/posts"))
-    return {
-      page: "posts",
-      location: null,
-      datasets: [],
-      blogSlug: null,
-    };
-  if (path.startsWith("/photos"))
-    return {
-      page: "photos",
-      location: null,
-      datasets: ['photos'],
-      blogSlug: null,
-    };
-  if (path === "/menu" || path.startsWith("/menu/"))
-    return {
-      page: "menu",
-      location: null,
-      datasets: ['products'],
-      blogSlug: null,
-    };
-  if (path === '/products' || path.startsWith('/products/'))
-    return {
-      page: 'products',
-      location: null,
-      datasets: ['products'],
-      blogSlug: null,
-    };
-  // Experiences are their own surface on every vertical that sells products: a
-  // restaurant reaches /menu and /experiences, a studio /products and
-  // /experiences. An Experience's own page is site-wide, so /experiences/<slug>
-  // reads the same dataset as its collection.
-  if (path === '/experiences' || path.startsWith('/experiences/'))
-    return {
-      page: 'experiences',
-      location: null,
-      datasets: ['products'],
-      blogSlug: null,
-    };
-  // A home's page is site-wide too, so /stays/<slug> reads its collection's dataset.
-  if (path === '/stays' || path.startsWith('/stays/'))
-    return {
-      page: 'stays',
-      location: null,
-      datasets: ['products'],
-      blogSlug: null,
-    };
-  if (path === "/blog" || path === "/blog/")
-    return {
-      page: "blog",
-      location: null,
-      datasets: [],
-      blogSlug: null,
-    };
-
-    return {
-      page: null,
-      location: null,
-      datasets: [],
-      blogSlug: null,
-    };
+  const section = root || 'home'
+  const page = Object.hasOwn(siteDatasets, section) ? section : null
+  return { page, location: null, datasets: page ? siteDatasets[page]! : [], blogSlug: null }
 }
 
 export const usePublicPageRequest = () => {
@@ -212,7 +90,6 @@ export const usePublicPageRequest = () => {
     const request = getPublicPageRequest(localePath.sourcePath)
     return {
       ...request,
-      datasets: request.datasets,
       locale: localePath.localeSegment,
     }
   });
@@ -226,13 +103,12 @@ export const usePublicPageRequest = () => {
 const encodeKeyField = (value: string | null | undefined): string =>
   encodeURIComponent(value ?? "").replace(/~/g, '%7E');
 
-export const usePublicResourceKey = (
-  resourceKind: 'shell' | 'page',
+export const usePublicPageKey = (
   organizationId: string,
   params: PublicPageRequest,
 ) =>
   [
-    resourceKind,
+    'page',
     encodeKeyField(organizationId),
     encodeKeyField(params.page),
     encodeKeyField(params.location),
@@ -243,7 +119,6 @@ export const usePublicResourceKey = (
 
 export const buildPublicPageUrl = (
   params: PublicPageRequest,
-  resourceKind: 'shell' | 'page' = 'page',
 ) => {
   const qs = new URLSearchParams();
   if (params.page) qs.set("page", params.page);
@@ -252,5 +127,5 @@ export const buildPublicPageUrl = (
   if (params.blogSlug) qs.set("blogSlug", params.blogSlug);
   if (params.locale) qs.set('locale', params.locale)
   const q = qs.toString();
-  return `/api/public/${resourceKind}${q ? `?${q}` : ""}`;
+  return `/api/public/page${q ? `?${q}` : ""}`;
 };

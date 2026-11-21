@@ -53,3 +53,14 @@ export const isOrganizationTestimonial = (value: unknown): value is Organization
 
 export const isTestimonialsResponse = (value: unknown): value is { reviews: OrganizationTestimonial[] } =>
   isRecord(value) && Array.isArray(value.reviews) && value.reviews.every(isOrganizationTestimonial)
+
+export function useDashboardReviews(organizationId: string, location: Readonly<{ value: string | null }>) {
+  const dashboardApi = useDashboardApi()
+  return useWebsiteIndexData(
+    () => `dashboard-reviews:${organizationId}:${location.value ?? ''}`,
+    () => dashboardApi(`/api/editor/organizations/${organizationId}/reviews`, {
+      query: location.value ? { location_id: location.value } : undefined,
+      validate: isTestimonialsResponse,
+    }),
+  )
+}

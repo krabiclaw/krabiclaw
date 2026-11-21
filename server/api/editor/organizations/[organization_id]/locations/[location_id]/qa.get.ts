@@ -1,12 +1,15 @@
+import { readDashboardMemberResources } from '~/server/utils/dashboard-context'
+import { defineHandler } from 'nitro'
+import { getQuery, getRouterParam } from 'nitro/h3'
 import { jsonResponse } from '~/server/utils/api-response'
-import { loadDashboardLocationQa } from '~/server/utils/dashboard-editor-resources'
+import { prepareDashboardQa } from '~/server/utils/location-qa'
+
 
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organization_id')
   const locationId = getRouterParam(event, 'location_id')
   if (!organizationId || !locationId) return jsonResponse({ error: 'Missing params' }, { status: 400 })
-
-  return jsonResponse(await loadDashboardLocationQa(event, organizationId, locationId))
+  const qa = prepareDashboardQa(locationId, getQuery(event))
+  const { rows } = await readDashboardMemberResources(event, organizationId, qa.queries)
+  return jsonResponse(qa.read(rows))
 })
-import { defineHandler } from 'nitro';
-import { getRouterParam } from 'nitro/h3';

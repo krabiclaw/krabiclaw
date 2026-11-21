@@ -6,7 +6,7 @@ import type { H3Event } from 'nitro';
 import {  setHeader } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { queryAll } from '~/server/db'
-import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
+import { buildPublicShellCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
 import { buildPublicShellPayload, readPublicShellRows } from '~/server/utils/public-shell-query'
 import { listOrganizationProducts } from '~/server/utils/product-management'
@@ -49,14 +49,7 @@ export async function loadPublicShellSource(
   const host = (event.req.headers.get('host')) ?? ''
   const useCache = !previewAuthorized && !isNonProductionHost(host)
   const revision = useCache ? await publicCacheRevision(event, db, organizationId) : null
-  const cacheKey = buildPublicResourceCacheKey(organizationId, {
-    contract: 'shell',
-    page: null,
-    location: null,
-    datasets: [],
-    blogSlug: null,
-    locale,
-  }, revision)
+  const cacheKey = buildPublicShellCacheKey(organizationId, locale, revision)
   const cache = env.ORGANIZATION_CACHE
   if (mutateHeaders) {
     setHeader(event, 'cache-control', previewAuthorized

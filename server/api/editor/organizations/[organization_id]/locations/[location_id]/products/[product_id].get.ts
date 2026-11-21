@@ -1,7 +1,7 @@
 import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { loadDashboardProduct } from '~/server/utils/dashboard-editor-resources'
 import { defineHandler } from 'nitro'
-import { getRouterParam } from 'nitro/h3'
+import { getQuery, getRouterParam } from 'nitro/h3'
 
 // One product, for the editor that is opening it. The editor used to read the
 // whole location catalogue and find one row in it: on the largest site here
@@ -14,7 +14,7 @@ export default defineHandler(async (event) => {
     return jsonResponse({ error: 'Organization ID, location ID and product ID are required' }, { status: 400 })
   }
   try {
-    return jsonResponse(await loadDashboardProduct(event, organizationId, locationId, productId), { headers: { 'cache-control': 'private, no-store' } })
+    return jsonResponse(await loadDashboardProduct(event, organizationId, locationId, productId, getQuery(event).editor === '1'), { headers: { 'cache-control': 'private, no-store' } })
   } catch (error) {
     rethrowHttpError(error)
     console.error('location_product_read_failed', { organizationId, locationId, productId, error: error instanceof Error ? error.message : String(error) })

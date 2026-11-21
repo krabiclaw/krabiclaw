@@ -2,9 +2,10 @@ import { splitLocalePrefix } from '~/utils/tenant-locale-path'
 import type { H3Event } from 'nitro'
 import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { executeBatch, type BatchQuery, type DbClient } from '~/server/db'
+import { publicReviewListQuery } from '~/server/utils/organization-reviews'
 import type { PublicBase } from '~/server/utils/public-base'
 import { projectPublicLocation } from '~/shared/location-sharing'
-import { publicLocationPrivacySql, publicReviewLocationProtectedSql } from '~/server/utils/public-location-privacy'
+import { publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
 import { projectExactLocalizedCollection, type ExactPublicLocalization } from '~/server/utils/public-localization'
 import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSection, type PublicShellPayload, type PublicSiteSection } from '~/utils/public-resource-contracts'
 import { prepareCollectionList, preparePublicProductSelection, preparePublicExperiences, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
@@ -127,6 +128,7 @@ export function publicSections(vertical: string | null, catalog: readonly Public
 }
 
 type PublicSqlScope = string | { sql: string }
+type PublicLocationScope = string | { sql: string; params: unknown[] }
 
 function appendPublicShellQueries(
   queries: BatchQuery[],
@@ -216,17 +218,7 @@ export function preparePublicShellRows(
   const queries: BatchQuery[] = []
   const indexes = appendPublicShellQueries(queries, organizationId, previewMenu)
   indexes.pageLinks = queries.push(publishedTenantPagePathsQuery(organizationId, locale)) - 1
-  if (includeReviews) indexes.reviews = queries.push({
-    query: `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source,
-            r.original_review_date, r.original_reference, r.google_review_metadata,
-            r.owner_reply, r.owner_reply_at, r.location_id, bl.title AS location_title,
-            ${publicReviewLocationProtectedSql('r')} AS is_stay_location
-     FROM reviews r
-     LEFT JOIN business_locations bl ON bl.id = r.location_id
-     WHERE r.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND r.status = 'approved'
-     ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 50`,
-    params: typeof organizationId === 'string' ? [organizationId] : [],
-  }) - 1
+  if (includeReviews) indexes.reviews = queries.push(publicReviewListQuery(organizationId)) - 1
   const collection = collectionKind ? preparePublicCollectionRows(organizationId, collectionKind, previewMenu) : null
   const experiences = preparePublicExperiences(organizationId)
   const shellLength = queries.length
@@ -244,7 +236,7 @@ export function preparePublicShellRows(
   }
 }
 
-export function publicProductMediaQuery(organizationId: PublicSqlScope, kind: string | undefined, cards: boolean): BatchQuery {
+export function publicProductMediaQuery(organizationId: PublicSqlScope, kind: string | undefined, cards: boolean, locationId?: PublicLocationScope): BatchQuery {
   return {
     query: `SELECT ma.*, mp.owner_id AS product_id, mp.slot, mp.sort_order
       FROM media_placements mp
@@ -252,8 +244,9 @@ export function publicProductMediaQuery(organizationId: PublicSqlScope, kind: st
       WHERE mp.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND mp.owner_type = 'product'
         AND ${cards ? "mp.slot = 'image'" : "mp.slot IN ('image', 'gallery')"} AND mp.status = 'active'
         ${kind ? 'AND EXISTS (SELECT 1 FROM products p WHERE p.id = mp.owner_id AND p.organization_id = mp.organization_id AND p.kind = ?)' : ''}
+        ${locationId ? `AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = mp.organization_id AND pl.product_id = mp.owner_id AND pl.location_id = ${typeof locationId === 'string' ? '?' : locationId.sql})` : ''}
       ORDER BY mp.owner_id, mp.slot, mp.sort_order, mp.id`,
-    params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(kind ? [kind] : [])],
+    params: [...(typeof organizationId === 'string' ? [organizationId] : []), ...(kind ? [kind] : []), ...(typeof locationId === 'string' ? [locationId] : locationId?.params ?? [])],
   }
 }
 
@@ -264,14 +257,14 @@ export function publicDocumentCollectionKind(path: string): PublicDocumentCollec
   if (path === '/reservations') return 'table'
 }
 
-function preparePublicCollectionRows(organizationId: PublicSqlScope, kind: PublicDocumentCollectionKind, previewMenu: boolean) {
-  const products = preparePublicProductSelection(organizationId, kind, kind !== 'dish' || !previewMenu)
+export function preparePublicCollectionRows(organizationId: PublicSqlScope, kind: PublicDocumentCollectionKind, previewMenu: boolean, locationId?: PublicLocationScope) {
+  const products = preparePublicProductSelection(organizationId, kind, kind !== 'dish' || !previewMenu, locationId)
   const sections = prepareCollectionList({ organizationId })
   return {
-    queries: [publicProductMediaQuery(organizationId, kind, kind === 'dish'), ...products.queries, ...sections.queries],
+    queries: [publicProductMediaQuery(organizationId, kind, kind === 'dish', locationId), ...products.queries, ...sections.queries],
     read([media, ...rows]: D1Result[]) {
       return { media: media!.results, products: products.read(rows.slice(0, products.queries.length)),
-        collections: sections.read(rows.slice(products.queries.length)) }
+        collections: sections.read(rows.slice(products.queries.length)).filter(row => typeof locationId !== 'string' || row.location_id === null || row.location_id === locationId) }
     },
   }
 }

@@ -214,7 +214,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     await check('past', past)
     // The channel guest keeps their conversation identity without a local account.
     assert.equal(stay.user_id, null)
-    assert.equal(thread.conversation.title, 'Mililani')
+    assert.equal(thread.conversation.title, '74 D · Sky')
     assert.deepEqual(thread.conversation.participants.filter(person => person.role === 'guest'), [])
     await check('thread', thread)
     await check('opening', opened)

@@ -1,3 +1,6 @@
+import type { CatalogRow } from './catalog-screen'
+import type { LodgingBookingChoice, LodgingBookingPolicy } from './lodging-booking'
+
 /**
  * Integration credentials are Better Auth linked accounts. An organization
  * never holds a token: it stores the Better Auth `account.id` that granted it
@@ -101,3 +104,33 @@ export const NONPROFIT_STATUS_CANONICAL = new Set<string>([
   'https://schema.org/NonprofitANBI',
   'https://schema.org/NonprofitSBBI',
 ])
+
+export function websitePreferencesRows(slug: string, settings: {
+  status: string
+  default_currency?: string | null
+  public_url?: string | null
+  vertical?: string
+  consultation_mode: string | null
+  lodging_booking?: LodgingBookingPolicy
+  lodging_booking_choices?: LodgingBookingChoice[]
+}): CatalogRow[] {
+  const website = `/dashboard/${encodeURIComponent(slug)}/website`
+  const row = (id: string, native: string, label: string, icon: string, summary?: string | null, to = `${website}/preferences/${id}`): CatalogRow =>
+    ({ id, native, label, icon: `i-lucide-${icon}`, summary: summary ?? undefined, to })
+  const currency = settings.default_currency
+  const currencyIcon = currency === 'EUR' ? 'euro' : currency === 'GBP' ? 'pound-sterling' : currency === 'JPY' || currency === 'CNY' ? 'japanese-yen' : 'dollar-sign'
+  return [
+    { ...row('status', 'website-status', 'Status', 'eye', settings.status === 'active' ? 'Published' : settings.status === 'suspended' ? 'Suspended' : 'Draft'),
+      ...(settings.status === 'suspended' ? { native: undefined } : {}), status: settings.status === 'active' ? 'success' : 'neutral' },
+    row('localization', 'languages', 'Languages', 'languages', 'Languages the site is published in'),
+    row('domains', 'website-domains', 'Domains', 'globe-2', settings.public_url ?? 'Not connected'),
+    row('currency', 'website-currency', 'Currency', currencyIcon, currency),
+    row('booking', 'website-booking', settings.vertical === 'service' ? 'Consultation settings' : settings.vertical === 'restaurant' ? 'Reservation settings' : 'Booking settings',
+      'calendar-check', settings.vertical === 'lodging'
+        ? settings.lodging_booking_choices?.find(choice => choice.value === settings.lodging_booking?.confirmation_mode)?.label
+        : settings.consultation_mode === 'native' ? 'Accepting consultation requests online' : undefined,
+      `${website}/booking`),
+    row('reviews', 'website-review-settings', 'Review settings', 'star', 'Approval and visibility'),
+    { id: 'website-seo', native: 'website-seo', label: 'Search engine optimization' },
+  ]
+}

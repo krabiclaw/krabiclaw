@@ -11,12 +11,12 @@ import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { buildDeleteOwnerPlacementsQuery, buildMediaPlacementReplacementQueries, deleteProductMediaPlacementsQuery, hydrateMediaAssetRefs, groupMediaPlacements, mediaPlacementsQuery, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
-import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
+import { isStayBedAllocationConflict, prepareArrangeProductPhotos, prepareStayHomeAccessibility, prepareStayPhotoRooms, readProductPhotos, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
+import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, preparePublishedProductPage, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationSite } from '~/server/utils/content/publishing'
 import { publishAccessInvalidation, publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, pendingConnectedChannelCalendarQuery, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
@@ -25,6 +25,7 @@ import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
+import { checkoutSellerFromRows, checkoutSellerQuery } from '~/server/utils/billing-access'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import {
   assertNoConflictingPrices,
@@ -39,7 +40,7 @@ import {
 } from '~/shared/prices'
 import { assertProductKind, patchProductDetails, validateProductDetails, validateStayAlarmDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
 import { presentationForProduct, type CatalogCounts } from '~/utils/product-presentation'
-import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
+import { preparePublicTenantOrigin } from '~/server/utils/public-base'
 import { FormQuestionDefinitionError, formQuestionsRevision, normalizeFormQuestionsInput, parseStoredFormQuestions } from '~/shared/form-questions'
 
 /** The home's weekend rate, read alongside the rest of its calendar policy. */
@@ -59,6 +60,7 @@ function storedQuestions(value: unknown) {
   return { questions, questions_revision: formQuestionsRevision(questions) }
 }
 import type {
+  CatalogProduct,
   Collection,
   CreateCollectionInput,
   CreateProductInput,
@@ -294,24 +296,35 @@ function productHydrationQueries(organizationId: string | { sql: string }, selec
   ]
 }
 
-async function hydrate(db: DbClient, organizationId: string, products: Product[]): Promise<Product[]> {
-  if (!products.length) return products
-  const stayIds = products.filter(product => product.kind === 'stay').map(product => product.id)
-  const [rows, photoRooms, accessibility] = await Promise.all([
-    executeBatch(db, productHydrationQueries(organizationId, {
-      query: 'SELECT value FROM json_each(?)', params: [d1JsonArray(products.map(product => product.id))],
-    }), { operation: 'Hydrate products' }),
-    readStayPhotoRooms(db, organizationId, stayIds),
-    readStayHomeAccessibility(db, organizationId, stayIds),
-  ])
-  return hydrateProductRows(products, rows, photoRooms, accessibility)
+function prepareProductRelations(organization: string | { sql: string }, selection: BatchQuery) {
+  const hydration = productHydrationQueries(organization, selection)
+  const stayIds = { query: `SELECT p.id FROM products p WHERE p.kind = 'stay' AND p.id IN (${selection.query})`, params: selection.params }
+  const rooms = prepareStayPhotoRooms(organization, stayIds)
+  const accessibility = prepareStayHomeAccessibility(organization, stayIds)
+  const roomEnd = hydration.length + rooms.queries.length
+  return {
+    queries: [...hydration, ...rooms.queries, ...accessibility.queries],
+    read(products: Product[], rows: D1Result[]) {
+      const stays = products.filter(product => product.kind === 'stay').map(product => product.id)
+      return hydrateProductRows(products, rows, rooms.read(rows.slice(hydration.length, roomEnd), stays),
+        accessibility.read(rows.slice(roomEnd), stays))
+    },
+  }
+}
+
+function prepareProductRead(organizationId: string | { sql: string }, records: BatchQuery) {
+  const relations = prepareProductRelations(organizationId, { query: `SELECT id FROM (${records.query})`, params: records.params })
+  return {
+    queries: [records, ...relations.queries],
+    read: ([products, ...rows]: D1Result[]) => relations.read((products!.results as Row[]).map(mapProductRow), rows),
+  }
 }
 
 function hydrateProductRows(
   products: Product[],
   batched: Awaited<ReturnType<typeof executeBatch>>,
-  photoRooms: Awaited<ReturnType<typeof readStayPhotoRooms>>,
-  accessibility: Awaited<ReturnType<typeof readStayHomeAccessibility>>,
+  photoRooms: ReturnType<ReturnType<typeof prepareStayPhotoRooms>['read']>,
+  accessibility: ReturnType<ReturnType<typeof prepareStayHomeAccessibility>['read']>,
 ) {
   const byId = new Map(products.map(product => [product.id, product]))
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
@@ -410,9 +423,9 @@ function agreementOf(media: ReadonlyArray<ResolvedMediaAsset & { slot?: string; 
   return document ? { ...document, file_name: document.file_name ?? null } : null
 }
 
-export async function hydrateProductMedia(db: DbClient, organizationId: string, products: Product[]): Promise<Product[]> {
+export async function hydrateProductMedia(db: DbClient, organizationId: string, products: Product[], loaded?: Awaited<ReturnType<typeof loadPublicSocialMedia>>): Promise<Product[]> {
   if (!products.length) return products
-  const placements = await loadPublicSocialMedia(db, organizationId, 'product', products.map(product => product.id))
+  const placements = loaded ?? await loadPublicSocialMedia(db, organizationId, 'product', products.map(product => product.id))
   return products.map((product) => {
     const socialMedia = placements.get(product.id) ?? { media: [], social_image: null }
     return {
@@ -430,45 +443,66 @@ export async function hydrateProductMedia(db: DbClient, organizationId: string, 
 // Reads
 // ---------------------------------------------------------------------------
 
+export function prepareOrganizationProduct(organizationId: string | { sql: string }, productId: string) {
+  return prepareProductRead(organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND p.id = ?`, params: [...(typeof organizationId === 'string' ? [organizationId] : []), productId],
+  })
+}
+
 export async function getProduct(db: DbClient, organizationId: string, productId: string): Promise<Product> {
-  const row = await queryFirst<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.id = ?`, [organizationId, productId])
-  if (!row) notFound()
-  const [product] = await hydrate(db, organizationId, [mapProductRow(row)])
-  return product!
+  const plan = prepareOrganizationProduct(organizationId, productId)
+  const [product] = plan.read(await executeBatch(db, plan.queries, { operation: 'Read product' }))
+  return product ?? notFound()
+}
+
+/** Publication links participate in the caller's product batch. Readiness retains its domain check. */
+export function prepareProductPublicPresentation(organization: string | { sql: string }, productId: string) {
+  const originPlan = preparePublicTenantOrigin(organization)
+  const pagePlan = preparePublishedProductPage(organization, productId)
+  return {
+    queries: [{
+      query: `SELECT p.id FROM products p
+        JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+        WHERE p.organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`,
+      params: [...(typeof organization === 'string' ? [organization] : []), productId],
+    }, ...originPlan.queries, {
+      query: `SELECT l.id, l.slug FROM business_locations l
+        JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
+        JOIN products p ON p.organization_id = pl.organization_id AND p.id = pl.product_id
+        WHERE l.organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND pl.product_id = ? AND p.kind = 'dish' AND l.status = 'active' AND pl.published = 1`,
+      params: [...(typeof organization === 'string' ? [organization] : []), productId],
+    }, bookingScheduleScopesQuery(organization, { query: 'SELECT ?', params: [productId] }),
+    checkoutSellerQuery(typeof organization === 'string' ? { query: '?', params: [organization] } : { query: organization.sql, params: [] }), ...pagePlan.queries],
+    async read([published, originRow, locations, schedules, seller, ...pageRows]: D1Result[], db: DbClient, env: CloudflareEnv, product: Product, organizationCurrency?: string | null) {
+      const organizationId = product.organization_id
+      const siteProduct = product.kind === 'experience' || product.kind === 'stay'
+      const path = siteProduct ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
+      const scheduledScopes = scheduleScopesFromRows(schedules!.results as BookingScheduleScopeRow[]).get(productId) ?? new Set<string | null>()
+      const readiness = product.kind === 'experience' || product.kind === 'stay' || product.booking
+        ? await productBookingReadiness(db, organizationId, product, { env, scheduledScopes,
+          paymentSetup: () => readStripeCheckoutSetup(db, organizationId, env, checkoutSellerFromRows(seller!.results)),
+          ...(organizationCurrency === undefined ? {} : { currency: checkedOrganizationCurrency(organizationId, organizationCurrency) }) }) : null
+      const page = !siteProduct && product.page ? pagePlan.read(pageRows, organizationId, product.page.path) : null
+      const origin = published!.results.length ? originPlan.read([originRow!], env) : null
+      const publicPath = siteProduct ? path && (!readiness || readiness.ready) ? path : null
+        : page && page.id === product.page?.id && page.product_id === product.id ? page.path : null
+      const publicUrls: Record<string, string> = {}
+      if (origin && product.kind === 'dish') for (const location of locations!.results as { id: string; slug: string }[]) {
+        publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
+      }
+      return { readiness, publicUrl: origin && publicPath ? new URL(publicPath, origin).toString() : null, publicUrls }
+    },
+  }
 }
 
 /** The saved routes a guest may open, shared by MCP and both dashboard editor scopes. */
 export async function productPublicPresentation(db: DbClient, env: CloudflareEnv, organizationId: string, product: Product) {
-  const readiness = product.kind === 'experience' || product.kind === 'stay' || product.booking
-    ? await productBookingReadiness(db, organizationId, product, { env }) : null
-  const published = await queryFirst(db, `SELECT p.id FROM products p
-    JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`, [organizationId, product.id])
-  const origin = published ? await resolvePublicTenantOrigin(db, env, organizationId) : null
-  const siteProduct = product.kind === 'experience' || product.kind === 'stay'
-  const path = siteProduct
-    ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
-  // An authored Page remains readable when its offering cannot be booked.
-  // Its publication owner also proves the saved binding and source address.
-  const page = !siteProduct && product.page
-    ? await resolvePublishedTenantPageIdentity(db, organizationId, product.page.path) : null
-  const publicPath = siteProduct ? path && (!readiness || readiness.ready) ? path : null
-    : page && page.id === product.page?.id && page.product_id === product.id ? page.path : null
-  const publicUrls: Record<string, string> = {}
-  if (origin && product.kind === 'dish') {
-    const locations = await queryAll<{ id: string; slug: string }>(db, `
-      SELECT l.id, l.slug FROM business_locations l
-      JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
-      WHERE l.organization_id = ? AND pl.product_id = ? AND l.status = 'active' AND pl.published = 1
-    `, [organizationId, product.id])
-    for (const location of locations) publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
-  }
-  return { readiness, publicUrl: origin && publicPath ? new URL(publicPath, origin).toString() : null, publicUrls }
+  const plan = prepareProductPublicPresentation(organizationId, product.id)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read product publication and links' }), db, env, product)
 }
 
 export async function listProducts(db: DbClient, organizationId: string): Promise<Product[]> {
-  const rows = await queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? ORDER BY p.name, p.id`, [organizationId])
-  return hydrate(db, organizationId, rows.map(mapProductRow))
+  return listOrganizationProducts(db, { organizationId })
 }
 
 /**
@@ -506,11 +540,11 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
 }
 
 interface ProductListInput {
-  organizationId: string; kind?: ProductKind; featured?: boolean; publishedOnly?: boolean; bookableOnly?: boolean; assignedUserId?: string; window?: { limit: number; offset: number }; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>
+  organizationId: string; productIds?: readonly string[]; kind?: ProductKind; featured?: boolean; publishedOnly?: boolean; bookableOnly?: boolean; assignedUserId?: string; window?: { limit: number; offset: number }; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>
 }
 
 interface OrganizationProductListInput extends ProductListInput {
-  productIds?: readonly string[]
+  locationId?: string
 }
 
 export interface ProductListResult {
@@ -525,13 +559,15 @@ function productListCounts(rows: readonly { kind: ProductKind; count?: number }[
 }
 
 /** Editable catalogue pages read one extra row. Public readiness and counts precede pagination. */
-function organizationProductSelection(input: Omit<OrganizationProductListInput, 'organizationId' | 'assignedUserId'> & { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope }) {
+function organizationProductSelection(input: Omit<OrganizationProductListInput, 'organizationId' | 'assignedUserId' | 'locationId'> & { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; locationId?: string | { sql: string; params: unknown[] } }) {
   const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
   const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
+  const location = input.locationId
   const selection = `FROM products p
     LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-    WHERE p.organization_id = ${org} AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${assignment ? ` AND (${assignment.unrestricted} OR (${assignment.sql}))` : ''}`
+    WHERE p.organization_id = ${org} AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${location ? ` AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ${typeof location === 'string' ? '?' : location.sql})` : ''}${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${assignment ? ` AND (${assignment.unrestricted} OR (${assignment.sql}))` : ''}`
   const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.publishedOnly ? 1 : 0,
+    ...(typeof location === 'string' ? [location] : location?.params ?? []),
     ...(input.productIds ? [d1JsonArray(input.productIds)] : []),
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
@@ -539,13 +575,8 @@ function organizationProductSelection(input: Omit<OrganizationProductListInput, 
   return { selection, params }
 }
 
-/** Menu cards use the canonical product projection without waiting for product IDs in JavaScript. */
-export function prepareOrganizationDishRead(organizationId: string | { sql: string }, publishedOnly: boolean) {
-  return preparePublicProductSelection(organizationId, 'dish', publishedOnly)
-}
-
-export function preparePublicProductSelection(organizationId: string | { sql: string }, kind: 'dish' | 'experience' | 'table', publishedOnly: boolean) {
-  const { selection, params } = organizationProductSelection({ organizationId, kind, publishedOnly })
+export function preparePublicProductSelection(organizationId: string | { sql: string }, kind: 'dish' | 'experience' | 'table', publishedOnly: boolean, locationId?: string | { sql: string; params: unknown[] }) {
+  const { selection, params } = organizationProductSelection({ organizationId, kind, publishedOnly, locationId })
   const relationships = productHydrationQueries(organizationId, { query: `SELECT p.id ${selection}`, params }).slice(0, 7)
   // These products cannot carry stay settings.
   const queries = [{ query: `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id`, params }, ...relationships]
@@ -553,6 +584,39 @@ export function preparePublicProductSelection(organizationId: string | { sql: st
     queries, ids: { query: `SELECT p.id ${selection} AND (p.order_url IS NULL OR p.order_url = '')`, params },
     read: ([products, ...rows]: Awaited<ReturnType<typeof executeBatch>>) =>
       hydrateProductRows((products!.results as Row[]).map(mapProductRow), rows, new Map(), new Map()),
+  }
+}
+
+/** Public page grids name their offerings before reading their relationships and publication readiness. */
+export function preparePublishedOfferingGrid(organization: { sql: string }, predicate: string) {
+  const selection = organizationProductSelection({ organizationId: organization, publishedOnly: true })
+  const selected = `${selection.selection} AND (${predicate})`
+  const { params } = selection
+  const idQuery = (condition?: string) => ({ query: `SELECT p.id ${selected}${condition ? ` AND (${condition})` : ''}`, params })
+  const ids = idQuery()
+  const relations = prepareProductRelations(organization, ids)
+  return {
+    ids,
+    queries: [
+      { query: `SELECT ${PRODUCT_COLUMNS} ${selected} ORDER BY p.name, p.id`, params },
+      ...relations.queries,
+      bookingScheduleScopesQuery(organization, idQuery("p.order_url IS NULL OR p.order_url = ''")),
+      checkoutSellerQuery({
+        query: `CASE WHEN EXISTS (SELECT 1 ${selected}
+          AND EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id=p.organization_id
+            AND c.product_id=p.id AND c.online_payment_required=1)) THEN ${organization.sql} END`,
+        params,
+      }),
+    ],
+    async read([products, ...rows]: D1Result[], db: DbClient, env: CloudflareEnv, organizationId: string, currency: CurrencyCode | null) {
+      const records = (products!.results as Row[]).map(mapProductRow)
+      const offers = relations.read(records, rows.slice(0, relations.queries.length))
+      const scheduledScopes = scheduleScopesFromRows(rows.at(-2)!.results as BookingScheduleScopeRow[])
+      let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
+      return publicProductWindow(db, organizationId, offers, undefined, env,
+        () => setup ??= readStripeCheckoutSetup(db, organizationId, env, checkoutSellerFromRows(rows.at(-1)!.results)),
+        false, { currency, scheduledScopes })
+    },
   }
 }
 
@@ -569,13 +633,12 @@ export function preparePublicExperiences(scope: string | { sql: string }) {
 }
 
 /** Catalog cards need offering facts, prices and one image. The editor reads the complete product. */
-export function prepareCatalogOfferings(input: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; kind?: ProductKind; locationId?: string }) {
+export function prepareCatalogOfferings(input: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; kind?: ProductKind; locationId?: string; includeDishes?: boolean }) {
   const { organizationId } = input
-  const base = organizationProductSelection(input)
-  const selection = `${base.selection} AND p.kind <> 'dish'${input.locationId ? ' AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = ?)' : ''}`
-  const params = [...base.params, ...(input.locationId ? [input.locationId] : [])]
+  const { selection: base, params } = organizationProductSelection(input)
+  const selection = input.includeDishes ? base : `${base} AND p.kind <> 'dish'`
   const ids = { query: `SELECT p.id ${selection}`, params }
-  const relationships = productHydrationQueries(organizationId, ids).slice(0, 7)
+  const relationships = productHydrationQueries(organizationId, ids).slice(0, 6)
   const queries = [
     { query: `SELECT ${PRODUCT_COLUMNS}, c.internal_name AS stay_internal_name FROM (
       SELECT ${PRODUCT_COLUMNS} ${selection}
@@ -608,14 +671,7 @@ export async function listOrganizationProducts(db: DbClient, input: Organization
   const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
   const window = requireReadiness ? undefined : input.window
   const { selection, params } = organizationProductSelection(input)
-  const [rows, counts] = await Promise.all([
-    queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
-    input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
-  ])
-  const products = await hydrate(db, input.organizationId, rows.map(mapProductRow))
-  if (!input.withCounts) return requireReadiness ? publicProductWindow(db, input.organizationId, products, input.window, input.env, input.paymentSetup, input.bookableOnly) : products
-  const matching = requireReadiness ? await publicProductWindow(db, input.organizationId, products, undefined, input.env, input.paymentSetup, input.bookableOnly) : products
-  return { products: requireReadiness && input.window ? matching.slice(input.window.offset, input.window.offset + input.window.limit + 1) : matching, counts: productListCounts(counts ?? matching) }
+  return readProductList(db, input, selection, params, requireReadiness, window)
 }
 
 /**
@@ -636,16 +692,26 @@ export async function listLocationProducts(db: DbClient, input: ProductListInput
     JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
     ${published ? `JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
       AND (${PUBLIC_PRODUCT_SQL})` : ''}
-    WHERE p.organization_id = ? AND pl.location_id = ?${published ? ' AND pl.published = 1' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
+    WHERE p.organization_id = ? AND pl.location_id = ?${input.productIds ? ' AND p.id IN (SELECT value FROM json_each(?))' : ''}${published ? ' AND pl.published = 1' : ''}${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
   const params = [input.organizationId, input.locationId,
+    ...(input.productIds ? [d1JsonArray(input.productIds)] : []),
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
     ...(input.assignedUserId ? [input.assignedUserId] : [])]
-  const [rows, counts] = await Promise.all([
-    queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
-    input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
-  ])
-  const products = await hydrate(db, input.organizationId, rows.map(mapProductRow))
+  return readProductList(db, input, selection, params, requireReadiness, window)
+}
+
+async function readProductList(db: DbClient, input: ProductListInput & { withCounts?: boolean }, selection: string, params: unknown[], requireReadiness: boolean, window: ProductListInput['window']): Promise<Product[] | ProductListResult> {
+  const plan = prepareProductRead(input.organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`,
+    params: [...params, ...(window ? [window.limit + 1, window.offset] : [])],
+  })
+  const count = input.withCounts && window
+    ? { query: `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params } : null
+  const rows = await executeBatch(db, [...plan.queries, ...(count ? [count] : [])], { operation: 'Read product list' })
+  const products = plan.read(rows.slice(0, plan.queries.length))
+  const counts = count ? rows.at(-1)!.results as { kind: ProductKind; count: number }[] : undefined
+
   if (!input.withCounts) return requireReadiness ? publicProductWindow(db, input.organizationId, products, input.window, input.env, input.paymentSetup, input.bookableOnly) : products
   const matching = requireReadiness ? await publicProductWindow(db, input.organizationId, products, undefined, input.env, input.paymentSetup, input.bookableOnly) : products
   return { products: requireReadiness && input.window ? matching.slice(input.window.offset, input.window.offset + input.window.limit + 1) : matching, counts: productListCounts(counts ?? matching) }
@@ -655,30 +721,39 @@ export async function listLocationProducts(db: DbClient, input: ProductListInput
 export async function summarizeLocationProducts(db: DbClient, input: {
   organizationId: string; locationId: string
 }): Promise<CatalogCounts> {
-  const row = await queryFirst<{ total: number; experiences: number; dishes: number; stays: number }>(db, `
+  const plan = prepareLocationProductSummary(input.organizationId, input.locationId)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read location catalog counts' }))
+}
+
+export function prepareLocationProductSummary(organization: string | { sql: string }, location: string | { sql: string }) {
+  return {
+    queries: [{ query: `
     SELECT count(*) AS total,
            count(CASE WHEN p.kind = 'experience' THEN 1 END) AS experiences,
            count(CASE WHEN p.kind = 'dish' THEN 1 END) AS dishes,
            count(CASE WHEN p.kind = 'stay' THEN 1 END) AS stays
       FROM products p
       JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
-     WHERE p.organization_id = ? AND pl.location_id = ?
-  `, [input.organizationId, input.locationId])
-  // The same numbers countCatalog reads off the rows, so a surface is
-  // assigned identically whether the caller counted rows or SQL did.
-  return { total: Number(row?.total ?? 0), experiences: Number(row?.experiences ?? 0), dishes: Number(row?.dishes ?? 0), stays: Number(row?.stays ?? 0) }
+     WHERE p.organization_id = ${typeof organization === 'string' ? '?' : organization.sql} AND pl.location_id = ${typeof location === 'string' ? '?' : location.sql}
+  `, params: [...(typeof organization === 'string' ? [organization] : []), ...(typeof location === 'string' ? [location] : [])] }],
+    read([counts]: D1Result[]): CatalogCounts {
+      const row = counts!.results[0] as CatalogCounts | undefined
+      if (!row) throw new Error('Location catalog counts were not read')
+      return { total: Number(row.total), experiences: Number(row.experiences), dishes: Number(row.dishes), stays: Number(row.stays) }
+    },
+  }
 }
 
 export async function listCollectionProducts(db: DbClient, input: {
   organizationId: string; collectionId: string
 }): Promise<Product[]> {
-  const rows = await queryAll<Row>(db, `
-    SELECT ${PRODUCT_COLUMNS} FROM products p
-    JOIN collection_products cp ON cp.product_id = p.id AND cp.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND cp.collection_id = ?
-    ORDER BY cp.sort_order, p.id
-  `, [input.organizationId, input.collectionId])
-  return hydrate(db, input.organizationId, rows.map(mapProductRow))
+  const plan = prepareProductRead(input.organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p
+      JOIN collection_products cp ON cp.product_id = p.id AND cp.organization_id = p.organization_id
+      WHERE p.organization_id = ? AND cp.collection_id = ? ORDER BY cp.sort_order, p.id`,
+    params: [input.organizationId, input.collectionId],
+  })
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read collection products' }))
 }
 
 /**
@@ -695,11 +770,15 @@ export async function requireOrganizationProduct(db: DbClient, input: {
 export function getProductBySlug(db: DbClient, organizationId: string, slug: string): Promise<Product | null>
 export function getProductBySlug(db: DbClient, organizationId: string, slug: string, stay: 'kind-only'): Promise<Product | { kind: 'stay' } | null>
 export async function getProductBySlug(db: DbClient, organizationId: string, slug: string, stay?: 'kind-only'): Promise<Product | { kind: 'stay' } | null> {
-  const row = await queryFirst<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.slug = ?`, [organizationId, slug])
-  if (!row) return null
-  if (stay === 'kind-only' && row.kind === 'stay') return { kind: 'stay' }
-  const [product] = await hydrate(db, organizationId, [mapProductRow(row)])
-  return product!
+  if (stay === 'kind-only') {
+    const kind = await queryFirst<{ kind: ProductKind }>(db, 'SELECT kind FROM products WHERE organization_id = ? AND slug = ?', [organizationId, slug])
+    if (!kind) return null
+    if (kind.kind === 'stay') return { kind: 'stay' }
+  }
+  const plan = prepareProductRead(organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id = ? AND p.slug = ?`, params: [organizationId, slug],
+  })
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read product by slug' }))[0] ?? null
 }
 
 /**
@@ -1665,9 +1744,12 @@ export async function planProductCreateWrites(db: DbClient, input: {
 }
 
 async function readProductBatch(db: DbClient, organizationId: string, ids: string[]): Promise<Product[]> {
-  const rows = await queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id=? AND p.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonArray(ids)])
-  if (rows.length !== ids.length) throw new HTTPError({ statusCode: 410, statusMessage: 'A product from this completed catalog operation has been removed' })
-  const products = await hydrate(db, organizationId, rows.map(mapProductRow))
+  const plan = prepareProductRead(organizationId, {
+    query: `SELECT ${PRODUCT_COLUMNS} FROM products p WHERE p.organization_id=? AND p.id IN (SELECT value FROM json_each(?))`,
+    params: [organizationId, d1JsonArray(ids)],
+  })
+  const products = plan.read(await executeBatch(db, plan.queries, { operation: 'Read catalog products' }))
+  if (products.length !== ids.length) throw new HTTPError({ statusCode: 410, statusMessage: 'A product from this completed catalog operation has been removed' })
   const byId = new Map(products.map(product => [product.id, product]))
   return ids.map(id => byId.get(id)!)
 }
@@ -1810,7 +1892,10 @@ async function planProductUpdate(db: DbClient, input: {
   if ((current.kind === 'stay') !== (merged.kind === 'stay')) invalid('A place to stay keeps its kind, and another kind cannot become one; create a new place to stay instead')
   const planned = await planProduct(db, organizationId, merged, {
     organizationId: input.organizationId, existingId: productId, existingSlug: current.slug, defaultCurrency: input.defaultCurrency,
-    takenSlugs: input.takenSlugs, idOwners: input.idOwners, knownSlugs: input.knownSlugs,
+    takenSlugs: input.takenSlugs,
+    idOwners: input.idOwners ?? (variants.every(variant => !variant.id || current.variants.some(saved => saved.id === variant.id))
+      ? new Map(current.variants.map(variant => [variant.id, `${organizationId}:${current.id}`])) : undefined),
+    knownSlugs: input.knownSlugs,
     stayResponsibility: current.stay ? { assigned_member_id: current.stay.assigned_member_id } : undefined,
   })
   planned.source = current.source
@@ -2049,7 +2134,12 @@ export async function updateProduct(db: DbClient, input: {
   const earlier = await replay()
   if (earlier) return complete(earlier)
   if (input.booking && !dedupeKey) invalid('An idempotency key is required when configuring bookable sessions')
-  const current = await getProduct(db, input.organizationId, input.productId)
+  const currentPlan = prepareOrganizationProduct(input.organizationId, input.productId)
+  const currentRows = await executeBatch(db, [...currentPlan.queries, {
+    query: 'SELECT default_currency FROM organization WHERE id = ?', params: [input.organizationId],
+  }], { operation: 'Read product update facts' })
+  const current = currentPlan.read(currentRows.slice(0, currentPlan.queries.length))[0] ?? notFound()
+  const defaultCurrency = checkedOrganizationCurrency(input.organizationId, (currentRows.at(-1)!.results[0] as { default_currency: string } | undefined)?.default_currency ?? null)
   const roomChanged = (): never => {
     throw new HTTPError({ statusCode: 409, statusMessage: 'The room or listing changed while you were editing. Nothing was changed; reload the room and try again.', data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version', product_id: input.productId } })
   }
@@ -2087,8 +2177,8 @@ export async function updateProduct(db: DbClient, input: {
   // guard. Only room amenity assignments also author the Product's global set.
   const plan = roomUpdate && roomUpdate.amenities === undefined ? null : await planProductUpdate(db, {
     organizationId: input.organizationId, current, patch, actor: input.actor, now,
-    env: input.env, booking: input.booking?.data, additionalChangedFields,
-    cacheInvalidations: roomUpdate ? [publicResourceCacheInvalidationQuery(input.organizationId, 'stay-photo-room-details')] : await productCacheInvalidations(db, input.organizationId, input.productId, 'product_updated'),
+    env: input.env, booking: input.booking?.data, additionalChangedFields, defaultCurrency,
+    cacheInvalidations: roomUpdate ? [publicResourceCacheInvalidationQuery(input.organizationId, 'stay-photo-room-details')] : [publicResourceCacheInvalidationQuery(input.organizationId, 'product_updated')],
   })
   settings = plan?.airbnbSettings ?? null
   reprice = input.patch.variants !== undefined || settings?.availability === true
@@ -2185,7 +2275,8 @@ export async function updateProduct(db: DbClient, input: {
 
   // A variant anything was ever booked on is not removed by an edit. Stopping
   // the sale of an option is `active`, not deletion.
-  const booked = await bookedRemovals(db, input.organizationId, [{ productId: input.productId, keptVariants }])
+  const removesVariants = plan !== null && current.variants.some(variant => !plan.product.variants.some(kept => kept.id === variant.id))
+  const booked = removesVariants ? await bookedRemovals(db, input.organizationId, [{ productId: input.productId, keptVariants }]) : []
   if (booked.length > 0) {
     conflict(`${booked.join(', ')} ${booked.length > 1 ? 'have' : 'has'} bookings, so ${booked.length > 1 ? 'they cannot be removed' : 'it cannot be removed'}. Turn ${booked.length > 1 ? 'them' : 'it'} off instead.`)
   }
@@ -2211,6 +2302,7 @@ export async function updateProduct(db: DbClient, input: {
       const configurationError = bookingConfigurationWriteError(error)
       if (configurationError !== error) throw configurationError
     }
+    if (!removesVariants) throw error
     const raced = await bookedRemovals(db, input.organizationId, [{ productId: input.productId, keptVariants }])
     if (raced.length === 0) throw error
     conflict(`${raced.join(', ')} was booked while you were editing, so nothing was changed. Turn it off instead of removing it.`)
@@ -2249,7 +2341,6 @@ export async function deleteProduct(db: DbClient, input: {
     conflict('An automatic message is sent for this home. Remove the home from that message before deleting it.')
   }
   const pages = await Promise.all(bound.map(page => prepareTenantPageDelete(db, page.id, { scope: { organizationId: input.organizationId }, expectedUpdatedAt: page.updated_at })))
-  const invalidations = await productCacheInvalidations(db, input.organizationId, input.productId, 'product_deleted')
   // A home deleted is one fewer home, and its location, if still active, is a
   // location again: guarded as one, since Basic may already have the locations it includes.
   await executeProductWrites(db, input.env, input.organizationId, [
@@ -2259,7 +2350,7 @@ export async function deleteProduct(db: DbClient, input: {
       OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
-    ...invalidations,
+    publicResourceCacheInvalidationQuery(input.organizationId, 'product_deleted'),
     // Its pictures go with it; the assets stay in the library.
     deleteProductMediaPlacementsQuery(input.organizationId, [input.productId]),
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
@@ -2268,22 +2359,6 @@ export async function deleteProduct(db: DbClient, input: {
     throw error
   })
   await publishStayProducts(input.env, [product])
-}
-
-/**
- * Invalidate every site projection this product appears in.
- *
- * A product published on two sites has two projections; invalidating only the
- * site the editor happened to be looking at is how one of them goes stale
- * while looking correct.
- */
-async function productCacheInvalidations(db: DbClient, organizationId: string, productId: string, reason: string): Promise<BatchQuery[]> {
-  const organizations = await queryAll<{ organization_id: string }>(db, `
-    SELECT organization_id FROM product_publications WHERE organization_id = ? AND product_id = ?
-    UNION
-    SELECT organization_id FROM content_documents WHERE organization_id = ? AND product_id = ?
-  `, [organizationId, productId, organizationId, productId])
-  return organizations.map(row => publicResourceCacheInvalidationQuery(row.organization_id, reason))
 }
 
 // ---------------------------------------------------------------------------
@@ -2564,19 +2639,20 @@ function collectionRows(rows: Row[], images: Awaited<ReturnType<typeof readMedia
   }))
 }
 
-interface CollectionReadScope { organizationId: string; locationId?: string | null; assignedUserId?: string }
+interface CollectionReadScope { organizationId: string; locationId?: string | null; assignedUserId?: string; collectionIds?: readonly string[] }
 
-export function prepareCollectionList(input: { organizationId: string | { sql: string }; locationId?: string | null; assignedUserId?: OfferingReadScope }) {
+export function prepareCollectionList(input: { organizationId: string | { sql: string }; locationId?: string | null; assignedUserId?: OfferingReadScope; collectionIds?: readonly string[] | BatchQuery }) {
   const assignment = input.assignedUserId ? assignedOfferingCondition(input.assignedUserId) : null
   const org = typeof input.organizationId === 'string' ? '?' : input.organizationId.sql
   const selection = `
     FROM collections
     WHERE organization_id = ${org}
       AND (? = 0 OR location_id IS ?)
+      ${input.collectionIds ? `AND id IN (${Array.isArray(input.collectionIds) ? 'SELECT value FROM json_each(?)' : (input.collectionIds as BatchQuery).query})` : ''}
       ${assignment ? `AND (${assignment.unrestricted} OR EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
         WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${assignment.sql})))` : ''}
   `
-  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...assignment?.params ?? []]
+  const params = [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.collectionIds ? Array.isArray(input.collectionIds) ? [d1JsonArray(input.collectionIds)] : (input.collectionIds as BatchQuery).params ?? [] : []), ...assignment?.params ?? []]
   return {
     queries: [
       { query: `SELECT * ${selection} ORDER BY sort_order, name, id`, params },
@@ -2586,6 +2662,38 @@ export function prepareCollectionList(input: { organizationId: string | { sql: s
     read: ([rows, media]: Awaited<ReturnType<typeof executeBatch>>) =>
       collectionRows(rows!.results as Row[], groupMediaPlacements(media!.results)),
   }
+}
+
+export function prepareEditorCatalog(input: { organizationId: string | { sql: string }; assignedUserId?: OfferingReadScope; kind?: ProductKind; locationId?: string }) {
+  const { organizationId } = input
+  const cards = prepareCatalogOfferings({ ...input, includeDishes: true })
+  const collections = prepareCollectionList({ ...input, locationId: undefined })
+  const all = organizationProductSelection({ organizationId, assignedUserId: input.assignedUserId })
+  const queries = [
+    ...cards.queries,
+    ...collections.queries,
+    {
+      query: `SELECT cp.collection_id, count(*) AS product_count, sum(p.kind = 'dish') AS dish_count
+        FROM (SELECT p.id, p.kind ${all.selection}) p
+        JOIN collection_products cp ON cp.organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND cp.product_id = p.id GROUP BY cp.collection_id`,
+      params: [...all.params, ...(typeof organizationId === 'string' ? [organizationId] : [])],
+    },
+  ]
+  return { queries, read(rows: D1Result[]) {
+    const counts = new Map((rows.at(-1)!.results as { collection_id: string; product_count: number; dish_count: number }[])
+      .map(({ collection_id, ...counts }) => [collection_id, counts]))
+    return {
+      collections: collections.read(rows.slice(cards.queries.length, -1)).map(row => ({
+        ...row, product_count: counts.get(row.id)?.product_count ?? 0, dish_count: counts.get(row.id)?.dish_count ?? 0,
+      })),
+      products: cards.read(rows.slice(0, cards.queries.length)).map(({ product, internalName, image }): CatalogProduct => ({
+        id: product.id, name: product.name, kind: product.kind, active: product.active, variants: product.variants,
+        collections: product.collections, locations: product.locations, publications: product.publications, image: image ?? null,
+        stay: internalName === null ? null : { internal_name: internalName },
+        booking: product.booking ? { held_online: product.booking.held_online } : null,
+      })),
+    }
+  } }
 }
 
 export async function listCollections(db: DbClient, input: CollectionReadScope): Promise<Collection[]> {
@@ -2715,7 +2823,7 @@ function collectionProductsWrites(organizationId: string, collectionId: string, 
 
 export async function setCollectionProducts(db: DbClient, input: {
   organizationId: string; collectionId: string; productIds: string[]; expectedProductIds?: string[]; moveTo?: SetCollectionProductsInput['move_to']; actor: Actor
-}): Promise<void> {
+}) {
   const productIds = collectionProductIds(input.productIds, 'product_ids', PRODUCT_LIMITS.collectionProducts)
   const expected = input.expectedProductIds === undefined ? undefined : collectionProductIds(input.expectedProductIds, 'expected_product_ids', PRODUCT_LIMITS.collectionProducts)
   const move = input.moveTo
@@ -2756,6 +2864,10 @@ export async function setCollectionProducts(db: DbClient, input: {
     if (/collection_products_sort_order_check|FOREIGN KEY constraint failed/.test(error instanceof Error ? error.message : String(error))) collectionProductsChanged(input.collectionId, error)
     throw error
   })
+  return [
+    { collection_id: input.collectionId, product_ids: productIds },
+    ...(targetId && targetIds ? [{ collection_id: targetId, product_ids: targetIds }] : []),
+  ]
 }
 
 export async function reorderCollections(db: DbClient, input: {
@@ -2808,11 +2920,7 @@ export async function reorderCollections(db: DbClient, input: {
 /** The products a reconcile names, loaded and hydrated in one pass. */
 async function listProductsByIds(db: DbClient, organizationId: string, ids: string[]): Promise<Product[]> {
   if (ids.length === 0) return []
-  const rows = await queryAll<Row>(db, `
-    SELECT ${PRODUCT_COLUMNS} FROM products p
-     WHERE p.organization_id = ? AND p.id IN (SELECT value FROM json_each(?))
-  `, [organizationId, d1JsonArray(ids)])
-  return hydrate(db, organizationId, rows.map(mapProductRow))
+  return listOrganizationProducts(db, { organizationId, productIds: ids })
 }
 
 async function planProductReconciliation(db: DbClient, input: {

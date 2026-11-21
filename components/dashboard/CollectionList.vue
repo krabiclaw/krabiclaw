@@ -46,7 +46,8 @@
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import DashboardMediaThumb from '~/components/dashboard/DashboardMediaThumb.vue'
-import type { Collection, Product } from '~/server/types/products'
+import type { Collection } from '~/server/types/products'
+import type { CatalogCollection, useProductCatalog } from '~/composables/useProductCatalog'
 import { getErrorMessage } from '~/utils/errors'
 
 const dashboardApi = useDashboardApi()
@@ -57,6 +58,7 @@ const organizationId = useDashboardOrganizationId()
 const props = defineProps<{
   /** The location these sections belong to, or null for the ones every location shares. */
   scope: string | null
+  catalog: ReturnType<typeof useProductCatalog>
   /** Read beside an editable scope; reordered and added to only where it is that scope. */
   readOnly?: boolean
 }>()
@@ -64,39 +66,14 @@ const props = defineProps<{
 const locationId = useLocationScope()
 const menuPath = computed(() => `/dashboard/${String(route.params.org_slug)}/products/menu`)
 
-interface CollectionRow extends Collection {
-  product_count: number
-  /** The products that belong to it. */
-  products: Product[]
-}
-
-// Section membership and classification are independent of a location filter.
-const catalog = useProductCatalog(organizationId, ref(null))
-await catalog.load
-
-// The count and cover are what make a collection legible at a glance, and they
-// are the only reason this level reads Items at all.
-const catalogRows = computed<CollectionRow[]>(() => {
-  // Membership is a relationship, so a product counts once in every collection
-  // it belongs to — which is the point: it is one product in several places,
-  // not several products.
-  const members = new Map<string, Product[]>()
-  for (const product of catalog.products.value) {
-    for (const membership of product.collections) {
-      members.set(membership.collection_id, [...(members.get(membership.collection_id) ?? []), product])
-    }
-  }
-  return catalog.collections.value.filter(row => row.location_id === props.scope).map((row) => {
-    const products = members.get(row.id) ?? []
-    return { ...row, product_count: products.length, products }
-  })
-})
+const catalog = props.catalog
+const catalogRows = computed(() => catalog.collections.value.filter(row => row.location_id === props.scope))
 
 // Reorder is a mode: the local order stands while the edit state is open and
 // commits once when it closes, so it is held apart from the shared catalog.
-const localOrder = ref<CollectionRow[] | null>(null)
+const localOrder = ref<CatalogCollection[] | null>(null)
 /** Every collection in this scope, in the one order it stores. */
-const collections = computed<CollectionRow[]>(() => localOrder.value ?? catalogRows.value)
+const collections = computed<CatalogCollection[]>(() => localOrder.value ?? catalogRows.value)
 const editing = ref(false)
 const removingId = ref<string | null>(null)
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
@@ -109,7 +86,7 @@ const orderError = ref<string | null>(null)
  * none. A grouping of only experiences or services is theirs, not the menu's.
  * It is not shown here, but keeps its place in the scope's stored order.
  */
-const isMenuSection = (row: CollectionRow) => !row.products.length || row.products.some(product => product.kind === 'dish')
+const isMenuSection = (row: CatalogCollection) => !row.product_count || row.dish_count > 0
 const sections = computed(() => collections.value.filter(isMenuSection))
 
 // A section opens in its own scope. Shared membership has no location filter.
@@ -127,7 +104,7 @@ function openNew() {
 
 
 
-async function removeCollection(item: { row: CollectionRow }) {
+async function removeCollection(item: { row: CatalogCollection }) {
   const count = item.row.product_count
   // Deleting a section never deletes what was in it; the items stay in the catalog.
   if (!await confirmDialog.open({
@@ -139,7 +116,7 @@ async function removeCollection(item: { row: CollectionRow }) {
   deleteError.value = null
   try {
     await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${item.row.id}`, { method: 'DELETE', validate: isRecord })
-    await load()
+    catalog.applyCollections([], item.row.id)
     if (localOrder.value) localOrder.value = localOrder.value.filter(collection => collection.id !== item.row.id)
     if (orderSnapshot.value) orderSnapshot.value = orderSnapshot.value.filter(id => id !== item.row.id)
   } catch (error) {
@@ -156,7 +133,7 @@ async function removeCollection(item: { row: CollectionRow }) {
  *
  * The row swaps places with its neighbour in the one order this scope stores.
  */
-function moveCollection(item: { row: CollectionRow }, direction: -1 | 1) {
+function moveCollection(item: { row: CatalogCollection }, direction: -1 | 1) {
   // Swaps with the neighbouring section on screen; a grouping the menu does
   // not show stays where it is in the complete order the endpoint takes.
   const visible = sections.value
@@ -188,20 +165,14 @@ async function commitOrder(): Promise<boolean> {
   savingOrder.value = true
   const expected = orderSnapshot.value ?? catalogRows.value.map(row => row.id)
   try {
-    await load()
-    if (catalog.error.value) throw catalog.error.value
-    const current = catalog.collections.value.filter(collection => collection.location_id === scope).map(collection => collection.id)
-    if (JSON.stringify([...current].sort()) !== JSON.stringify([...order].sort())) throw new Error('The sections changed. Review the current list before reordering it.')
-    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/order`, {
+    const { collections: saved } = await dashboardApi(`/api/editor/organizations/${organizationId}/collections/order`, {
       method: 'PUT',
       body: { collection_ids: order, expected_collection_ids: expected, location_id: scope },
-      validate: isRecord,
+      validate: (value): value is { collections: Collection[] } =>
+        isRecord(value) && Array.isArray(value.collections) && value.collections.every(row => isRecord(row) && typeof row.id === 'string' && row.location_id === scope),
     })
-    await load()
-    if (catalog.error.value) throw catalog.error.value
+    catalog.applyCollections(saved)
     if (props.scope === scope) localOrder.value = null
-    const persisted = catalog.collections.value.filter(collection => collection.location_id === scope).map(collection => collection.id)
-    if (JSON.stringify(persisted) !== JSON.stringify(order)) throw new Error('Section order changed. Review the current order before editing again.')
     return true
   } catch (error) {
     orderDirty.value = true

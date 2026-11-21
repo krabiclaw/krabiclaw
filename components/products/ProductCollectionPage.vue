@@ -71,12 +71,9 @@
     </div>
 
     <div v-else-if="isMenu">
-      <TenantFilterTabs
-        v-model="activeCategory"
-        :tabs="categoryTabs"
-        :enable-scroll-detection="true"
-        @height="categoryNavHeight = $event"
-      />
+      <nav v-if="categoryTabs.length > 1" class="sticky top-[var(--tenant-header-height,4rem)] z-20 flex gap-2 overflow-x-auto border-b border-default bg-default px-4 py-2">
+        <a v-for="tab in categoryTabs" :key="tab.key" :href="`#${tab.sectionId}`" class="shrink-0 rounded-full px-3 py-1.5 text-sm text-muted hover:bg-muted hover:text-default">{{ tab.label }}</a>
+      </nav>
 
       <div class="mx-auto max-w-3xl px-4 py-20 sm:px-6 lg:px-8">
         <section
@@ -84,7 +81,7 @@
           :id="`cat-${group.id}`"
           :key="group.id"
           class="mb-24"
-          :style="{ scrollMarginTop: `${categoryNavHeight}px` }"
+          style="scroll-margin-top: calc(var(--tenant-header-height, 4rem) + 3rem)"
         >
           <div class="mb-8 border-b border-default pb-6">
             <!-- A section's own picture introduces it. -->
@@ -447,24 +444,12 @@ const categoryTabs = computed(() => groups.value.map(group => ({
   label: showLocations.value && group.location_id ? `${locationTitle(group.location_id)} · ${group.category}` : group.category,
   sectionId: `cat-${group.id}`,
 })))
-const userSelectedCategory = ref('')
-const activeCategory = computed({
-  get: () => userSelectedCategory.value || groups.value[0]?.id || '',
-  set: (value: string) => {
-    userSelectedCategory.value = value
-  },
-})
-const categoryNavHeight = ref(44)
 const menuUpdated = computed<string | null>(() => {
   const latest = props.products.reduce<string | null>((current, product) => {
     if (!current || product.updated_at > current) return product.updated_at
     return current
   }, null)
   return latest ? formatDate(latest) : null
-})
-
-watch(groups, () => {
-  userSelectedCategory.value = ''
 })
 
 /**

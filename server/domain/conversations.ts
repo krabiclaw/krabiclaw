@@ -429,6 +429,12 @@ export function parseMessagePayload(message: Pick<MessageRow, 'payload_json'>): 
   return JSON.parse(message.payload_json) as Record<string, unknown>
 }
 
+/** Who wrote a message mirrored from Airbnb, as Channex names them; its imported history names nobody. */
+export function channelSenderName(payload: Record<string, unknown>): string | null {
+  const name = payload.meta && typeof payload.meta === 'object' ? Reflect.get(payload.meta, 'name') : null
+  return typeof name === 'string' && name.trim() ? name.trim() : null
+}
+
 /** Read through to `messageId` (the newest message shown), never back past where the reader already is. */
 export function readThroughQuery(input: { conversationId: string; organizationId: string; userId: string; messageId: string; guard?: ConversationGuard; now: string }): BatchQuery {
   const guard = input.guard ?? participantGuard('c', input.userId)

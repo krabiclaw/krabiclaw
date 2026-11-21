@@ -28,17 +28,13 @@ export interface AttributionTouch {
   msclkid: string | null
 }
 
-function hasControlCharacter(value: string): boolean {
-  return Array.from(value).some(character => {
-    const code = character.codePointAt(0) ?? 0
-    return code <= 31 || code === 127
-  })
-}
-
-function normalizeValue(value: unknown): string | null {
+function normalizeAttributionValue(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
-  if (!trimmed || hasControlCharacter(trimmed)) return null
+  if (!trimmed || Array.from(trimmed).some(character => {
+    const code = character.charCodeAt(0)
+    return code <= 31 || code === 127
+  })) return null
   return Array.from(trimmed).slice(0, 255).join('')
 }
 
@@ -46,7 +42,7 @@ export function readAttributionParams(searchParams: URLSearchParams): Attributio
   const result: AttributionParams = {}
   for (const key of ATTRIBUTION_KEYS) {
     for (const candidate of searchParams.getAll(key)) {
-      const normalized = normalizeValue(candidate)
+      const normalized = normalizeAttributionValue(candidate)
       if (normalized) {
         result[key] = normalized
         break
@@ -61,7 +57,7 @@ export function sanitizeAttributionParams(value: unknown): AttributionParams {
   const record = value as Record<string, unknown>
   const result: AttributionParams = {}
   for (const key of ATTRIBUTION_KEYS) {
-    const normalized = normalizeValue(record[key])
+    const normalized = normalizeAttributionValue(record[key])
     if (normalized) result[key] = normalized
   }
   return result

@@ -6,7 +6,7 @@
       : 'grid grid-cols-[1fr_auto]'"
     data-testid="dashboard-top-nav"
   >
-    <NuxtLink :to="homeTo" aria-label="Blawby dashboard" class="group flex w-fit shrink-0 items-center gap-2.5 no-underline">
+    <NuxtLink prefetch-on="interaction" :to="homeTo" aria-label="Blawby dashboard" class="group flex w-fit shrink-0 items-center gap-2.5 no-underline">
       <img
         src="/platform/blawby.svg"
         alt=""
@@ -24,7 +24,7 @@
         v-for="item in items"
         :key="item.key"
         :to="item.to"
-        prefetch
+        prefetch-on="interaction"
         class="px-4 py-2 text-sm font-medium no-underline transition active:scale-95 duration-150"
         :class="item.active
           ? 'text-highlighted underline decoration-2 underline-offset-8'

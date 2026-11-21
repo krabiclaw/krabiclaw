@@ -44,13 +44,15 @@
             :class="thread.id === openThreadId ? 'bg-elevated' : 'hover:bg-elevated/60'"
           >
             <span v-if="thread.unread" class="absolute left-2.5 top-[38px] size-2 rounded-full bg-primary" :aria-label="`${thread.title}: unread`" />
-            <InboxAvatar :name="thread.title" :initial="thread.avatar_initial" :support="thread.kind === 'support'" :channel="thread.kind === 'team' ? null : thread.channel" size="lg" />
+            <!-- Airbnb's row: the listing's photo, its dates, the listing, then who said what last. -->
+            <img v-if="thread.image_url" :src="thread.image_url" :alt="thread.home ?? thread.title" class="size-14 shrink-0 rounded-xl object-cover" loading="lazy">
+            <InboxAvatar v-else :name="thread.title" :initial="thread.avatar_initial" :support="thread.kind === 'support'" :channel="thread.kind === 'team' ? null : thread.channel" size="lg" />
             <span class="min-w-0 flex-1">
               <span class="flex items-baseline justify-between gap-3 text-sm text-muted">
-                <span class="min-w-0 truncate">{{ [thread.when, thread.home].filter(Boolean).join(' · ') }}</span>
+                <span class="min-w-0 truncate">{{ thread.when ?? (thread.home ? thread.title : '') }}</span>
                 <span class="shrink-0">{{ thread.time }}</span>
               </span>
-              <span class="block truncate text-base text-highlighted" :class="thread.unread ? 'font-semibold' : 'font-medium'">{{ thread.title }}</span>
+              <span class="block truncate text-base text-highlighted" :class="thread.unread ? 'font-semibold' : 'font-medium'">{{ thread.home ?? thread.title }}</span>
               <span v-if="thread.preview" class="mt-0.5 line-clamp-2 text-sm" :class="thread.unread ? 'text-default' : 'text-muted'">{{ thread.preview_from }}: {{ thread.preview }}</span>
             </span>
           </NuxtLink>
@@ -270,9 +272,7 @@ function readAhead(conversationId: string) {
   }
   prefetch(conversationId)?.then(page => { if (page) settle() }, settle)
 }
-watch([threads, realtime.status], ([rows]) => {
-  for (const thread of rows.slice(0, 5)) if (thread.id !== openThreadId.value) readAhead(thread.id)
-}, { immediate: true })
+
 
 async function loadMore() {
   const before = data.value

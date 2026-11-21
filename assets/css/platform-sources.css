@@ -18,7 +18,7 @@
 @source "../../components/platform";
 @source "../../components/social";
 @source "../../components/booking";
-@source "../../components/ui/AnnouncementModal.vue";
+@source "../../components/ui/PublicAnnouncement.vue";
 @source "../../components/ui/AppBreadcrumb.vue";
 @source "../../components/ui/AppSection.vue";
 @source "../../components/ui/UImage.vue";

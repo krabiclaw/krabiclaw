@@ -1,13 +1,66 @@
+import { buildPublicReviewAggregate, normalizePublicReviewAggregateRows, type PublicReviewAggregateLocation } from '~/server/utils/public-review-aggregate'
 import { HTTPError } from 'nitro'
-import { executeBatch, queryAll, queryFirst, type DbClient } from '../db/index.ts'
+import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
 import { publicResourceCacheInvalidationQuery } from './public-resource-cache.ts'
 import { loadPublicSocialMedia } from './public-social-image.ts'
+import { groupMediaPlacements, mediaPlacementsQuery } from './media-asset-manager.ts'
 import { publicLocationIsProtected } from '~/shared/location-sharing'
 import { projectPublicLocationReview, publicReviewLocationProtectedSql } from './public-location-privacy.ts'
-import { d1JsonStringSet } from '../db/d1-limits.ts'
 import type { ReviewCategory } from '~/shared/review-questions'
 import { submittedReviewRequestSql } from '~/server/utils/review-requests'
+import { publicSocialMediaFromPlacements } from '~/utils/social-metadata'
 
+
+type ReviewLocationScope = string | { sql: string; params: unknown[] }
+
+export function publicReviewListQuery(organization: string | { sql: string }, locationId?: ReviewLocationScope, limit = 50): BatchQuery {
+  return {
+    query: `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source,
+        r.original_review_date, r.original_reference, r.google_review_metadata, r.owner_reply, r.owner_reply_at,
+        ${locationId ? 'r.title, r.helpful_count,' : 'r.location_id, bl.title AS location_title,'}
+        ${publicReviewLocationProtectedSql('r')} AS is_stay_location
+      FROM reviews r ${locationId ? '' : 'LEFT JOIN business_locations bl ON bl.id = r.location_id AND bl.organization_id = r.organization_id'}
+      WHERE r.organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+        AND r.status = 'approved'${locationId ? ` AND r.location_id = ${typeof locationId === 'string' ? '?' : locationId.sql}` : ''}
+      ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id LIMIT ?`,
+    params: [...(typeof organization === 'string' ? [organization] : []), ...(typeof locationId === 'string' ? [locationId] : locationId?.params ?? []), limit],
+  }
+}
+
+export function visiblePublicReview({ is_stay_location, ...review }: Record<string, unknown>) {
+  return projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))
+}
+
+export async function readPublicLocationReviews(db: DbClient, organizationId: string,
+  location: PublicReviewAggregateLocation & { id: string }, full = true) {
+  const plan = preparePublicLocationReviews(organizationId, location.id, full)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read public location reviews' }), organizationId, location)
+}
+
+export function preparePublicLocationReviews(organization: string | { sql: string }, location: ReviewLocationScope, full = true) {
+  const list = publicReviewListQuery(organization, location, full ? 50 : 3)
+  const queries = [list, ...(full ? [{
+    query: `SELECT rating FROM reviews WHERE organization_id = ${typeof organization === 'string' ? '?' : organization.sql}
+      AND location_id = ${typeof location === 'string' ? '?' : location.sql} AND status = 'approved'`,
+    params: [...(typeof organization === 'string' ? [organization] : []), ...(typeof location === 'string' ? [location] : location.params)],
+  }, mediaPlacementsQuery({
+    organizationId: organization, ownerType: 'review', owners: { sql: `SELECT id FROM (${list.query})`, params: list.params },
+    includeOrganizationFallback: true,
+  })] : [])]
+  return { queries, read([listed, ratings, media]: D1Result[], id: string, aggregateLocation: PublicReviewAggregateLocation) {
+    const placements = media ? groupMediaPlacements(media.results) : null
+    const fallback = placements?.get(id) ?? []
+    return {
+      reviews: (listed!.results as Record<string, unknown>[]).map(row => {
+        const review = visiblePublicReview(row)
+        return placements
+          ? { ...review, ...publicSocialMediaFromPlacements('review', placements.get(String(row.id)) ?? [], fallback) }
+          : review
+      }),
+      aggregate: ratings ? buildPublicReviewAggregate(normalizePublicReviewAggregateRows(ratings.results as { rating?: unknown }[]), aggregateLocation) : null,
+    }
+  } }
+}
 
 function publicReviewRow(row: Record<string, unknown>, protectedLocation: boolean, publishedOnly: boolean): Record<string, unknown> & { publication_authorized: boolean; verified: boolean } {
   // A published review names no internal request or staff account, and
@@ -20,37 +73,47 @@ function publicReviewRow(row: Record<string, unknown>, protectedLocation: boolea
   }
 }
 
-/** The optional per-question scores beside each review's overall rating, for those who may read them. */
-export async function attachReviewCategoryRatings<T extends Record<string, unknown>>(db: DbClient, reviews: T[]): Promise<Array<T & { category_ratings: Array<{ category: ReviewCategory; rating: number }> }>> {
-  const ids = reviews.map(review => String(review.id))
-  const rows = ids.length
-    ? await queryAll<{ review_id: string; category: ReviewCategory; rating: number }>(db, 'SELECT review_id, category, rating FROM review_category_ratings WHERE review_id IN (SELECT value FROM json_each(?)) ORDER BY review_id, category', [d1JsonStringSet(ids)])
-    : []
-  return reviews.map(review => ({ ...review, category_ratings: rows.filter(row => row.review_id === String(review.id)).map(({ category, rating }) => ({ category, rating })) }))
-}
-
 /**
  * `locationId` names one location's reviews, `null` the reviews attached to no
  * location, and omitting it lists every review on the site.
  */
 export async function listOrganizationReviews(db: DbClient, organizationId: string, options: { publishedOnly?: boolean; locationId?: string | null } = {}): Promise<Array<Record<string, unknown> & { publication_authorized: boolean; verified: boolean; category_ratings?: Array<{ category: ReviewCategory; rating: number }> }>> {
+  const plan = prepareOrganizationReviews(organizationId, options)
+  return plan.read(await executeBatch(db, plan.queries, { operation: 'Read organization reviews' }), organizationId)
+}
+
+export function prepareOrganizationReviews(organizationId: string | { sql: string }, options: { publishedOnly?: boolean; locationId?: string | null } = {}) {
+  const org = typeof organizationId === 'string' ? '?' : organizationId.sql
+  const orgParams = typeof organizationId === 'string' ? [organizationId] : []
   const locationFilter = options.locationId ? ' AND r.location_id = ?' : options.locationId === null ? ' AND r.location_id IS NULL' : ''
-  const rows = await queryAll<Record<string, unknown>>(db, `
+  const scope = `r.organization_id = ${org}${locationFilter}${options.publishedOnly ? " AND r.status = 'approved'" : ''}`
+  const params = options.locationId ? [...orgParams, options.locationId] : orgParams
+  const queries = [{ query: `
     SELECT r.id, r.organization_id, r.location_id, r.author_name,
            r.rating, r.title, r.content, r.owner_reply, r.owner_reply_at, r.helpful_count, r.status, r.source,
            ${submittedReviewRequestSql('r')} AS review_request_id, entered_by_user_id, collection_method, original_review_date,
            original_reference, google_review_metadata, publication_authorized, created_at, updated_at,
-           ${options.publishedOnly ? '' : 'r.private_feedback,'}
+           ${options.publishedOnly ? '' : `r.private_feedback,
+             (SELECT json_group_array(json_object('category', category, 'rating', rating) ORDER BY category)
+                FROM review_category_ratings WHERE review_id = r.id) AS category_ratings_json,`}
            ${publicReviewLocationProtectedSql('r')} AS is_stay_location
     FROM reviews r
-    WHERE r.organization_id = ?${locationFilter}${options.publishedOnly ? " AND r.status = 'approved'" : ''}
+    WHERE ${scope}
     ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC
-  `, options.locationId ? [organizationId, options.locationId] : [organizationId])
-  const reviews = await attachReviewMedia(db, organizationId, rows.map(({ is_stay_location, ...row }) =>
-    publicReviewRow(row, options.publishedOnly === true && publicLocationIsProtected(is_stay_location), options.publishedOnly === true)))
-  // The public reads a review's words and overall rating; the per-question scores are the team's.
-  if (options.publishedOnly) return reviews
-  return await attachReviewCategoryRatings(db, reviews)
+  `, params }, mediaPlacementsQuery({
+    organizationId, ownerType: 'review', owners: { sql: `SELECT r.id FROM reviews r WHERE ${scope}`, params },
+    includeOrganizationFallback: true,
+  })]
+  return { queries, read: ([listed, media]: D1Result[], id: string) => {
+    const placements = groupMediaPlacements(media!.results)
+    const fallback = placements.get(id) ?? []
+    return (listed!.results as Record<string, unknown>[]).map(({ is_stay_location, category_ratings_json, ...row }) => ({
+      ...publicReviewRow(row, options.publishedOnly === true && publicLocationIsProtected(is_stay_location), options.publishedOnly === true),
+      ...publicSocialMediaFromPlacements('review', placements.get(String(row.id)) ?? [], fallback),
+      ...(typeof category_ratings_json === 'string'
+        ? { category_ratings: JSON.parse(category_ratings_json) as Array<{ category: ReviewCategory; rating: number }> } : {}),
+    }))
+  } }
 }
 
 export async function attachReviewMedia<T extends Record<string, unknown>>(db: DbClient, organizationId: string, reviews: T[]) {

@@ -33,10 +33,17 @@ test('the email link returns through normal sign-in and only the invited account
     await expect(team.getByRole('heading', { name: 'Pending invitations', exact: true })).toBeVisible()
     await team.getByRole('link', { name: 'Invite a team member' }).click()
     await team.getByLabel('Email address').fill(invitee.email)
-    await expect(team.getByRole('radio', { name: /^General Staff/ })).toBeChecked()
-    await expect(team.getByRole('radio', { name: /^Restaurant Manager/ })).toBeVisible()
-    await expect(team.getByRole('radio', { name: /^Cleaner/ })).toHaveCount(0)
-    await team.getByRole('radio', { name: /^Kitchen/ }).check()
+    // The role is its own step, never under the keyboard of the email field.
+    await expect(team.getByRole('checkbox', { name: /^General Staff/ })).toHaveCount(0)
+    await team.getByRole('button', { name: 'Next', exact: true }).click()
+    // Nothing is chosen for the owner: Send waits for a role.
+    await expect(team.getByRole('checkbox', { name: /^General Staff/ })).not.toBeChecked()
+    await expect(team.getByRole('button', { name: 'Send invite', exact: true })).toBeDisabled()
+    await expect(team.getByRole('checkbox', { name: /^Restaurant Manager/ })).toBeVisible()
+    await expect(team.getByRole('checkbox', { name: /^Cleaner/ })).toHaveCount(0)
+    await team.getByRole('checkbox', { name: /^Kitchen/ }).check()
+    // A member can hold several roles; Better Auth stores them together.
+    await team.getByRole('checkbox', { name: /^Host/ }).check()
     const table = Object.values(restaurant.products).find(product => product.kind === 'table')
     if (!table) throw new Error('No restaurant table in the fixture')
     await team.getByRole('combobox', { name: table.name, exact: true }).click()
@@ -44,12 +51,13 @@ test('the email link returns through normal sign-in and only the invited account
     await team.getByRole('button', { name: 'Send invite', exact: true }).click()
     const pending = team.getByRole('listitem').filter({ hasText: invitee.email })
     await expect(pending).toContainText('Email: recorded locally')
+    await expect(pending).toContainText('Kitchen, Host')
     const pendingActions = pending.getByRole('button', { name: `Actions for ${invitee.email}` })
     await expect(pendingActions).toBeVisible()
     const list = await request.get('/api/auth/organization/list-invitations', { params: { organizationId: restaurant.organizationId } })
     expect(list.status()).toBe(200)
     const sent = (await list.json() as Array<{ email: string; id: string; status: string; role: string }>).find(invitation => invitation.email === invitee.email)
-    expect(sent).toMatchObject({ status: 'pending', role: 'kitchen' })
+    expect(sent).toMatchObject({ status: 'pending', role: 'kitchen,host' })
     if (!sent) throw new Error('Better Auth did not return the invitation sent by Team')
     invitationId = sent.id
     const teamRefresh = team.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/members')
@@ -96,7 +104,7 @@ test('the email link returns through normal sign-in and only the invited account
   const organizations = await page.request.get('/api/account/organizations')
   expect(organizations.status()).toBe(200)
   expect(await organizations.json()).toMatchObject({ organizations: expect.arrayContaining([
-    expect.objectContaining({ id: restaurant.organizationId, role: 'kitchen' }),
+    expect.objectContaining({ id: restaurant.organizationId, role: 'kitchen,host' }),
   ]) })
   const catalog = await page.request.get('/api/dashboard/catalog', { params: { org: restaurant.slug, location_id: restaurant.locations.brooklyn!.id } })
   expect(catalog.status(), await catalog.text()).toBe(200)

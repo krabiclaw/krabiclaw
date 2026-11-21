@@ -1,30 +1,37 @@
 <template>
+  <!-- Two steps, as Airbnb's co-host invite: the address first, then the role on a screen of its own, so the keyboard never hides the choice. -->
   <DashboardLeafPanel
     v-if="screen"
     id="organization-members-invite"
     :title="screen.title"
-    :save-label="savedInvitation ? screen.resend_label : screen.save_label"
+    :save-label="step === 'email' ? 'Next' : savedInvitation ? screen.resend_label : screen.save_label"
     :saving="inviting"
-    :disabled="!email.trim() || !selectedRole"
+    :disabled="step === 'email' ? !validEmail : !selectedRoles.length"
     :error="inviteError"
     @cancel="resetInvite"
-    @save="sendInvite"
+    @save="next"
   >
-    <div class="space-y-6">
+    <form v-if="step === 'email'" @submit.prevent="next">
       <UFormField :label="screen.email_label" required>
-        <UInput v-model="email" type="email" autocomplete="email" :disabled="inviting" autofocus class="w-full" />
+        <UInput v-model="email" type="email" autocomplete="email" enterkeyhint="next" autofocus class="w-full" />
       </UFormField>
+    </form>
+    <div v-else class="space-y-6">
+      <button type="button" class="flex w-full items-center gap-3 rounded-lg border border-default p-3 text-left" :disabled="inviting" @click="step = 'email'">
+        <span class="min-w-0 flex-1"><span class="block text-sm text-muted">{{ screen.email_label }}</span><span class="block truncate font-medium text-highlighted">{{ email.trim() }}</span></span>
+        <span class="text-sm font-medium text-highlighted underline">Edit</span>
+      </button>
       <fieldset class="space-y-2" :disabled="inviting">
         <legend class="mb-2 font-medium">{{ screen.role_label }}</legend>
         <label v-for="choice in screen.roles" :key="choice.value" class="flex cursor-pointer items-start gap-3 rounded-lg border border-default p-3">
-          <input v-model="role" type="radio" :value="choice.value" name="staff-role" class="mt-1">
+          <input v-model="roles" type="checkbox" :value="choice.value" name="staff-role" class="mt-1">
           <span><span class="block font-medium">{{ choice.label }}</span><span class="text-sm text-muted">{{ choice.description }}</span></span>
         </label>
       </fieldset>
-      <fieldset v-if="selectedRole?.access.length && screen.listings.length" class="space-y-3" :disabled="inviting">
+      <fieldset v-if="listingAccess.length && screen.listings.length" class="space-y-3" :disabled="inviting">
         <legend class="mb-2 font-medium">{{ screen.listing_label }}</legend>
         <UFormField v-for="listing in screen.listings" :key="listing.listing_id" :label="listing.label">
-          <USelect v-model="grants[listing.listing_id]" :items="[{ value: 'none', label: screen.no_access_label }, ...selectedRole.access]" class="w-full" />
+          <USelect v-model="grants[listing.listing_id]" :items="[{ value: 'none', label: screen.no_access_label }, ...listingAccess]" class="w-full" />
         </UFormField>
       </fieldset>
     </div>
@@ -51,18 +58,29 @@ const { data: screen, error } = await useAsyncData(
 if (error.value) throw error.value
 
 const email = ref('')
-const role = ref(screen.value?.default_role)
-const selectedRole = computed(() => screen.value?.roles.find(choice => choice.value === role.value))
+const step = ref<'email' | 'role'>('email')
+const validEmail = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim()))
+// No role is chosen for the owner: they pick one on its own step.
+// A member may hold several roles; listing access offers what any chosen role allows.
+const roles = ref<string[]>([])
+const selectedRoles = computed(() => screen.value?.roles.filter(choice => roles.value.includes(choice.value)) ?? [])
+const listingAccess = computed(() => [...new Map(selectedRoles.value.flatMap(choice => choice.access).map(access => [access.value, access])).values()])
 const grants = ref<Record<string, string>>({})
 const inviting = ref(false)
 const inviteError = ref('')
 const savedInvitation = ref<string | null>(null)
-watch(role, () => { grants.value = {} })
-watch([email, role, grants], () => { savedInvitation.value = null }, { deep: true })
+watch(roles, () => { grants.value = {} }, { deep: true })
+watch([email, roles, grants], () => { savedInvitation.value = null }, { deep: true })
+
+function next() {
+  if (step.value === 'role') return sendInvite()
+  if (validEmail.value) step.value = 'role'
+}
 
 function resetInvite() {
   email.value = ''
-  role.value = screen.value?.default_role
+  step.value = 'email'
+  roles.value = []
   grants.value = {}
   inviteError.value = ''
   savedInvitation.value = null
@@ -73,11 +91,11 @@ async function sendInvite() {
   inviteError.value = ''
   try {
     const organizationId = screen.value?.organization_id
-    if (!organizationId || organizationId !== dashboard.organization.value?.id || !selectedRole.value) throw new Error('Invitation details are unavailable')
+    if (!organizationId || organizationId !== dashboard.organization.value?.id || !selectedRoles.value.length) throw new Error('Invitation details are unavailable')
     const listingAccess = Object.entries(grants.value).filter(([, access]) => access !== 'none').map(([listing_id, access]) => ({ listing_id, access }))
     const result = await authClient.$fetch<{ id: string }>('/organization/invite-member', {
       method: 'POST', body: {
-        email: email.value.trim(), role: selectedRole.value.value, organizationId, resend: Boolean(savedInvitation.value),
+        email: email.value.trim(), role: selectedRoles.value.map(choice => choice.value), organizationId, resend: Boolean(savedInvitation.value),
         ...(listingAccess.length ? { listing_access: JSON.stringify(listingAccess) } : {}),
       },
     })

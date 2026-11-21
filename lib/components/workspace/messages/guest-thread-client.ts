@@ -46,7 +46,7 @@ const isCount = (value: unknown) => Number.isSafeInteger(value) && Number(value)
 
 function isRow(value: unknown): value is InboxRow {
   return isRecord(value) && isText(value.id) && (value.kind === 'guest' || value.kind === 'support' || value.kind === 'team')
-    && isText(value.title) && isText(value.avatar_initial) && (value.channel === 'airbnb' || value.channel === 'direct')
+    && isText(value.title) && isText(value.avatar_initial) && isNullableText(value.image_url) && (value.channel === 'airbnb' || value.channel === 'direct')
     && isNullableText(value.home) && isNullableText(value.when) && typeof value.preview === 'string' && (value.preview ? isText(value.preview_from) : value.preview_from === null)
     && isText(value.time) && typeof value.unread === 'boolean'
 }
@@ -89,6 +89,7 @@ export function isConversationEntry(value: unknown): value is ConversationEntry 
     && Array.isArray(value.photos) && value.photos.every(isPhoto)
     && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshown_files)
     && isNullableText(value.author_user_id) && typeof value.automatic === 'boolean'
+    && (value.job_status === undefined || value.job_status === null || isText(value.job_status))
     && Array.isArray(value.deliveries) && value.deliveries.every(delivery => isRecord(delivery)
       && isText(delivery.id) && isText(delivery.channel) && isText(delivery.status)
       && isNullableText(delivery.error) && isText(delivery.updated_at))

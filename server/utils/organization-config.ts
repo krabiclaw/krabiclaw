@@ -32,7 +32,7 @@ export interface OrganizationConfig {
  */
 export type WritableOrganizationConfigKey = Exclude<keyof OrganizationConfig, 'google_analytics_measurement_id' | 'palette'>
 
-const CONFIG_COLUMNS = `
+export const CONFIG_COLUMNS = `
   json_extract(o.settings_json, '$.config.palette') AS palette,
   json_extract(o.settings_json, '$.config.font_preset') AS font_preset,
   json_type(o.settings_json, '$.config.font_preset') AS font_preset_type,
@@ -46,7 +46,7 @@ const CONFIG_COLUMNS = `
   json_extract(o.settings_json, '$.config.careers_email') AS careers_email,
   (SELECT i.measurement_id FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'google_analytics') AS google_analytics_measurement_id`
 
-type ConfigRow = Record<keyof OrganizationConfig | 'font_preset_type', unknown>
+export type ConfigRow = Record<keyof OrganizationConfig | 'font_preset_type', unknown>
 
 export const getConfig = async (db: DbClient, organizationId: string): Promise<OrganizationConfig> => {
   const row = await queryFirst<ConfigRow>(db, `SELECT ${CONFIG_COLUMNS} FROM organization o WHERE o.id = ?`, [organizationId])
@@ -54,7 +54,7 @@ export const getConfig = async (db: DbClient, organizationId: string): Promise<O
   return parseConfig(row)
 }
 
-function parseConfig(row: ConfigRow): OrganizationConfig {
+export function parseConfig(row: ConfigRow): OrganizationConfig {
   const config: OrganizationConfig = {}
   for (const key of ["press_email","partnerships_email","catering_email","careers_email","google_analytics_measurement_id"] as const) {
     const value = row[key]

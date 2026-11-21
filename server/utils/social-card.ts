@@ -3,7 +3,7 @@ import {
   buildSingleMediaPlacementQueries,
   deleteMediaAsset,
   mediaPlacementsQuery,
-  readMediaPlacements,
+  groupMediaPlacements,
   type StoredMediaPlacementItem,
 } from '~/server/utils/media-asset-manager'
 import { uploadResolvedMediaToAssetStore, type UploadResolvedMediaInput } from '~/server/utils/media-upload'
@@ -20,7 +20,7 @@ import {
   type SocialTemplate,
 } from '~/utils/social-metadata'
 import { resolvePublicSite } from '~/utils/site-routing'
-import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
+import { mediaStillUrl, resolveOwnerPicture } from '~/shared/media-placement-contract'
 import { platformHomeSocialCardCopy } from '~/server/utils/platform-home-social-card'
 import { publicLocationProtectedSql } from '~/server/utils/public-location-privacy'
 import { publicLocationIsProtected } from '~/shared/location-sharing'
@@ -155,15 +155,25 @@ export function queueOrganizationSocialCardRefresh(organizationId: string): { id
   }] }
 }
 
-function readOrganizationSocialCardRefresh(db: DbClient, organizationId: string) {
-  return queryFirst<{ id: string; reason: string; status: 'pending' | 'processing' | 'processed' | 'failed'; last_error: string | null }>(db, `
+type SocialCardRefreshRow = { id: string; reason: string; status: 'pending' | 'processing' | 'processed' | 'failed'; last_error: string | null }
+
+export function organizationSocialCardRefreshQuery(organizationId: string | { sql: string }): BatchQuery {
+  return { query: `
     SELECT id, reason, status, last_error FROM public_resource_cache_invalidations
-    WHERE organization_id = ? AND reason LIKE ? ORDER BY rowid DESC LIMIT 1
-  `, [organizationId, `${SOCIAL_CARD_REFRESH_PREFIX}%`])
+    WHERE organization_id = ${typeof organizationId === 'string' ? '?' : organizationId.sql} AND reason LIKE ? ORDER BY rowid DESC LIMIT 1
+  `, params: [...(typeof organizationId === 'string' ? [organizationId] : []), `${SOCIAL_CARD_REFRESH_PREFIX}%`] }
+}
+
+function readOrganizationSocialCardRefresh(db: DbClient, organizationId: string) {
+  const { query, params } = organizationSocialCardRefreshQuery(organizationId)
+  return queryFirst<SocialCardRefreshRow>(db, query, params)
 }
 
 export async function loadOrganizationSocialCardRefresh(db: DbClient, organizationId: string): Promise<OrganizationSocialCardRefresh | null> {
-  const row = await readOrganizationSocialCardRefresh(db, organizationId)
+  return organizationSocialCardRefresh(await readOrganizationSocialCardRefresh(db, organizationId))
+}
+
+export function organizationSocialCardRefresh(row?: SocialCardRefreshRow | null): OrganizationSocialCardRefresh | null {
   if (!row) return null
   return {
     id: row.id,
@@ -268,81 +278,93 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-async function loadOwner(db: DbClient, owner: SocialCardOwner): Promise<OwnerRecord | null> {
+function socialCardOwnerQuery(owner: SocialCardOwner): string {
   switch (owner.owner_type) {
-    case 'organization': {
-      const record = await queryFirst<OwnerRecord>(db, `SELECT id AS organization_id,
+    case 'organization':
+      return `SELECT id AS organization_id,
         COALESCE(NULLIF(trim(seo_title), ''), NULLIF(trim(name), '')) AS title,
         COALESCE(NULLIF(trim(seo_description), ''), NULLIF(trim(brand_description), '')) AS description,
-        NULL AS label, NULL AS location FROM organization WHERE id = ? LIMIT 1`, [owner.owner_id]) ?? null
-      if (!record || owner.owner_id !== 'platform') return record
-      // Home shares the organization's generated card. Read its authored hero
-      // instead of producing a name-only card from empty organization SEO fields.
-      const hero = await queryFirst<{ data_json: string }>(db, `SELECT cb.data_json
-        FROM content_documents d JOIN content_blocks cb ON cb.document_id = d.id
-        WHERE d.organization_id = ? AND d.kind = 'page' AND d.row_role = 'root'
-          AND d.path = '/' AND cb.type = 'hero' AND cb.parent_block_id IS NULL
-        ORDER BY cb.position LIMIT 1`, [owner.owner_id])
-      const copy = hero ? platformHomeSocialCardCopy(JSON.parse(hero.data_json)) : null
-      return copy ? { ...record, title: copy.title, description: copy.description ?? record.description } : record
-    }
+        NULL AS label, NULL AS location FROM organization WHERE id = ? LIMIT 1`
     case 'business_location':
-      return await queryFirst<OwnerRecord>(db, `SELECT organization_id,
+      return `SELECT organization_id,
         COALESCE(NULLIF(trim(seo_title), ''), title) AS title,
         COALESCE(NULLIF(trim(seo_description), ''), NULLIF(trim(short_description), ''), NULLIF(trim(description), '')) AS description,
         'Location' AS label, COALESCE(address ->> '$.sublocality', address ->> '$.locality') AS location,
-        ${publicLocationProtectedSql('bl')} AS is_stay_location FROM business_locations bl WHERE id = ? LIMIT 1`, [owner.owner_id]) ?? null
+        ${publicLocationProtectedSql('bl')} AS is_stay_location FROM business_locations bl WHERE id = ? LIMIT 1`
     case 'product':
-      return await queryFirst<OwnerRecord>(db, `SELECT p.organization_id,
+      return `SELECT p.organization_id,
         p.name AS title,
         NULLIF(trim(p.description), '') AS description,
         'Product' AS label, NULL AS location
         FROM products p
         JOIN product_publications pub ON pub.product_id = p.id
           AND pub.organization_id = p.organization_id AND pub.published = 1
-        WHERE p.id = ? LIMIT 1`, [owner.owner_id]) ?? null
+        WHERE p.id = ? LIMIT 1`
     case 'content_document':
-      return await queryFirst<OwnerRecord>(db, `SELECT d.organization_id,
+      return `SELECT d.organization_id,
         COALESCE(NULLIF(trim(d.title), ''), NULLIF(trim(substr(d.summary, 1, 80)), '')) AS title,
         NULLIF(trim(d.summary), '') AS description,
         CASE d.kind WHEN 'article' THEN 'Article' WHEN 'social_post' THEN 'Update' END AS label,
         bl.title AS location
         FROM content_documents d JOIN content_documents root ON root.id = COALESCE(d.root_id, d.id)
         LEFT JOIN business_locations bl ON bl.id = root.location_id
-        WHERE d.id = ? AND d.kind IN ('page','article','social_post') LIMIT 1`, [owner.owner_id]) ?? null
+        WHERE d.id = ? AND d.kind IN ('page','article','social_post') LIMIT 1`
     case 'review':
-      return await queryFirst<OwnerRecord>(db, `SELECT organization_id,
+      return `SELECT organization_id,
         COALESCE(NULLIF(trim(title), ''), 'Review by ' || COALESCE(NULLIF(trim(author_name), ''), 'a customer')) AS title,
         NULLIF(trim(content), '') AS description, 'Review' AS label, NULL AS location
-        FROM reviews WHERE id = ? AND organization_id IS NOT NULL LIMIT 1`, [owner.owner_id]) ?? null
+        FROM reviews WHERE id = ? AND organization_id IS NOT NULL LIMIT 1`
   }
 }
 
-async function loadOrganization(db: DbClient, organizationId: string): Promise<OrganizationRecord | null> {
-  return await queryFirst<OrganizationRecord>(db, `SELECT s.id, s.name, s.brand_description,
-    s.theme_id, s.vertical
-    FROM organization s WHERE s.id = ? LIMIT 1`, [organizationId]) ?? null
-}
+type StoredSocialCard = { organization_id: string; asset_id: string }
 
-/**
- * A page's or an article's picture is its first top-level block carrying a
- * `media` placement. Block type is not the test, because the block that leads
- * differs per site; carrying a picture is what they have in common. A
- * social post keeps its picture in its own `cover` and has no blocks.
- */
-async function loadLeadingPictureBlockId(db: DbClient, owner: SocialCardOwner): Promise<string | null> {
-  if (owner.owner_type !== 'content_document') return null
-  const block = await queryFirst<{ id: string }>(db, `SELECT cb.id FROM content_blocks cb
-    JOIN media_placements mp ON mp.owner_type = 'content_block' AND mp.owner_id = cb.id
-      AND mp.slot = 'media' AND mp.status = 'active'
-    JOIN media_assets ma ON ma.id = mp.asset_id AND ma.status = 'active'
-    WHERE cb.document_id = ? AND cb.parent_block_id IS NULL
-    ORDER BY cb.position LIMIT 1`, [owner.owner_id])
-  return block?.id ?? null
-}
-
-async function readOwnerPlacements(db: DbClient, organizationId: string, ownerType: MediaPlacementOwnerType, ownerId: string, includePendingSocialCard = false) {
-  return (await readMediaPlacements(db, { organizationId, ownerType, ownerIds: [ownerId], includePendingSocialCard })).get(ownerId) ?? []
+async function readSocialCardSources(db: DbClient, owner: SocialCardOwner) {
+  const scope = socialCardOwnerQuery(owner)
+  const organizationId = { sql: '(SELECT organization_id FROM card_owner)' }
+  const queries: BatchQuery[] = [
+    { query: scope, params: [owner.owner_id] },
+    { query: `SELECT id, name, brand_description, theme_id, vertical FROM organization WHERE id = ${organizationId.sql}` },
+    mediaPlacementsQuery({ organizationId, ownerType: owner.owner_type, owners: [owner.owner_id], includePendingSocialCard: true }),
+    mediaPlacementsQuery({ organizationId, ownerType: 'organization', owners: { sql: `SELECT ${organizationId.sql}` } }),
+    { query: "SELECT organization_id, asset_id FROM media_placements WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'",
+      params: [owner.owner_type, owner.owner_id] },
+  ]
+  const isDocument = owner.owner_type === 'content_document'
+  const isPlatformHome = owner.owner_type === 'organization' && owner.owner_id === 'platform'
+  if (isDocument) queries.push(mediaPlacementsQuery({
+    organizationId,
+    ownerType: 'content_block',
+    owners: {
+      sql: `SELECT cb.id FROM content_blocks cb
+        JOIN media_placements mp ON mp.owner_type = 'content_block' AND mp.owner_id = cb.id
+          AND mp.organization_id = ${organizationId.sql} AND mp.slot = 'media' AND mp.status = 'active'
+        JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
+        WHERE cb.document_id = ? AND cb.parent_block_id IS NULL ORDER BY cb.position LIMIT 1`,
+      params: [owner.owner_id],
+    },
+  }))
+  if (isPlatformHome) queries.push({
+    query: `SELECT cb.data_json FROM content_documents d JOIN content_blocks cb ON cb.document_id = d.id
+      WHERE d.organization_id = ${organizationId.sql} AND d.kind = 'page' AND d.row_role = 'root'
+        AND d.path = '/' AND cb.type = 'hero' AND cb.parent_block_id IS NULL ORDER BY cb.position LIMIT 1`,
+  })
+  const [ownerRow, site, placements, brand, cards, extra] = await executeBatch(db, queries.map((statement, index) =>
+    index === 0 || index === 4 ? statement : {
+      query: `WITH card_owner AS (${scope}) ${statement.query}`, params: [owner.owner_id, ...(statement.params ?? [])],
+    }), { operation: 'Read the social card and its source media' })
+  const organization = site!.results[0] as OrganizationRecord | undefined
+  const record = ownerRow!.results[0] as OwnerRecord | undefined
+  const hero = isPlatformHome ? extra?.results[0] as { data_json: string } | undefined : undefined
+  const copy = hero ? platformHomeSocialCardCopy(JSON.parse(hero.data_json)) : null
+  return {
+    ownerRecord: record && copy ? { ...record, title: copy.title, description: copy.description ?? record.description } : record,
+    organization,
+    ownerMedia: groupMediaPlacements(placements!.results).get(owner.owner_id) ?? [],
+    organizationMedia: organization ? groupMediaPlacements(brand!.results).get(organization.id) ?? [] : [],
+    leadingMedia: isDocument ? [...groupMediaPlacements(extra!.results).values()].flat() : [],
+    cards: cards!.results as StoredSocialCard[],
+  }
 }
 
 export function buildSocialCardGenerationKey(input: {
@@ -365,10 +387,9 @@ async function deleteUnplacedCard(db: DbClient, env: SocialCardEnv, assetId: str
   await deleteMediaAsset(db, env, assetId, organizationId, actorId)
 }
 
-async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner: SocialCardOwner; actorId?: string | null; claim?: SocialCardRefreshClaim }, reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'private_location') {
+async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner: SocialCardOwner; actorId?: string | null; claim?: SocialCardRefreshClaim }, placed: StoredSocialCard[], reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'private_location') {
   // Only production stores cards, so only production deletes one; elsewhere
   // the rows are a copy of production's and the card they name is production's.
-  const placed = await queryAll<{ organization_id: string; asset_id: string }>(input.db, "SELECT organization_id, asset_id FROM media_placements WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'", [input.owner.owner_type, input.owner.owner_id])
   if (placed.length) {
     const guard = socialCardClaimGuard(input.claim)
     await executeBatch(input.db, [
@@ -395,27 +416,20 @@ export async function refreshSocialCard(input: {
   // regenerate fails that write: the batch paths below record the failure.
   const { db, env, owner } = input
   const claimGuard = socialCardClaimGuard(input.claim)
-  const ownerRecord = await loadOwner(db, owner)
-  if (!ownerRecord) return await clearSocialCard(input, 'owner_not_found')
-  if (owner.owner_type === 'business_location' && publicLocationIsProtected(ownerRecord.is_stay_location)) return await clearSocialCard(input, 'private_location')
-  const organization = await loadOrganization(db, ownerRecord.organization_id)
-  if (!organization) return await clearSocialCard(input, 'owner_not_found')
+  const { ownerRecord, organization, ownerMedia, organizationMedia, leadingMedia, cards } = await readSocialCardSources(db, owner)
+  if (!ownerRecord || !organization) return await clearSocialCard(input, cards, 'owner_not_found')
+  if (owner.owner_type === 'business_location' && publicLocationIsProtected(ownerRecord.is_stay_location)) return await clearSocialCard(input, cards, 'private_location')
   const title = ownerRecord.title?.trim()
   const organizationName = organization.name?.trim() || null
-  if (!title || !organizationName) return await clearSocialCard(input, 'missing_content')
+  if (!title || !organizationName) return await clearSocialCard(input, cards, 'missing_content')
 
-  const [ownerMedia, organizationMedia, leadingBlockId] = await Promise.all([
-    readOwnerPlacements(db, organization.id, owner.owner_type, owner.owner_id, true),
-    readOwnerPlacements(db, organization.id, 'organization', organization.id),
-    loadLeadingPictureBlockId(db, owner),
-  ])
-  const source = leadingBlockId
-    ? resolveOwnerPicture('content_block', await readOwnerPlacements(db, organization.id, 'content_block', leadingBlockId), organizationMedia)
+  const source = leadingMedia.length
+    ? resolveOwnerPicture('content_block', leadingMedia, organizationMedia)
     : resolveOwnerPicture(owner.owner_type, ownerMedia, organizationMedia)
   const logo = organizationMedia.find(item => item.slot === 'logo' && mediaStillUrl(item)) ?? null
   const current = ownerMedia.find(item => item.slot === 'social_card') ?? null
   const backgroundImageUrl = mediaStillUrl(source)
-  if (!source || !backgroundImageUrl) return await clearSocialCard(input, 'no_source')
+  if (!source || !backgroundImageUrl) return await clearSocialCard(input, cards, 'no_source')
 
   const payload: SocialCardRenderPayload = {
     template: socialTemplate(organization),

@@ -26,8 +26,7 @@ import { getErrorMessage } from '~/utils/errors'
 import {
   COLLECTION_METHOD_LABELS,
   REVIEW_STATUS_LABELS,
-  isTestimonialsResponse,
-  type OrganizationTestimonial,
+  useDashboardReviews,
   type TestimonialStatus,
 } from '~/utils/testimonials'
 
@@ -39,17 +38,10 @@ const router = useRouter()
 
 const STATUS_COLORS: Record<TestimonialStatus, 'warning' | 'success' | 'neutral'> = { pending: 'warning', approved: 'success', rejected: 'neutral', private: 'neutral' }
 
-const dashboardApi = useDashboardApi()
 const level = useRouteLevel()
 const organizationId = useDashboardOrganizationId()
 
-const { data, error } = await useAsyncData(
-  () => locationScope.value ? `dashboard-location-reviews-${organizationId}-${locationScope.value}` : `dashboard-organization-reviews-${organizationId}`,
-  () => dashboardApi<{ reviews: OrganizationTestimonial[] }>(
-    `/api/editor/organizations/${organizationId}/reviews`,
-    { query: locationScope.value ? { location_id: locationScope.value } : undefined, validate: isTestimonialsResponse },
-  ),
-)
+const { data, error } = await useDashboardReviews(organizationId, locationScope)
 
 const testimonials = computed(() => data.value?.reviews ?? [])
 // A review is a record, so its row links to its own level, as a question's does.

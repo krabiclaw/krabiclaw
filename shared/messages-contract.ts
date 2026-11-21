@@ -1,7 +1,7 @@
 import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus, InboxPhoto, InboxThreadKind } from '~/server/domain/guest-threads/types'
 
 export const PLATFORM_MESSAGE_AUTHOR_KIND = 'blawby'
-export const PLATFORM_MESSAGE_AUTHOR_KINDS = [PLATFORM_MESSAGE_AUTHOR_KIND, 'krabiclaw'] as const
+export const PLATFORM_MESSAGE_AUTHOR_KINDS = [PLATFORM_MESSAGE_AUTHOR_KIND] as const
 export const PLATFORM_MESSAGE_AUTHOR_KINDS_SQL = PLATFORM_MESSAGE_AUTHOR_KINDS.map(value => `'${value}'`).join(', ')
 
 export function isPlatformMessageAuthor(value: string): value is typeof PLATFORM_MESSAGE_AUTHOR_KINDS[number] {
@@ -47,6 +47,7 @@ export interface ConversationMessage {
   automatic: boolean
   /** Blawby's post of a job: the card the job's Done is on. */
   job: boolean
+  job_status?: 'open' | 'done' | 'skipped' | 'cancelled' | null
   sent_at: string
   time: string | null
   body: string | null

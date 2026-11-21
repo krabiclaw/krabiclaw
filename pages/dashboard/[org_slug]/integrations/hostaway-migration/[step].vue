@@ -68,7 +68,7 @@
             <UFormField label="Blocked from" required><UInput v-model="block.value.from" type="date" aria-label="Blocked from" class="w-full" @update:model-value="invalidate" /></UFormField>
             <UFormField label="First available date" required><UInput v-model="block.value.to" type="date" :min="block.value.from || undefined" aria-label="First available date" class="w-full" @update:model-value="invalidate" /></UFormField>
           </div>
-          <UFormField label="Reason"><UInput v-model="block.value.note" aria-label="Block reason" class="w-full" @update:model-value="invalidate" /></UFormField>
+          <UFormField label="Reason"><UTextarea v-model="block.value.note" :rows="3" aria-label="Block reason" class="w-full" @update:model-value="invalidate" /></UFormField>
           <UButton label="Remove blocked dates" color="neutral" variant="link" @click="removeBlock(block.index)" />
         </div>
         <UButton label="Add blocked dates" icon="i-lucide-plus" color="neutral" variant="outline" @click="addBlock(home.product_id)" />

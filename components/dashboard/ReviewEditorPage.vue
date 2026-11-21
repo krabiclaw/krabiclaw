@@ -42,7 +42,7 @@
 
 <script lang="ts">
 import type { InjectionKey, Reactive, Ref } from 'vue'
-import { REVIEW_STATUS_LABELS, isTestimonialsResponse, type OrganizationTestimonial, type TestimonialStatus } from '~/utils/testimonials'
+import { REVIEW_STATUS_LABELS, useDashboardReviews, type TestimonialStatus } from '~/utils/testimonials'
 
 /** The review's visibility draft and the save its leaf commits through. */
 export interface ReviewEditor {
@@ -59,6 +59,7 @@ export const reviewEditorKey = Symbol('review-editor') as InjectionKey<ReviewEdi
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
+import { businessChanged } from '~/composables/useDashboardInvalidations'
 import { getErrorMessage } from '~/utils/errors'
 import { REVIEW_CATEGORIES, REVIEW_SUBJECTS } from '~/shared/review-questions'
 
@@ -73,28 +74,17 @@ const locationScope = useLocationScope()
 const route = useRoute()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
+const realtime = useDashboardInvalidations()
 const level = useRouteLevel()
 const organizationId = useDashboardOrganizationId()
 
 const reviewId = computed(() => String(route.params.review_id ?? ''))
 const recordPath = computed(() => `/dashboard/${String(route.params.org_slug)}/website/reviews/${reviewId.value}`)
-// The list this review is a row of, so a moderated review reads the same in both.
-const listKey = computed(() => locationScope.value
-  ? `dashboard-location-reviews-${organizationId}-${locationScope.value}`
-  : `dashboard-organization-reviews-${organizationId}`)
-
 const form = useState(`review-draft-${organizationId}-${locationScope.value ?? 'organization'}-${reviewId.value}`, () => ({ status: 'pending' as TestimonialStatus })).value
 const saving = ref(false)
 const errorMessage = ref('')
 
-// Reviews are listed per scope, so the record is found in its list.
-const { data, error: loadError, refresh } = await useAsyncData(
-  () => `dashboard-review-record-${organizationId}-${locationScope.value ?? 'organization'}-${reviewId.value}`,
-  () => dashboardApi<{ reviews: OrganizationTestimonial[] }>(`/api/editor/organizations/${organizationId}/reviews`, {
-    query: locationScope.value ? { location_id: locationScope.value } : undefined,
-    validate: isTestimonialsResponse,
-  }),
-)
+const { data, error: loadError } = await useDashboardReviews(organizationId, locationScope)
 
 const record = computed(() => data.value?.reviews.find(row => row.id === reviewId.value) ?? null)
 // A review that is not there is not a page, so it 404s rather than rendering an empty record.
@@ -122,13 +112,17 @@ async function save() {
   errorMessage.value = ''
   try {
     const status = form.status
-    await dashboardApi(`/api/editor/organizations/${organizationId}/reviews/${encodeURIComponent(row.id)}`, {
+    const saved = await dashboardApi(`/api/editor/organizations/${organizationId}/reviews/${encodeURIComponent(row.id)}`, {
       method: 'PATCH',
       body: { status },
       validate: (value): value is { review_id: string; status: TestimonialStatus } =>
         isRecord(value) && value.review_id === row.id && value.status === status,
     })
-    await Promise.all([refresh(), refreshNuxtData(listKey.value)])
+    if (data.value) data.value = { reviews: data.value.reviews.map(review => review.id === saved.review_id
+      ? { ...review, status: saved.status }
+      : review) }
+    const held = realtime.held.begin(`website:dashboard-reviews:${organizationId}:${locationScope.value ?? ''}`, businessChanged)
+    realtime.held.hold(held, data.value, Date.now() + 30_000, 16)
     await level.close()
   } catch (error) {
     errorMessage.value = getErrorMessage(error, 'Review could not be updated')

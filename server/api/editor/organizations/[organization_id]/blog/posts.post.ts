@@ -1,5 +1,5 @@
 import { jsonResponse } from "~/server/utils/api-response";
-import { requireBlogAccess } from "~/server/utils/blog-access";
+import { requireWebsiteAccess } from "~/server/utils/tenant-pages-api";
 import { createBlogPost, type PlatformBlogCreateInput } from "~/server/utils/content/publishing";
 import { httpErrorDetails } from "~/server/utils/http-error";
 import { finalizeRequestMetrics } from "~/server/utils/request-metrics";
@@ -19,7 +19,7 @@ export default defineHandler(async (event) => {
   }
 
   try {
-    const { env, db, session } = await requireBlogAccess(event, organizationId);
+    const { env, db, session } = await requireWebsiteAccess(event, organizationId);
 
     const result = await createBlogPost(db, session.user.id, body as PlatformBlogCreateInput, {
       organization_id: organizationId, }, env);
