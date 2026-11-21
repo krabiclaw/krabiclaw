@@ -162,7 +162,7 @@
             <div class="flex items-center justify-between rounded-xl border border-default bg-elevated/30 p-3">
               <div class="flex items-center gap-3 min-w-0">
                 <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-default border border-default text-highlighted shadow-2xs">
-                  <UIcon name="i-lucide-file-text" class="size-5 text-[#006AFF]" />
+                  <UIcon name="i-lucide-file-text" class="size-5 text-primary" />
                 </div>
                 <div class="min-w-0">
                   <p class="truncate text-xs font-bold text-highlighted">{{ agreement.file_name }}</p>
@@ -193,7 +193,7 @@
                 :disabled="saving"
                 placeholder="Type your full name"
                 data-testid="agreement-name"
-                class="w-full rounded-xl border border-default bg-default px-3.5 py-2.5 text-xs text-highlighted placeholder:text-muted focus:border-[#006AFF] focus:outline-none focus:ring-1 focus:ring-[#006AFF]"
+                class="w-full rounded-xl border border-default bg-default px-3.5 py-2.5 text-xs text-highlighted placeholder:text-muted focus:border-default focus:outline-none focus:ring-1 focus:ring-default"
               >
             </div>
 
@@ -218,7 +218,7 @@
                 type="checkbox"
                 required
                 :disabled="saving"
-                class="mt-0.5 size-4 rounded accent-[#006AFF] cursor-pointer shrink-0"
+                class="mt-0.5 size-4 rounded accent-neutral cursor-pointer shrink-0"
                 data-testid="agreement-consent"
               >
               <span class="leading-relaxed text-muted select-none">
@@ -236,7 +236,7 @@
                 size="lg"
                 color="neutral"
                 :disabled="!consent || name.trim().length < 2"
-                class="font-semibold bg-[#1C2038] hover:bg-[#15182B] text-white"
+                class="font-semibold"
               >
                 Adopt and sign
               </UButton>

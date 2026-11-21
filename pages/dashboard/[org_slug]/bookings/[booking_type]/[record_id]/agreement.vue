@@ -60,14 +60,14 @@
               <p class="text-xs text-muted mt-0.5">To finish getting your {{ agreementName.toLowerCase() }} ready, review the checklist below and mark where everyone should sign.</p>
             </div>
             <UButton
-              color="primary"
+              color="neutral"
               size="md"
               label="Next"
               icon="i-lucide-arrow-right"
               trailing
               :loading="generatingPdf"
               data-testid="booking-agreement-prepare"
-              class="shrink-0 bg-[#006AFF] hover:bg-[#0055D4] text-white font-medium"
+              class="shrink-0 font-medium"
               @click="proceedToWorkspace"
             />
           </div>
@@ -91,7 +91,7 @@
                 <UIcon name="i-lucide-grip-vertical" class="size-4" />
               </div>
               <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-default text-highlighted shadow-2xs">
-                <UIcon name="i-lucide-file-text" class="size-5 text-[#006AFF]" />
+                <UIcon name="i-lucide-file-text" class="size-5 text-primary" />
               </div>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-xs font-semibold text-highlighted">{{ file ? file.name : agreement ? agreement.file_name : `${agreementSlug}-agreement.pdf` }}</p>
@@ -109,7 +109,7 @@
             >
               <p class="text-xs text-muted max-w-sm">You can upload up to 10 images, PDFs, or Word documents. Each file must be smaller than 100MB.</p>
               <div class="mt-3">
-                <UButton icon="i-lucide-plus" label="Add supporting file" color="primary" variant="subtle" size="xs" class="text-[#006AFF]" />
+                <UButton icon="i-lucide-plus" label="Add supporting file" color="neutral" variant="outline" size="xs" />
               </div>
               <p class="mt-2 text-[11px] text-dimmed">You may also drop files here or paste.</p>
             </div>
@@ -142,7 +142,7 @@
               </div>
               <button
                 type="button"
-                class="text-xs font-semibold text-[#006AFF] hover:underline"
+                class="text-xs font-semibold text-highlighted underline hover:text-primary transition-colors"
                 data-testid="edit-duration-btn"
                 @click="durationModalOpen = true"
               >
@@ -176,7 +176,7 @@
               </div>
               <button
                 type="button"
-                class="text-xs font-semibold text-[#006AFF] hover:underline"
+                class="text-xs font-semibold text-highlighted underline hover:text-primary transition-colors"
                 data-testid="edit-signers-btn"
                 @click="signersModalOpen = true"
               >
@@ -208,7 +208,7 @@
               </div>
               <button
                 type="button"
-                class="text-xs font-semibold text-[#006AFF] hover:underline"
+                class="text-xs font-semibold text-highlighted underline hover:text-primary transition-colors"
                 data-testid="edit-rent-btn"
                 @click="rentDepositModalOpen = true"
               >
@@ -221,13 +221,13 @@
           <div class="flex items-center justify-between pt-4 border-t border-default">
             <span class="text-xs font-semibold text-highlighted">Your {{ agreementName.toLowerCase() }} is nearly ready to be signed</span>
             <UButton
-              color="primary"
+              color="neutral"
               size="md"
               label="Next"
               icon="i-lucide-arrow-right"
               trailing
               :loading="generatingPdf"
-              class="bg-[#006AFF] hover:bg-[#0055D4] text-white font-medium"
+              class="font-medium"
               @click="proceedToWorkspace"
             />
           </div>
@@ -242,7 +242,7 @@
     <Teleport to="body">
       <div
         v-if="viewMode === 'send'"
-        class="fixed inset-0 z-50 flex flex-col bg-[#F4F4F6] dark:bg-slate-950 text-default antialiased"
+        class="fixed inset-0 z-50 flex flex-col bg-elevated/40 dark:bg-slate-950 text-default antialiased"
         data-testid="fullscreen-field-workspace"
       >
         <!-- Top Header (Clean Zillow 10 Style) -->
@@ -266,12 +266,12 @@
             <button
               type="button"
               class="relative flex size-10 items-center justify-center rounded-lg transition-colors"
-              :class="activeRailTab === 'presets' ? 'text-[#006AFF] bg-primary/10' : 'text-muted hover:text-highlighted'"
+              :class="activeRailTab === 'presets' ? 'text-primary bg-primary/10' : 'text-muted hover:text-highlighted'"
               title="Preset fields"
               data-testid="rail-tab-presets"
               @click="activeRailTab = 'presets'"
             >
-              <div v-if="activeRailTab === 'presets'" class="absolute -left-3 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r bg-[#006AFF]" />
+              <div v-if="activeRailTab === 'presets'" class="absolute -left-3 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r bg-primary" />
               <UIcon name="i-lucide-info" class="size-5" />
             </button>
 
@@ -279,12 +279,12 @@
             <button
               type="button"
               class="relative flex size-10 items-center justify-center rounded-lg transition-colors"
-              :class="activeRailTab === 'pages' ? 'text-[#006AFF] bg-primary/10' : 'text-muted hover:text-highlighted'"
+              :class="activeRailTab === 'pages' ? 'text-primary bg-primary/10' : 'text-muted hover:text-highlighted'"
               title="Pages"
               data-testid="rail-tab-pages"
               @click="activeRailTab = 'pages'"
             >
-              <div v-if="activeRailTab === 'pages'" class="absolute -left-3 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r bg-[#006AFF]" />
+              <div v-if="activeRailTab === 'pages'" class="absolute -left-3 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r bg-primary" />
               <UIcon name="i-lucide-file-text" class="size-5" />
             </button>
           </nav>
@@ -310,26 +310,26 @@
                 <div v-show="paletteOpenHost" class="p-2 space-y-1.5">
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-[#006AFF] hover:text-[#006AFF] transition-colors shadow-2xs"
+                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-default hover:bg-elevated transition-colors shadow-2xs"
                     @click="placeDirectField(hostSignerKey, 'name')"
                   >
-                    <UIcon name="i-lucide-type" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-type" class="size-3.5 text-primary" />
                     <span>Name</span>
                   </button>
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-[#006AFF] hover:text-[#006AFF] transition-colors shadow-2xs"
+                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-default hover:bg-elevated transition-colors shadow-2xs"
                     @click="placeDirectField(hostSignerKey, 'signature')"
                   >
-                    <UIcon name="i-lucide-pen-tool" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-pen-tool" class="size-3.5 text-primary" />
                     <span>Signature</span>
                   </button>
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-[#006AFF] hover:text-[#006AFF] transition-colors shadow-2xs"
+                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-default hover:bg-elevated transition-colors shadow-2xs"
                     @click="placeDirectField(hostSignerKey, 'date')"
                   >
-                    <UIcon name="i-lucide-calendar" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-calendar" class="size-3.5 text-primary" />
                     <span>Date</span>
                   </button>
                 </div>
@@ -350,26 +350,26 @@
                 <div v-show="paletteOpenGuest" class="p-2 space-y-1.5">
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-[#006AFF] hover:text-[#006AFF] transition-colors shadow-2xs"
+                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-default hover:bg-elevated transition-colors shadow-2xs"
                     @click="placeDirectField(tenantSignerKey, 'name')"
                   >
-                    <UIcon name="i-lucide-type" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-type" class="size-3.5 text-primary" />
                     <span>Name</span>
                   </button>
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-[#006AFF] hover:text-[#006AFF] transition-colors shadow-2xs"
+                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-default hover:bg-elevated transition-colors shadow-2xs"
                     @click="placeDirectField(tenantSignerKey, 'signature')"
                   >
-                    <UIcon name="i-lucide-pen-tool" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-pen-tool" class="size-3.5 text-primary" />
                     <span>Signature</span>
                   </button>
                   <button
                     type="button"
-                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-[#006AFF] hover:text-[#006AFF] transition-colors shadow-2xs"
+                    class="flex w-full items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-highlighted hover:border-default hover:bg-elevated transition-colors shadow-2xs"
                     @click="placeDirectField(tenantSignerKey, 'date')"
                   >
-                    <UIcon name="i-lucide-calendar" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-calendar" class="size-3.5 text-primary" />
                     <span>Date</span>
                   </button>
                 </div>
@@ -389,15 +389,15 @@
                 </button>
                 <div v-show="paletteOpenTerms" class="p-2 space-y-1.5">
                   <div class="flex items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-muted">
-                    <UIcon name="i-lucide-calendar" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-calendar" class="size-3.5 text-muted" />
                     <span>Start date</span>
                   </div>
                   <div class="flex items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-muted">
-                    <UIcon name="i-lucide-dollar-sign" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-dollar-sign" class="size-3.5 text-muted" />
                     <span>Monthly rent</span>
                   </div>
                   <div class="flex items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-muted">
-                    <UIcon name="i-lucide-shield-check" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-shield-check" class="size-3.5 text-muted" />
                     <span>Security deposit</span>
                   </div>
                 </div>
@@ -417,11 +417,11 @@
                 </button>
                 <div v-show="paletteOpenCustom" class="p-2 space-y-1.5">
                   <div class="flex items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-muted">
-                    <UIcon name="i-lucide-type" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-type" class="size-3.5 text-muted" />
                     <span>Text</span>
                   </div>
                   <div class="flex items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs font-medium text-muted">
-                    <UIcon name="i-lucide-check-square" class="size-3.5 text-[#006AFF]" />
+                    <UIcon name="i-lucide-check-square" class="size-3.5 text-muted" />
                     <span>Check</span>
                   </div>
                 </div>
@@ -440,7 +440,7 @@
                   :key="pageNum"
                   type="button"
                   class="flex w-full items-start gap-3 rounded-lg p-1.5 text-left transition-all"
-                  :class="page === pageNum ? 'bg-primary/5 ring-2 ring-[#006AFF]' : 'hover:bg-elevated'"
+                  :class="page === pageNum ? 'bg-primary/5 ring-2 ring-primary' : 'hover:bg-elevated'"
                   @click="page = pageNum"
                 >
                   <span class="text-xs font-mono font-medium text-muted w-5 shrink-0 pt-1">{{ pageNum.toString().padStart(2, '0') }}</span>
@@ -473,7 +473,7 @@
                 <div
                   v-for="field in pageFields"
                   :key="`${field.signer_key}:${field.kind}:${field.x}:${field.y}`"
-                  class="absolute select-none cursor-move rounded border-2 border-dashed border-[#00A3A6] bg-white/95 dark:bg-slate-900/95 text-slate-900 dark:text-slate-100 shadow-xs flex items-center justify-between px-2.5 transition-all group"
+                  class="absolute select-none cursor-move rounded border-2 border-dashed border-primary bg-default text-highlighted shadow-xs flex items-center justify-between px-2.5 transition-all group"
                   :style="{
                     left: `${field.x * 100}%`,
                     top: `${field.y * 100}%`,
@@ -483,10 +483,10 @@
                   @pointerdown.stop="drag($event, field)"
                 >
                   <!-- Corner Grab Handles (Screenshot 11) -->
-                  <div class="absolute -left-1 -top-1 size-2 bg-[#00A3A6] rounded-xs" />
-                  <div class="absolute -right-1 -top-1 size-2 bg-[#00A3A6] rounded-xs" />
-                  <div class="absolute -left-1 -bottom-1 size-2 bg-[#00A3A6] rounded-xs" />
-                  <div class="absolute -right-1 -bottom-1 size-2 bg-[#00A3A6] rounded-xs" />
+                  <div class="absolute -left-1 -top-1 size-2 bg-primary rounded-xs" />
+                  <div class="absolute -right-1 -top-1 size-2 bg-primary rounded-xs" />
+                  <div class="absolute -left-1 -bottom-1 size-2 bg-primary rounded-xs" />
+                  <div class="absolute -right-1 -bottom-1 size-2 bg-primary rounded-xs" />
 
                   <!-- Field Content -->
                   <span class="truncate text-xs font-semibold leading-none">
@@ -507,7 +507,7 @@
                   <div class="absolute -bottom-8 left-1/2 -translate-x-1/2 z-30 hidden group-hover:flex items-center">
                     <button
                       type="button"
-                      class="flex items-center gap-1 rounded bg-[#2C3360] px-2 py-1 text-[11px] font-semibold text-white shadow-lg hover:bg-red-600 transition-colors"
+                      class="flex items-center gap-1 rounded bg-inverted px-2 py-1 text-[11px] font-semibold text-inverted shadow-lg hover:bg-red-600 transition-colors"
                       @click.stop="remove(field)"
                     >
                       <UIcon name="i-lucide-trash-2" class="size-3" />
@@ -570,13 +570,13 @@
               <div class="flex items-center gap-3">
                 <UButton color="neutral" variant="ghost" size="md" label="Back to checklist" @click="viewMode = 'overview'" />
                 <UButton
-                  color="primary"
+                  color="neutral"
                   size="md"
                   label="Request signatures"
                   :loading="saving"
                   :disabled="!ready"
                   data-testid="request-signatures-button"
-                  class="bg-[#006AFF] hover:bg-[#0055D4] text-white font-semibold px-5"
+                  class="font-semibold px-5"
                   @click="send"
                 />
               </div>
@@ -598,9 +598,9 @@
           <div class="space-y-3">
             <label
               class="flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 transition-colors"
-              :class="termsDraft.termType === 'fixed' ? 'border-[#006AFF] bg-[#006AFF]/5 ring-1 ring-[#006AFF]' : 'border-default bg-default'"
+              :class="termsDraft.termType === 'fixed' ? 'border-default ring-2 ring-default bg-elevated/40' : 'border-default bg-default'"
             >
-              <input v-model="termsDraft.termType" type="radio" value="fixed" class="mt-1 accent-[#006AFF]">
+              <input v-model="termsDraft.termType" type="radio" value="fixed" class="mt-1 accent-neutral">
               <div>
                 <span class="block text-sm font-semibold text-highlighted">Fixed term</span>
                 <span class="block text-xs text-muted">Specify start and end date</span>
@@ -608,9 +608,9 @@
             </label>
             <label
               class="flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 transition-colors"
-              :class="termsDraft.termType === 'month_to_month' ? 'border-[#006AFF] bg-[#006AFF]/5 ring-1 ring-[#006AFF]' : 'border-default bg-default'"
+              :class="termsDraft.termType === 'month_to_month' ? 'border-default ring-2 ring-default bg-elevated/40' : 'border-default bg-default'"
             >
-              <input v-model="termsDraft.termType" type="radio" value="month_to_month" class="mt-1 accent-[#006AFF]">
+              <input v-model="termsDraft.termType" type="radio" value="month_to_month" class="mt-1 accent-neutral">
               <div>
                 <span class="block text-sm font-semibold text-highlighted">Month-to-month</span>
                 <span class="block text-xs text-muted">Specify start date, no end date</span>
@@ -632,7 +632,7 @@
           <button
             v-if="termsDraft.termType === 'fixed'"
             type="button"
-            class="text-xs font-semibold text-[#006AFF] hover:underline"
+            class="text-xs font-semibold text-highlighted underline hover:text-primary transition-colors"
             @click="setOneYearTerm"
           >
             Set to 1 year term
@@ -644,8 +644,9 @@
             type="submit"
             block
             size="lg"
+            color="neutral"
             label="Save and continue"
-            class="bg-[#006AFF] hover:bg-[#0055D4] text-white font-semibold"
+            class="font-semibold"
           />
         </div>
       </form>
@@ -681,8 +682,9 @@
           <UButton
             type="submit"
             size="md"
+            color="neutral"
             label="Save and continue"
-            class="bg-[#006AFF] hover:bg-[#0055D4] text-white font-semibold"
+            class="font-semibold"
           />
         </div>
       </form>
@@ -738,8 +740,9 @@
           <UButton
             type="submit"
             size="md"
+            color="neutral"
             label="Save and continue"
-            class="bg-[#006AFF] hover:bg-[#0055D4] text-white font-semibold"
+            class="font-semibold"
           />
         </div>
       </form>
