@@ -172,8 +172,8 @@
             </p>
           </div>
 
-          <div v-if="conversationId && agreementRead" id="booking-agreement-section" :class="sectionClass">
-            <h2 class="text-lg font-semibold text-highlighted">{{ agreementSectionTitle }}</h2>
+          <div v-if="conversationId && agreementRead && (agreementRead.agreement || !personalScope)" id="booking-agreement-section" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">{{ agreementLabelText }}</h2>
             <div class="mt-3">
               <component
                 :is="personalScope ? 'button' : NuxtLink"
@@ -185,22 +185,21 @@
               >
                 <UIcon name="i-lucide-file-text" class="size-4 shrink-0 text-highlighted" />
                 <span class="min-w-0 flex-1">
-                  <span class="block font-medium">{{ agreementRowLabel }}</span>
+                  <span class="block font-medium">{{ agreementLabelText }}</span>
                   <span v-if="agreementRowSummary" class="block text-xs text-muted" data-testid="booking-agreement-status">{{ agreementRowSummary }}</span>
                 </span>
                 <UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
               </component>
             </div>
-            <DashboardListItemDialog v-if="personalScope && guestAgreementOpen" v-model:open="guestAgreementOpen" :title="agreementRowLabel" :show-actions="false">
+            <DashboardListItemDialog v-if="personalScope && guestAgreementOpen" v-model:open="guestAgreementOpen" :title="agreementLabelText ?? ''" :show-actions="false">
               <BookingAgreement
                 :conversation-id="conversationId"
-                :preloaded="agreementRead"
-                @open-signing="(agr) => {
+                :preloaded="{ agreement: agreementRead.agreement, canManage: false }"
+                @open-signing="(value) => {
                   guestAgreementOpen = false
-                  signingAgreement = agr
+                  signingAgreement = value
                   signingOpen = true
                 }"
-                @changed="refreshDetails()"
               />
             </DashboardListItemDialog>
             <AgreementSignSheet
@@ -323,8 +322,7 @@
                 <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
               </a>
             </template>
-
-            <p v-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
+            <p v-else-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
             <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds">
               <template v-if="!personalScope && entry.payment.captured_amount > entry.payment.refunded_amount" #actions>
                 <NuxtLink :to="{ path: `${editorPath}/refund`, query: { ...route.query, payment: entry.payment.id } }" :class="rowClass">
@@ -445,12 +443,19 @@ export interface BookingEditor {
   savePrivateNote: (input: { id: string; version: number; text: string }) => Promise<void>
   /** A stay's offline payment step: its currency, today at the home, and the write. */
   stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
-  /** The booking's conversation, where its agreement is sent and signed. */
-  conversationId: ComputedRef<string | null>
-  /** The booking's agreement and, for the business, who it may ask to sign. */
-  agreement: ComputedRef<{ label: string | null; signers: { key: string; name: string; role: 'guest' | 'host' }[] } | null>
-  currentAgreement: ComputedRef<import('~/shared/agreements').BookingAgreement | null>
-  canManageAgreement: ComputedRef<boolean>
+  /**
+   * The booking's agreement as the business manages it: the current document,
+   * who it may ask to sign, and what the booking is. Null when the booking's
+   * read carries no agreement for this viewer to manage.
+   */
+  agreement: ComputedRef<{
+    conversationId: string
+    label: string
+    title: string
+    when: { label: string; value: string; detail: string | null }[]
+    current: import('~/shared/agreements').BookingAgreement | null
+    signers: { key: string; name: string; role: 'guest' | 'host' }[]
+  } | null>
   /** A stay's Change reservation step: what it is now, and the write. */
   stayChange: { stay: ComputedRef<{ check_in_date: string; check_out_date: string; adults: number; children: number } | null>; save: (input: { check_in_date: string; check_out_date: string; adults: number; children: number }) => Promise<void> }
 }
@@ -486,6 +491,7 @@ import { formatPostalAddress } from '~/utils/postal-address'
 import StaySetupMap from './StaySetupMap.client.vue'
 import BookingAgreement from '~/components/booking/BookingAgreement.vue'
 import AgreementSignSheet from '~/components/booking/AgreementSignSheet.vue'
+import { agreementLabel, agreementStatusLine, type BookingAgreement as BookingAgreementRecord } from '~/shared/agreements'
 import { ApiClientError } from '~/utils/api-clients'
 
 const props = defineProps<{
@@ -601,39 +607,25 @@ function manageBookingParty() { guestManagement?.open(bookingParty.value) }
 const otherGuestLabel = computed(() => `${partySize.value - 1} other ${partySize.value === 2 ? recordCopy.value?.guestLabel ?? 'guest' : recordCopy.value?.guestsLabelPlural ?? 'guests'}`)
 const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text)
 const conversationId = computed(() => booking.value?.conversation_id ?? detail.value?.conversation_id ?? null)
-/** The agreement the booking's own read carries; a read that carries none (a turnover) shows none. */
+/** The agreement the booking's own read carries, and for the business who it may ask to sign; a read that carries none (a turnover) shows none. */
 const agreementRead = computed(() => {
   const record = booking.value ?? detail.value
   if (!record || !('agreement' in record) || record.agreement === undefined) return null
-  return { agreement: record.agreement, canManage: 'agreement_signers' in record && record.agreement_signers !== undefined }
+  return { agreement: record.agreement, signers: 'agreement_signers' in record ? record.agreement_signers ?? null : null }
 })
+const signingAgreement = ref<BookingAgreementRecord | null>(null)
 const guestAgreementOpen = ref(false)
-const signingAgreement = ref<import('~/shared/agreements').BookingAgreement | null>(null)
 const signingOpen = ref(false)
-const agreementSectionTitle = computed(() => {
-  const record = booking.value ?? detail.value
-  if (record && 'agreement' in record && record.agreement?.label) return record.agreement.label
-  if (stay.value) return 'Lease'
-  if (booking.value?.vertical === 'service') return 'Engagement letter'
-  if (booking.value?.vertical === 'experience') return 'Waiver'
-  return 'Agreement'
+/** The business's word for the document: the agreement's own, or the booking's kind's before one exists. */
+const agreementLabelText = computed(() => {
+  if (!agreementRead.value) return null
+  if (agreementRead.value.agreement) return agreementRead.value.agreement.label
+  return agreementLabel(stay.value ? 'stay' : booking.value?.product_kind ?? 'stay')
 })
-const agreementRowLabel = computed(() => {
-  const record = booking.value ?? detail.value
-  if (record && 'agreement' in record && record.agreement?.label) return record.agreement.label
-  return agreementSectionTitle.value
-})
-function agreementSignerNames(list: string[]) {
-  return list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`
-}
 const agreementRowSummary = computed(() => {
-  const agr = agreementRead.value?.agreement
-  if (!agr) return props.personalScope ? null : 'Not sent'
-  const day = (at: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(at))
-  if (agr.status === 'stored') return `Signed copy added ${day(agr.completed_at!)}`
-  if (agr.status === 'signed') return `All parties signed on ${day(agr.completed_at!)}`
-  const waiting = agr.signers.filter(signer => !signer.signed_at).map(signer => signer.key === agr.viewer_signer_key ? 'you' : signer.name.split(' ')[0]!)
-  return `Waiting on ${agreementSignerNames(waiting)}`
+  const value = agreementRead.value?.agreement
+  if (!value) return props.personalScope ? null : 'Not sent'
+  return agreementStatusLine(value)
 })
 
 const messageTo = computed(() => {
@@ -1064,8 +1056,8 @@ const statusLabel = computed(() => {
 })
 
 function money(minor: number): string {
-  const currency = detail.value?.currency || (booking.value && 'currency' in booking.value ? (booking.value as Record<string, unknown>).currency : null) || 'USD'
-  if (!isCurrencyCode(currency)) return `$${(Math.abs(minor) / 100).toFixed(2)}`
+  const currency = detail.value?.currency
+  if (!isCurrencyCode(currency)) throw new Error(`Unsupported stay currency ${String(currency)}`)
   return `${minor < 0 ? '−' : ''}${formatMinorAmount(Math.abs(minor), currency)}`
 }
 function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LABELS[method] }
@@ -1251,17 +1243,12 @@ provide(bookingEditorKey, {
   note,
   savePrivateNote,
   stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
-  conversationId,
   agreement: computed(() => {
-    const record = booking.value ?? detail.value
-    if (!record || !('agreement_signers' in record) || !record.agreement_signers) return null
-    return { label: record.agreement?.label ?? null, signers: record.agreement_signers }
+    const read = agreementRead.value
+    const view = panel.value
+    if (!read?.signers || !conversationId.value || !agreementLabelText.value || !view) return null
+    return { conversationId: conversationId.value, label: agreementLabelText.value, title: view.title ?? agreementLabelText.value, when: view.when, current: read.agreement, signers: read.signers }
   }),
-  currentAgreement: computed(() => {
-    const record = booking.value ?? detail.value
-    return record && 'agreement' in record ? (record.agreement ?? null) : null
-  }),
-  canManageAgreement: computed(() => agreementRead.value?.canManage === true),
   stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },
 })
 </script>

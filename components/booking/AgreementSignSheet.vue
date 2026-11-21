@@ -2,7 +2,7 @@
   <Teleport to="body">
     <div
       v-if="open"
-      class="fixed inset-0 z-[100] flex flex-col bg-slate-100 dark:bg-slate-950 text-default antialiased"
+      class="fixed inset-0 z-[100] flex flex-col bg-muted text-default antialiased"
       data-testid="agreement-review-sign-workspace"
     >
       <!-- Top Navigation Header -->
@@ -42,13 +42,13 @@
       </header>
 
       <!-- Main Body: Scrollable Document Pages -->
-      <div ref="scrollContainer" class="flex-1 overflow-y-auto bg-slate-200/70 dark:bg-slate-900 p-4 sm:p-8 pb-32 flex flex-col items-center gap-6">
+      <div ref="scrollContainer" class="flex-1 overflow-y-auto bg-accented p-4 sm:p-8 pb-32 flex flex-col items-center gap-6">
         <!-- Rendered Pages Container -->
         <div
           v-for="pageNum in totalPages"
           :key="pageNum"
           :ref="(el) => { if (el) pageElements[pageNum] = el as HTMLElement }"
-          class="relative bg-white shadow-xl rounded-sm transition-all max-w-[800px] w-full"
+          class="relative shadow-xl rounded-sm transition-all max-w-[800px] w-full"
           data-testid="agreement-document"
         >
           <!-- Canvas for Page -->
@@ -63,7 +63,7 @@
               data-testid="field-stamp-box"
               class="absolute z-20 select-none cursor-pointer rounded border-2 transition-all flex items-center justify-center p-1"
               :class="isAdopted
-                ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
+                ? 'border-success bg-success/10 ring-2 ring-success/30'
                 : 'border-primary bg-primary/10 ring-4 ring-primary/20 animate-pulse'"
               :style="{
                 left: `${field.x * 100}%`,
@@ -76,12 +76,12 @@
               <!-- Stamped Signature Preview if Adopted -->
               <p
                 v-if="isAdopted && field.kind === 'signature'"
-                class="truncate text-xl sm:text-2xl text-highlighted"
+                class="truncate text-xl sm:text-2xl text-black"
                 style="font-family: 'Snell Roundhand', 'Segoe Script', 'Brush Script MT', cursive"
               >
                 {{ name.trim() }}
               </p>
-              <span v-else-if="isAdopted && field.kind === 'date'" class="text-xs font-semibold text-highlighted">
+              <span v-else-if="isAdopted && field.kind === 'date'" class="text-xs font-semibold text-black">
                 {{ todayDate }}
               </span>
               <!-- Unadopted Click-to-Sign Prompt -->
@@ -94,7 +94,7 @@
             <!-- Other Signer's Field -->
             <div
               v-else
-              class="absolute select-none rounded border border-slate-400 bg-slate-400/10 flex items-center justify-center p-1"
+              class="absolute select-none rounded border border-accented bg-accented/40 flex items-center justify-center p-1"
               :style="{
                 left: `${field.x * 100}%`,
                 top: `${field.y * 100}%`,
@@ -155,7 +155,7 @@
       <!-- Signature Adoption Modal (Exact 1:1 Parity with Zillow Image 2) -->
       <div
         v-if="adoptionModalOpen"
-        class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+        class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-elevated/75 backdrop-blur-xs"
         data-testid="signature-adoption-dialog"
       >
         <div class="w-full max-w-md rounded-2xl border border-default bg-default p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
@@ -184,14 +184,15 @@
                   <p class="text-[11px] text-muted">Prepared for this booking</p>
                 </div>
               </div>
-              <button
-                type="button"
+              <a
+                :href="agreement.url"
+                target="_blank"
+                rel="noopener"
                 class="flex shrink-0 items-center gap-1.5 rounded-lg border border-default bg-default px-2.5 py-1 text-xs font-medium text-highlighted hover:bg-elevated shadow-2xs transition-colors"
-                @click="adoptionModalOpen = false"
               >
                 <UIcon name="i-lucide-external-link" class="size-3 text-muted" />
                 <span>Review PDF</span>
-              </button>
+              </a>
             </div>
 
             <!-- Full legal name input (Zillow Image 2) -->
@@ -291,10 +292,7 @@ const todayDate = computed(() => {
 })
 
 function isViewerField(field: AgreementField): boolean {
-  if (field.signer_key === props.agreement.viewer_signer_key) return true
-  // If viewer is host and field belongs to host role
-  const signer = props.agreement.signers.find(s => s.key === field.signer_key)
-  return signer?.key === props.agreement.viewer_signer_key
+  return field.signer_key === props.agreement.viewer_signer_key
 }
 
 function pageFields(pageNum: number): AgreementField[] {
@@ -337,6 +335,7 @@ async function loadAndRenderPdf() {
 
     // Fetch the PDF bytes
     const response = await fetch(props.agreement.url)
+    if (!response.ok) throw new Error(`The ${props.agreement.label.toLowerCase()} could not be opened (${response.status})`)
     const data = new Uint8Array(await response.arrayBuffer())
     pdfDoc = await pdfjs.getDocument({ data }).promise
     totalPages.value = pdfDoc.numPages
@@ -355,8 +354,8 @@ async function loadAndRenderPdf() {
         await page.render({ canvas, canvasContext, viewport }).promise
       }
     }
-  } catch {
-    // If inline render fails, user can still review and sign via adoption modal
+  } catch (failure) {
+    error.value = getErrorMessage(failure, `The ${props.agreement.label.toLowerCase()} could not be shown. Open it with Review PDF.`)
   } finally {
     loadingPdf.value = false
   }

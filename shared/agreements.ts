@@ -27,93 +27,6 @@ export function agreementLabel(kind: ProductKind, isLongTerm = false): string {
   return label
 }
 
-/** Structured terms for generating leases, engagement letters, and waivers (#2038). */
-export interface AgreementTerms {
-  term_type: 'fixed' | 'month_to_month'
-  start_date: string
-  end_date?: string | null
-  monthly_rent_minor: number
-  deposit_minor: number
-  deposit_status?: 'none' | 'pending' | 'held' | 'partially_returned' | 'returned' | 'forfeited'
-  deposit_notes?: string
-  currency: string
-  rules_or_clauses?: string[]
-}
-
-/** A single installment period in a monthly payment schedule (#1907). */
-export interface MonthlySchedulePeriod {
-  period: number
-  due_date: string
-  start_date: string
-  end_date: string
-  amount_minor: number
-  paid_minor: number
-  status: 'paid' | 'partial' | 'due' | 'overdue' | 'upcoming'
-}
-
-/**
- * Calculates monthly payment schedule for long-term stays or recurring customer contracts (#1907).
- * Reconciles total recorded payments against installment periods in chronological order.
- */
-export function calculateMonthlyPaymentSchedule(
-  startsAt: string,
-  endsAt: string,
-  monthlyRentMinor: number,
-  totalPaidMinor: number,
-  nowIso = new Date().toISOString(),
-): MonthlySchedulePeriod[] {
-  if (monthlyRentMinor <= 0) return []
-  const start = new Date(startsAt)
-  const end = new Date(endsAt)
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) return []
-
-  const periods: MonthlySchedulePeriod[] = []
-  let currentStart = new Date(start)
-  let periodNum = 1
-  let remainingPaid = Math.max(0, totalPaidMinor)
-  const nowDate = nowIso.split('T')[0]!
-
-  while (currentStart < end) {
-    const nextStart = new Date(currentStart)
-    nextStart.setMonth(nextStart.getMonth() + 1)
-    const periodEnd = nextStart > end ? end : nextStart
-
-    const startDateStr = currentStart.toISOString().split('T')[0]!
-    const endDateStr = periodEnd.toISOString().split('T')[0]!
-    const dueDateStr = startDateStr
-
-    const paidForPeriod = Math.min(monthlyRentMinor, remainingPaid)
-    remainingPaid -= paidForPeriod
-
-    let status: MonthlySchedulePeriod['status']
-    if (paidForPeriod >= monthlyRentMinor) {
-      status = 'paid'
-    } else if (paidForPeriod > 0) {
-      status = 'partial'
-    } else if (dueDateStr < nowDate) {
-      status = 'overdue'
-    } else if (dueDateStr === nowDate) {
-      status = 'due'
-    } else {
-      status = 'upcoming'
-    }
-
-    periods.push({
-      period: periodNum++,
-      due_date: dueDateStr,
-      start_date: startDateStr,
-      end_date: endDateStr,
-      amount_minor: monthlyRentMinor,
-      paid_minor: paidForPeriod,
-      status,
-    })
-
-    currentStart = nextStart
-  }
-
-  return periods
-}
-
 /** Where one signer's signature or date goes: fractions of the page, from its top-left corner, on a 1-based page. */
 export interface AgreementField {
   signer_key: string
@@ -177,4 +90,17 @@ export function isBookingAgreement(value: unknown): value is BookingAgreement {
 /** The URL of a booking conversation's agreement document, read through that conversation's access. */
 export function agreementDocumentPath(conversationId: string, messageId: string, signed = false): string {
   return `/api/messages/${encodeURIComponent(conversationId)}/agreements/${encodeURIComponent(messageId)}${signed ? '/signed' : ''}`
+}
+
+function joinNames(names: string[]): string {
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+
+/** One line on where the agreement stands, as every surface states it. */
+export function agreementStatusLine(agreement: BookingAgreement): string {
+  const day = (at: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(at))
+  if (agreement.status === 'stored') return `Signed copy added ${day(agreement.completed_at!)}`
+  if (agreement.status === 'signed') return `All parties signed on ${day(agreement.completed_at!)}`
+  const waiting = agreement.signers.filter(signer => !signer.signed_at).map(signer => signer.key === agreement.viewer_signer_key ? 'you' : signer.name.split(' ')[0]!)
+  return `Waiting on ${joinNames(waiting)}`
 }

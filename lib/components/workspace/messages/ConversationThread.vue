@@ -140,7 +140,6 @@
               signingAgreement = agr
               signingOpen = true
             }"
-            @changed="refresh()"
           />
         </DashboardListItemDialog>
         <AgreementSignSheet

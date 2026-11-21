@@ -451,52 +451,37 @@ function isWinAnsi(text: string): boolean {
   return WIN_ANSI_REGEX.test(text)
 }
 
-const fontBytesCache = new Map<string, Uint8Array>()
-
-async function loadFontAssetBytes(env: CloudflareEnv, fileName: string): Promise<Uint8Array> {
-  const cached = fontBytesCache.get(fileName)
-  if (cached) return cached
-  let bytes: Uint8Array
-  if (env.ASSETS) {
-    const res = await env.ASSETS.fetch(new Request(`http://assets/fonts/${fileName}`))
-    if (!res.ok) throw new Error(`Could not load font asset ${fileName}: ${res.status}`)
-    bytes = new Uint8Array(await res.arrayBuffer())
-  } else {
-    const { readFile } = await import('node:fs/promises')
-    const { resolve } = await import('node:path')
-    bytes = new Uint8Array(await readFile(resolve(process.cwd(), 'public/fonts', fileName)))
-  }
-  fontBytesCache.set(fileName, bytes)
+/**
+ * A Noto font from the Worker's static assets, read once per document and
+ * never kept between requests: the CJK files are 9–18 MB and the isolate has 128 MB.
+ */
+async function loadFontAssetBytes(env: CloudflareEnv, fileName: string, loaded: Map<string, Uint8Array>): Promise<Uint8Array> {
+  const held = loaded.get(fileName)
+  if (held) return held
+  if (!env.ASSETS) throw new Error('The Worker has no ASSETS binding to read signature fonts from')
+  const response = await env.ASSETS.fetch(new Request(`http://assets/fonts/${fileName}`))
+  if (!response.ok) throw new Error(`Could not load font asset ${fileName}: ${response.status}`)
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  loaded.set(fileName, bytes)
   return bytes
 }
 
-const fontkitInstanceCache = new Map<string, ReturnType<typeof fontkit.create>>()
-async function getFontkitFont(env: CloudflareEnv, key: NotoFontKey) {
-  const cached = fontkitInstanceCache.get(key)
-  if (cached) return cached
-  const bytes = await loadFontAssetBytes(env, NOTO_FONT_FILES[key])
-  const instance = fontkit.create(bytes)
-  fontkitInstanceCache.set(key, instance)
-  return instance
-}
-
-async function pickNotoFontKey(env: CloudflareEnv, text: string): Promise<NotoFontKey> {
+/**
+ * The one font a non-WinAnsi line needs, chosen by its script. Kana is
+ * Japanese and Hangul Korean; Han text is Simplified Chinese unless the SC
+ * font lacks one of its characters, when it is Traditional.
+ */
+async function notoFontFor(env: CloudflareEnv, text: string, loaded: Map<string, Uint8Array>): Promise<{ key: NotoFontKey; bytes: Uint8Array }> {
   const chars = [...text]
-  if (chars.some(c => /\p{Script=Thai}/u.test(c))) return 'thai'
-  if (chars.some(c => /\p{Script=Hangul}/u.test(c))) return 'kr'
-  if (chars.some(c => /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(c))) return 'jp'
-  if (chars.some(c => /\p{Script=Han}/u.test(c))) {
-    const jpFont = await getFontkitFont(env, 'jp')
-    if (chars.every(c => !/\p{Script=Han}/u.test(c) || jpFont.hasGlyphForCodePoint(c.codePointAt(0)!))) {
-      return 'jp'
-    }
-    const scFont = await getFontkitFont(env, 'sc')
-    if (chars.every(c => !/\p{Script=Han}/u.test(c) || scFont.hasGlyphForCodePoint(c.codePointAt(0)!))) {
-      return 'sc'
-    }
-    return 'tc'
-  }
-  return 'latin'
+  const key: NotoFontKey = chars.some(c => /\p{Script=Thai}/u.test(c)) ? 'thai'
+    : chars.some(c => /\p{Script=Hangul}/u.test(c)) ? 'kr'
+      : chars.some(c => /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(c)) ? 'jp'
+        : chars.some(c => /\p{Script=Han}/u.test(c)) ? 'sc' : 'latin'
+  const bytes = await loadFontAssetBytes(env, NOTO_FONT_FILES[key], loaded)
+  if (key !== 'sc') return { key, bytes }
+  const sc = fontkit.create(bytes)
+  if (chars.every(c => !/\p{Script=Han}/u.test(c) || sc.hasGlyphForCodePoint(c.codePointAt(0)!))) return { key, bytes }
+  return { key: 'tc', bytes: await loadFontAssetBytes(env, NOTO_FONT_FILES.tc, loaded) }
 }
 
 /** The document with every signature where it was placed and a closing page that records who signed, when and how. */
@@ -517,15 +502,14 @@ export async function signedAgreementDocument(env: CloudflareEnv, conversation: 
   const [script, regular, bold] = await Promise.all([pdf.embedFont(StandardFonts.TimesRomanItalic), pdf.embedFont(StandardFonts.Helvetica), pdf.embedFont(StandardFonts.HelveticaBold)])
 
   const embeddedNotoFonts = new Map<NotoFontKey, PDFFont>()
+  const loadedFonts = new Map<string, Uint8Array>()
   async function resolveFont(text: string, defaultFont: PDFFont): Promise<PDFFont> {
     if (isWinAnsi(text)) return defaultFont
-    const key = await pickNotoFontKey(env, text)
-    let font = embeddedNotoFonts.get(key)
-    if (!font) {
-      const bytes = await loadFontAssetBytes(env, NOTO_FONT_FILES[key])
-      font = await pdf.embedFont(bytes, { subset: true })
-      embeddedNotoFonts.set(key, font)
-    }
+    const { key, bytes } = await notoFontFor(env, text, loadedFonts)
+    const embedded = embeddedNotoFonts.get(key)
+    if (embedded) return embedded
+    const font = await pdf.embedFont(bytes, { subset: true })
+    embeddedNotoFonts.set(key, font)
     return font
   }
 
