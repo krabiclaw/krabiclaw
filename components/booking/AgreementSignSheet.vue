@@ -64,7 +64,7 @@
               class="absolute z-20 select-none cursor-pointer rounded border-2 transition-all flex items-center justify-center p-1"
               :class="isAdopted
                 ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30'
-                : 'border-cyan-500 bg-cyan-500/15 ring-4 ring-cyan-500/30 animate-pulse'"
+                : 'border-primary bg-primary/10 ring-4 ring-primary/20 animate-pulse'"
               :style="{
                 left: `${field.x * 100}%`,
                 top: `${field.y * 100}%`,
@@ -85,7 +85,7 @@
                 {{ todayDate }}
               </span>
               <!-- Unadopted Click-to-Sign Prompt -->
-              <div v-else class="flex items-center gap-1.5 text-xs font-bold text-cyan-900 dark:text-cyan-100">
+              <div v-else class="flex items-center gap-1.5 text-xs font-bold text-primary">
                 <UIcon name="i-lucide-pen-tool" class="size-3.5" />
                 <span>{{ field.kind === 'signature' ? 'Sign here' : 'Date' }}</span>
               </div>
