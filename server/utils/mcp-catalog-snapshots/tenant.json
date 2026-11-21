@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:271f7229b8f1916f14e9a0d4e4d1a003bf766d609bc235cc63119a449f045eb9",
-  "documentationFingerprint": "sha256:1959ce5291e9ba9c3208b8d2b03953e8c90dd51a08b3cc48b205376b02505597",
+  "fingerprint": "sha256:9326be9dc4698b8ea106d62f8fa472a52c128e2d050c595593e9e98f2fb6ecd7",
+  "documentationFingerprint": "sha256:88a1d4c218e729e60855462eed119fa872e8f84000ea5aa4b0889ad426ef7127",
   "tools": [
     {
       "name": "add_organization_language",
@@ -87548,6 +87548,27 @@
       "description": "Record deposit money received, returned to the guest or client, or withheld (kept for damage or unpaid charges, with the reason in note). Blawby moves no money; this records what happened outside it. Only what is held can be returned or withheld; withheld becomes paid revenue.",
       "inputSchema": {
         "additionalProperties": false,
+        "allOf": [
+          {
+            "else": {
+              "required": [
+                "method"
+              ]
+            },
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "withheld"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "note"
+              ]
+            }
+          }
+        ],
         "properties": {
           "amount_minor": {
             "minimum": 1,

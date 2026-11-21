@@ -463,6 +463,10 @@ async function storeSignedCopy(event: Event) {
     const form = new FormData()
     form.append('file', chosen)
     await applicationFetch(`/api/messages/${encodeURIComponent(context.value.conversationId)}/agreement/store`, { method: 'POST', body: form, validate: isRecord })
+    // The stored copy is now the booking's document; a replacement being prepared is dropped.
+    draft.file = null
+    draft.fields = []
+    pdf = null
     await editor!.refresh()
   } catch (failure) {
     error.value = getErrorMessage(failure, 'The signed copy could not be added')

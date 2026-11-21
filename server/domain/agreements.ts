@@ -543,8 +543,10 @@ export async function signedAgreementDocument(env: CloudflareEnv, conversation: 
     const box = { x: field.x * width, y: height - (field.y + field.height) * height, w: field.width * width, h: field.height * height }
     // One line, shrunk to the field's width, so a long name never runs below it.
     const tallest = Math.min(box.h * (field.kind === 'signature' ? 0.8 : 0.6), field.kind === 'signature' ? 28 : 12)
-    const size = Math.min(tallest, (box.w - 4) / Math.max(font.widthOfTextAtSize(text, 1), 0.01))
-    page.drawText(text, { x: box.x + 2, y: box.y + (box.h - size) / 2 + size * 0.2, size, font, color: SIGNATURE_COLOR })
+    // Padding scales with the field, so even a hairline field keeps a positive width to fit the text into.
+    const pad = Math.min(2, box.w * 0.05)
+    const size = Math.min(tallest, (box.w - 2 * pad) / Math.max(font.widthOfTextAtSize(text, 1), 0.01))
+    page.drawText(text, { x: box.x + pad, y: box.y + (box.h - size) / 2 + size * 0.2, size, font, color: SIGNATURE_COLOR })
   }
   // The signature record: what was signed, by whom, when and from where.
   const page = pdf.addPage([612, 792])

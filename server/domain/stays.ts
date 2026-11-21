@@ -1339,7 +1339,8 @@ export function stayDetailQuery(access: StayAccess, stayId: string): BatchQuery 
   return stayDetailSelection({ query: '?', params: [access.organizationId] }, stayId, access.manage, visibleHomes(access))
 }
 
-export function stayDetailSelection(organization: BatchQuery, stayId: string, manage: boolean, scope: ReturnType<typeof visibleHomes> = { sql: '1 = 1', params: [] }): BatchQuery {
+/** `stay` is the stay's ID, or a SQL term for it a batch resolves (the guest's owned stay). */
+export function stayDetailSelection(organization: BatchQuery, stay: string | BatchQuery, manage: boolean, scope: ReturnType<typeof visibleHomes> = { sql: '1 = 1', params: [] }): BatchQuery {
   const paymentColumns = manage ? `,
     (SELECT json_group_array(json_object('id', id, 'booking_id', booking_id, 'amount_minor', amount_minor, 'currency', currency,
       'method', method, 'paid_on', paid_on, 'reference', reference, 'note', note, 'period_start', period_start, 'created_at', created_at, 'created_by', created_by))
@@ -1354,8 +1355,8 @@ export function stayDetailSelection(organization: BatchQuery, stayId: string, ma
   return {
     query: `SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url ${paymentColumns}
       FROM ${STAY_FROM}
-     WHERE s.organization_id = ${organization.query} AND s.id = ? AND s.product_session_id IS NULL AND ${scope.sql}`,
-    params: [...organization.params ?? [], stayId, ...scope.params],
+     WHERE s.organization_id = ${organization.query} AND s.id = ${typeof stay === 'string' ? '?' : stay.query} AND s.product_session_id IS NULL AND ${scope.sql}`,
+    params: [...organization.params ?? [], ...(typeof stay === 'string' ? [stay] : stay.params ?? []), ...scope.params],
   }
 }
 
@@ -2573,24 +2574,26 @@ export interface GuestStay {
 export async function readGuestStay(db: DbClient, viewer: { userId: string; verifiedEmail: string | null }, activityId: string): Promise<GuestStay> {
   const now = new Date()
   const buyerUserId = viewer.userId
-  // The stay's agreement is read with its ownership, in the same round trip.
+  // The stay, its agreement and its ownership are one snapshot, read in one round trip.
   const ownedStay = `SELECT s.id, s.organization_id FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
      WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`
-  const [ownedRows, ...agreementRows] = await executeBatch(db, [{
+  const ownedId = { query: `(SELECT id FROM (${ownedStay}))`, params: [activityId, buyerUserId] }
+  const ownedOrganization = { query: `(SELECT organization_id FROM (${ownedStay}))`, params: [activityId, buyerUserId] }
+  const [ownedRows, detailRows, ...agreementRows] = await executeBatch(db, [{
     query: `SELECT s.id, r.id AS conversation_id, s.organization_id, s.product_id,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id AND captured_amount > 0) AS paid_online,
            CASE WHEN s.status='pending' AND ${stayRequestRespondBySql('s')} IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql('r.id')}) ELSE 0 END AS payment_processing
       FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
      WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`,
     params: [now.toISOString(), activityId, buyerUserId],
-  }, ...agreementQueries({
-    booking: { sql: `(SELECT id FROM (${ownedStay}))`, params: [activityId, buyerUserId] },
-    organization: { sql: `(SELECT organization_id FROM (${ownedStay}))`, params: [activityId, buyerUserId] },
+  }, stayDetailSelection(ownedOrganization, ownedId, true), ...agreementQueries({
+    booking: { sql: ownedId.query, params: ownedId.params },
+    organization: { sql: ownedOrganization.query, params: ownedOrganization.params },
   }, true)], { operation: 'Read the guest stay' })
   const owned = ownedRows!.results[0] as { id: string; conversation_id: string; organization_id: string; product_id: string; paid_online: number; payment_processing: number } | undefined
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
   await ownedBuyerRequest(db, buyerUserId, owned.conversation_id)
-  const stay = await getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id)
+  const stay = stayDetailFrom({ organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, detailRows!.results[0])
   if (stay.user_id !== buyerUserId || isChannelManagedStay(stay)) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
   const confirmed = stay.status === 'confirmed'
   const showArrival = confirmed && (isBookingDay(stay.ends_at)

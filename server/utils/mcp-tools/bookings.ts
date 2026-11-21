@@ -129,6 +129,8 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'record_booking_deposit', domain: 'bookings', minimumRole: 'admin',
     description: 'Record deposit money received, returned to the guest or client, or withheld (kept for damage or unpaid charges, with the reason in note). Blawby moves no money; this records what happened outside it. Only what is held can be returned or withheld; withheld becomes paid revenue.',
     inputSchema: {
+      // Money that moved names how; money kept names why.
+      allOf: [{ if: { properties: { kind: { const: 'withheld' } } }, then: { required: ['note'] }, else: { required: ['method'] } }],
       booking_id: bookingId, kind: { type: 'string', enum: depositEntryKinds }, amount_minor: { type: 'integer', minimum: 1 },
       method: { type: 'string', enum: ['cash', 'bank_transfer', 'card_external', 'other'], description: 'How the money moved; ignored for withheld.' },
       paid_on: { type: 'string', description: 'YYYY-MM-DD' }, reference: text, note: { ...text, description: 'Required for withheld: what it was kept for.' }, idempotency_key: key,

@@ -47,12 +47,12 @@
         <div
           v-for="pageNum in totalPages"
           :key="pageNum"
-          :ref="(el) => { if (el) pageElements[pageNum] = el as HTMLElement }"
+          :ref="(el) => keepPage(pageElements, pageNum, el as HTMLElement | null)"
           class="relative shadow-xl rounded-sm transition-all max-w-[800px] w-full"
           data-testid="agreement-document"
         >
           <!-- Canvas for Page -->
-          <canvas :ref="(el) => { if (el) pageCanvases[pageNum] = el as HTMLCanvasElement }" class="block w-full h-auto pointer-events-none" />
+          <canvas :ref="(el) => keepPage(pageCanvases, pageNum, el as HTMLCanvasElement | null)" class="block w-full h-auto pointer-events-none" />
 
           <!-- Placed Fields on this Page -->
           <template v-for="field in pageFields(pageNum)" :key="`${field.signer_key}:${field.kind}:${field.x}:${field.y}`">
@@ -152,27 +152,15 @@
         </div>
       </footer>
 
-      <!-- Signature Adoption Modal (Exact 1:1 Parity with Zillow Image 2) -->
-      <div
-        v-if="adoptionModalOpen"
-        class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-elevated/75 backdrop-blur-xs"
+      <!-- Signature adoption: the app's modal, which keeps focus inside it and the sheet behind it inert. -->
+      <UModal
+        v-model:open="adoptionModalOpen"
+        :title="`Sign ${agreement.label}`"
+        :ui="{ overlay: 'z-[110]', content: 'z-[110] max-w-md', title: 'text-center text-base' }"
         data-testid="signature-adoption-dialog"
       >
-        <div class="w-full max-w-md rounded-2xl border border-default bg-default p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-          <!-- Header with Close Button on Top Left and Centered Title (Zillow Image 2) -->
-          <div class="relative flex items-center justify-center pb-4">
-            <button
-              type="button"
-              class="absolute left-0 top-0.5 text-muted hover:text-highlighted p-1 rounded-lg hover:bg-elevated transition-colors"
-              aria-label="Close"
-              @click="adoptionModalOpen = false"
-            >
-              <UIcon name="i-lucide-x" class="size-5" />
-            </button>
-            <h3 class="text-base font-bold text-highlighted">Sign {{ agreement.label || 'Agreement' }}</h3>
-          </div>
-
-          <form class="space-y-4" @submit.prevent="confirmAdoption">
+        <template #body>
+          <form class="space-y-4" data-testid="signature-adoption-form" @submit.prevent="confirmAdoption">
             <!-- Document Info Box (Zillow Image 2) -->
             <div class="flex items-center justify-between rounded-xl border border-default bg-elevated/30 p-3">
               <div class="flex items-center gap-3 min-w-0">
@@ -258,8 +246,8 @@
               </UButton>
             </div>
           </form>
-        </div>
-      </div>
+        </template>
+      </UModal>
     </div>
   </Teleport>
 </template>
@@ -285,6 +273,11 @@ const isAdopted = ref(false)
 const scrollContainer = ref<HTMLElement | null>(null)
 const pageElements = reactive<Record<number, HTMLElement>>({})
 const pageCanvases = reactive<Record<number, HTMLCanvasElement>>({})
+/** A page's element while it is mounted; dropped when Vue clears the ref, so a shorter document holds none of a longer one's. */
+function keepPage<T>(pages: Record<number, T>, page: number, element: T | null) {
+  if (element) pages[page] = element
+  else Reflect.deleteProperty(pages, page)
+}
 let pdfDoc: import('pdfjs-dist').PDFDocumentProxy | null = null
 
 // The signed PDF dates each signature in UTC; the preview shows the same day.
@@ -377,6 +370,12 @@ watch(open, (isOpen) => {
       name.value = viewerSigner.name === 'You' ? '' : viewerSigner.name
     }
     void loadAndRenderPdf()
+  } else {
+    // Closing releases the document and its pages; a load still in flight draws nothing.
+    loading++
+    void pdfDoc?.cleanup()
+    pdfDoc = null
+    totalPages.value = 1
   }
 }, { immediate: true })
 
