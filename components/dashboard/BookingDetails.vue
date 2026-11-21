@@ -311,6 +311,19 @@
                 <span data-testid="stay-amount-paid">{{ money(channelManaged ? detail.total_minor : detail.paid_minor) }}</span>
               </p>
               <p v-if="channelManaged" class="mt-1 text-sm text-muted">Payments, changes and cancellations are managed on {{ channelName }}.</p>
+              <!-- A stay paid monthly: each month, what it is due and where it stands. -->
+              <ul v-if="detail.installments" class="mt-4 divide-y divide-default border-y border-default" data-testid="stay-monthly-ledger">
+                <li v-for="period in detail.installments" :key="period.period_start" class="flex items-start justify-between gap-4 py-3 text-sm">
+                  <span class="min-w-0">
+                    <span class="block text-highlighted">{{ reservationDay(period.period_start) }} – {{ reservationDay(previousDay(period.period_end)) }}</span>
+                    <span class="block text-xs text-muted">Due {{ reservationDay(period.period_start) }}</span>
+                  </span>
+                  <span class="shrink-0 text-right">
+                    <span class="block text-highlighted">{{ period.status === 'partial' ? `${money(period.paid_minor)} of ${money(period.amount_minor)}` : money(period.amount_minor) }}</span>
+                    <UBadge :color="LEDGER_COLORS[period.status]" variant="subtle" size="sm" :label="LEDGER_LABELS[period.status]" />
+                  </span>
+                </li>
+              </ul>
               <template v-if="!personalScope">
                 <ul v-if="!channelManaged && detail.payments.length" class="mt-4 space-y-3">
                   <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4">
@@ -462,7 +475,7 @@ export interface BookingEditor {
   note: ComputedRef<{ id: string; version: number; text: string } | null>
   savePrivateNote: (input: { id: string; version: number; text: string }) => Promise<void>
   /** A stay's offline payment step: its currency, today at the home, and the write. */
-  stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
+  stayPayment: { currency: ComputedRef<string | null>; today: () => string; months: ComputedRef<import('~/server/domain/stays').StayLedgerPeriod[] | null>; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; period_start: string; idempotency_key: string }) => Promise<void> }
   /**
    * The booking's agreement as the business manages it: the current document,
    * who it may ask to sign, and what the booking is. Null when the booking's
@@ -1104,6 +1117,14 @@ function money(minor: number): string {
   return `${minor < 0 ? '−' : ''}${formatMinorAmount(Math.abs(minor), currency)}`
 }
 function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LABELS[method] }
+const LEDGER_LABELS = { paid: 'Paid', partial: 'Partial', due: 'Due', overdue: 'Overdue', upcoming: 'Upcoming' } as const
+const LEDGER_COLORS = { paid: 'success', partial: 'warning', due: 'neutral', overdue: 'error', upcoming: 'neutral' } as const
+/** A period's last night: the day before the next one starts. */
+function previousDay(date: string) {
+  const day = new Date(`${date}T00:00:00Z`)
+  day.setUTCDate(day.getUTCDate() - 1)
+  return day.toISOString().slice(0, 10)
+}
 
 const changeRetry = ref<{ messageId: string; decision: 'accept' | 'decline' } | null>(null)
 // The payment day defaults to today where the home is; one key per payment being entered, kept across retries.
@@ -1162,7 +1183,7 @@ async function answerStayChange(messageId: string, decision: 'accept' | 'decline
 }
 
 /** The payment step's write: money the host received or refunded offline, recorded on the stay. */
-async function recordStayPayment(input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) {
+async function recordStayPayment(input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; period_start: string; idempotency_key: string }) {
   const value = detail.value
   if (!value || isChannelManagedStay(value) || !isCurrencyCode(value.currency)) throw new Error('This stay records no payments here')
   const typed = input.amount.trim()
@@ -1170,7 +1191,7 @@ async function recordStayPayment(input: { amount: string; method: StayPaymentMet
   const minor = majorAmountToMinor(negative ? typed.slice(1) : typed, value.currency as Parameters<typeof majorAmountToMinor>[1])
   await dashboardApi(`${dashboardBookingPath(value.booking_id)}/payments`, {
     method: 'POST', validate: isNightBooking,
-    body: { amount_minor: negative ? -minor : minor, method: input.method, paid_on: input.paid_on, reference: input.reference || undefined, idempotency_key: input.idempotency_key },
+    body: { amount_minor: negative ? -minor : minor, method: input.method, paid_on: input.paid_on, reference: input.reference || undefined, period_start: input.period_start || undefined, idempotency_key: input.idempotency_key },
   })
   await refreshDetails()
 }
@@ -1285,7 +1306,7 @@ provide(bookingEditorKey, {
   formatCreatedAt,
   note,
   savePrivateNote,
-  stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
+  stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, months: computed(() => detail.value?.installments ?? null), record: recordStayPayment },
   agreement: computed(() => {
     const read = agreementRead.value
     const view = panel.value

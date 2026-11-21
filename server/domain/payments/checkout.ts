@@ -19,6 +19,7 @@ import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
 import type { CheckoutStay, StayQuote } from '~/server/domain/stays'
 import type { readCheckoutSeller } from '~/server/utils/billing-access'
 import { createWithStripeMetadata } from './stripe-metadata'
+import { isStayInstallments, stayCheckoutAmount, stayInstallments, type StayInstallment } from '~/shared/stay-installments'
 
 interface CheckoutInputBase {
   organizationId: string
@@ -124,6 +125,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   let price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | undefined
   let catalogPriceId: string | null = null
   let stay: StayPurchase | null = null
+  /** A long stay paid monthly by a guest with an account: its periods, frozen with the purchase. */
+  let installments: StayInstallment[] | null = null
   let policy: BookingPolicy
   let answers: FormAnswerSnapshot[] = []
   // A seat is paid per guest; a table's deposit once for the booking; a stay once for its nights.
@@ -168,8 +171,9 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       const frozenStay = snapshot.stay
       if (!isStayPurchase(frozenStay) || frozenStay.product_id !== input.stay.product_id || frozenStay.check_in_date !== input.stay.check_in_date
         || frozenStay.check_out_date !== input.stay.check_out_date || frozenStay.adults !== input.stay.adults || frozenStay.children !== input.stay.children
-        || frozenStay.infants !== input.stay.infants || frozenStay.total_minor !== frozen.amount || !isRecord(snapshot.policy)) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored stay purchase is invalid', data: { code: 'idempotency_conflict', field: 'idempotency_key' } })
+        || frozenStay.infants !== input.stay.infants || !isStayInstallments(snapshot.installments) || stayCheckoutAmount(frozenStay, snapshot.installments) !== frozen.amount || !isRecord(snapshot.policy)) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored stay purchase is invalid', data: { code: 'idempotency_conflict', field: 'idempotency_key' } })
       stay = frozenStay
+      installments = (snapshot.installments ?? null) as StayInstallment[] | null
       policy = snapshot.policy as unknown as BookingPolicy
     }
     connected = { stripe_account_id: frozen.stripe_account_id, livemode: frozen.livemode === 1 }
@@ -195,7 +199,12 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     const guest = input.guest
     const { quote, taxCode } = input.terms
     if (quote.product_id !== input.stay.product_id || quote.check_in_date !== input.stay.check_in_date || quote.check_out_date !== input.stay.check_out_date) throw new Error('The stay quote does not match the stay requested')
-    price = { unit_amount: quote.total_minor, currency: quote.currency, tax_behavior: quote.tax_behavior }
+    // A long stay is paid monthly, its first month now and the rest as Stripe invoices on their dates,
+    // when the guest has an account to keep the card on; otherwise it is paid at once.
+    const buyer = input.buyer ?? await queryFirst<{ isAnonymous: number | null }>(db, 'SELECT "isAnonymous" FROM user WHERE id = ?', [input.buyerUserId])
+    if (!buyer) throw new Error('The stay buyer was not found')
+    installments = buyer.isAnonymous ? null : stayInstallments(quote)
+    price = { unit_amount: stayCheckoutAmount(quote, installments), currency: quote.currency, tax_behavior: quote.tax_behavior }
     projectionTitle = quote.name
     projectionTaxCode = taxCode
     stay = {
@@ -249,7 +258,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
         params: [holdId,input.organizationId,stay.product_id,stay.location_id,stay.timezone,input.buyerUserId,approval?.conversationId ?? null,id,stay.adults+stay.children,amount,price.currency,stay.check_in_date,stay.check_out_date,expiresAt,now] }
     }
     const purchase = { title: projectionTitle, tax_code: projectionTaxCode, price, quantity: purchaseQuantity, automatic_tax: automaticTax, method_configuration_id: methodConfigurationId, request_fingerprint: input.requestFingerprint, billing_fx: billingFx,
-      policy, ...(input.unit === 'slot' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId, answers } : { stay, ...(approval ? { approved_stay: { bookingId: approval.bookingId, version: approval.version } } : {}) }) }
+      policy, ...(input.unit === 'slot' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId, answers } : { stay, installments, ...(approval ? { approved_stay: { bookingId: approval.bookingId, version: approval.version } } : {}) }) }
     const origin = conversionOriginSnapshotQuery(input.organizationId, input.origin)
     try { await executeBatch(db,[
       { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,idempotency_key,checkout_expires_at,return_token,return_token_hash,return_expires_at,created_at,updated_at)
@@ -267,6 +276,9 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   // A signed-in buyer's Customer at this business: the Payment Element offers, saves and removes their cards here only.
   const customer = input.buyerUserId ? await connectedBuyerCustomer(db, stripe, input.buyer ?? input.buyerUserId, connected.stripe_account_id, connected.livemode) : null
   const stripeAccount = connected.stripe_account_id
+  // The card a long stay's later months are charged to is saved with the first, on the guest's Customer at this business.
+  const monthly = installments !== null
+  if (monthly && !customer) throw new Error('A stay paid monthly has no guest Customer to keep its card on')
   try {
     const intent = await createWithStripeMetadata(stripe, 'payment', id, Boolean(previous), metadata => stripe.paymentIntents.create({
       amount, currency: price.currency.toLowerCase(),
@@ -276,6 +288,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       automatic_payment_methods: { enabled: true, allow_redirects: 'always' },
       // Cards and Link are authorized before the booking is saved. ACH clears asynchronously.
       payment_method_options: { card: { capture_method: 'manual' }, link: { capture_method: 'manual' } },
+      ...(monthly ? { setup_future_usage: 'off_session' } : {}),
       application_fee_amount: 0,
       description: projectionTitle,
       metadata,

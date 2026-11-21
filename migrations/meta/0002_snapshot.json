@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c506f213-2a15-4ce9-9f0a-3d7c15861000",
+  "id": "4e6ab401-ef2a-4d82-a083-8b3c6a94a24a",
   "prevId": "38b9293c-e685-47c3-ad48-f7af1b25ff88",
   "tables": {
     "account": {
@@ -7407,6 +7407,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'payment'"
+        },
+        "period_start": {
+          "name": "period_start",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "idempotency_key": {
           "name": "idempotency_key",

@@ -86,12 +86,23 @@
           </div>
 
           <div class="flex justify-between items-baseline border-t border-default pt-5">
-            <span class="font-semibold text-highlighted">{{ t('payment.total') }} <span class="underline">{{ handoff.currency }}</span></span>
+            <span class="font-semibold text-highlighted">{{ laterPayments.length ? t('payment.due_today') : t('payment.total') }} <span class="underline">{{ handoff.currency }}</span></span>
             <span class="font-semibold text-highlighted tabular-nums" data-payment-total>
               {{ paymentMoney(review ? review.total : handoff.subtotal, handoff.currency) }}
             </span>
           </div>
           <p v-if="review && review.tax_included > 0" class="text-xs text-muted" data-payment-tax-included>{{ t('payment.tax_included', { amount: paymentMoney(review.tax_included, review.currency) }) }}</p>
+          <!-- A long stay paid monthly: each later month on its date, and what the stay costs in all. -->
+          <div v-if="laterPayments.length" class="border-t border-default pt-5 space-y-2" data-payment-schedule>
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.later_payments') }}</h3>
+            <dl class="space-y-2 text-sm">
+              <div v-for="(period, index) in laterPayments" :key="period.period_start" class="flex justify-between gap-4">
+                <dt class="text-default">{{ formatCalendarDate(period.period_start, locale, { month: 'short', day: 'numeric', year: 'numeric' }) }}<template v-if="index === laterPayments.length - 1"> · {{ t('payment.final_payment') }}</template></dt>
+                <dd class="tabular-nums text-default">{{ money(period.amount_minor) }}</dd>
+              </div>
+              <div class="flex justify-between gap-4 font-semibold"><dt>{{ t('payment.stay_total') }}</dt><dd class="tabular-nums">{{ money(stayTotal) }}</dd></div>
+            </dl>
+          </div>
         </aside>
 
         <div class="lg:order-1 min-w-0 space-y-6">
@@ -129,7 +140,7 @@
               </div>
             </section>
 
-            <i18n-t keypath="payment.agreement" tag="p" scope="global" class="text-xs text-muted leading-relaxed">
+            <i18n-t :keypath="laterPayments.length ? 'payment.monthly_agreement' : 'payment.agreement'" tag="p" scope="global" class="text-xs text-muted leading-relaxed">
               <template #terms>
                 <NuxtLink v-if="termsPath" :to="termsPath" class="font-semibold text-default underline">{{ t('payment.booking_terms') }}</NuxtLink>
                 <template v-else>{{ t('payment.booking_terms') }}</template>
@@ -226,6 +237,9 @@ const methodLabel = computed(() => {
 const money = (minor: number) => paymentMoney(minor, handoff.value!.currency)
 const nightsLabel = (count: number) => count === 1 ? t('stay.one_night') : t('stay.nights_count', { count })
 const guestsLabel = (count: number) => `${count} ${t(count === 1 ? 'site.experience_detail.guest' : 'site.experience_detail.guests')}`
+/** The months after today's, from the plan the checkout froze. */
+const laterPayments = computed(() => handoff.value?.stay?.installments?.slice(1) ?? [])
+const stayTotal = computed(() => handoff.value?.stay?.nightly.reduce((sum, price) => sum + price, 0) ?? 0)
 const stayRange = computed(() => {
   const stay = handoff.value?.stay
   return stay ? `${formatCalendarDate(stay.check_in_date, locale.value, { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, locale.value, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''

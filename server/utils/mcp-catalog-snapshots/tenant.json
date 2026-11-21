@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f79b2baa90175723d5eabaece909ca2ad39f2449604aa4f903c5fbdc0139dea1",
-  "documentationFingerprint": "sha256:0a267bbe608e723a3dc5c7965cee2737cb3f396f5eb69b92c294243e2a3da5a1",
+  "fingerprint": "sha256:3f8c37e44968f67c7352bfa9daf5f2f396ffd0fb11f9527cc724e9e8492762b4",
+  "documentationFingerprint": "sha256:97c0738e06c2bd21e49ce13b06e3bd1487c65d493884adf4eca673fa6c506902",
   "tools": [
     {
       "name": "add_organization_language",
@@ -55042,6 +55042,49 @@
                       "infants": {
                         "type": "integer"
                       },
+                      "installments": {
+                        "description": "A stay paid monthly: each month and where it stands. Null for a stay paid at once.",
+                        "items": {
+                          "properties": {
+                            "amount_minor": {
+                              "type": "integer"
+                            },
+                            "paid_minor": {
+                              "type": "integer"
+                            },
+                            "period_end": {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            "period_start": {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            "status": {
+                              "enum": [
+                                "paid",
+                                "partial",
+                                "due",
+                                "overdue",
+                                "upcoming"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "period_start",
+                            "period_end",
+                            "amount_minor",
+                            "paid_minor",
+                            "status"
+                          ],
+                          "type": "object"
+                        },
+                        "type": [
+                          "array",
+                          "null"
+                        ]
+                      },
                       "location_id": {
                         "minLength": 1,
                         "type": "string"
@@ -55068,6 +55111,13 @@
                               "minLength": 1,
                               "type": "string"
                             },
+                            "period_start": {
+                              "description": "The month a monthly stay’s later payment paid; null for the checkout payment.",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
                             "receipt_url": {
                               "type": [
                                 "string",
@@ -55079,6 +55129,7 @@
                             }
                           },
                           "required": [
+                            "period_start",
                             "payment_id",
                             "currency",
                             "amount_minor",
@@ -55166,6 +55217,13 @@
                               "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                               "type": "string"
                             },
+                            "period_start": {
+                              "description": "For a stay paid monthly, the first night of the month this receipt pays; null for the stay as a whole.",
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
                             "reference": {
                               "type": [
                                 "string",
@@ -55182,6 +55240,7 @@
                             "paid_on",
                             "reference",
                             "note",
+                            "period_start",
                             "created_at",
                             "created_by"
                           ],
@@ -55279,6 +55338,7 @@
                       "guest_image_url",
                       "payments",
                       "online_payments",
+                      "installments",
                       "paid_minor",
                       "payment_status"
                     ],
@@ -87640,6 +87700,11 @@
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "type": "string"
           },
+          "period_start": {
+            "description": "For a stay paid monthly, the month this receipt pays: a period_start from get_product_booking → record.installments. Omit for the stay as a whole.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
           "reference": {
             "maxLength": 200,
             "type": "string"
@@ -87711,6 +87776,12 @@
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                 "type": "string"
               },
+              "period_start": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "reference": {
                 "type": [
                   "string",
@@ -87727,6 +87798,7 @@
               "paid_on",
               "reference",
               "note",
+              "period_start",
               "created_at"
             ],
             "type": "object"
@@ -127423,7 +127495,7 @@
         "cancel_product_booking": "sha256:4649ba23b5d73655c2ba9b2f26ef92757c2c7a809b1dceda3e7caed8ff49b08a",
         "confirm_product_booking": "sha256:44be0ae50ae38e0e7f9610cd8eff82af1212af3eb160c66d082804673dafd71e",
         "get_conversation": "sha256:5007b5cc2485f51db503b10ae92e88691fe6d2ffa56dafced5194e41abd1fd3f",
-        "get_product_booking": "sha256:e18d6d013e88273118bb76b0b7537581314ccae436d9993104f509cca6407c63",
+        "get_product_booking": "sha256:a8b31e4517cc1b385a04a7b24be4d1c33acff3bd7aa7eb9472e50da785835220",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_conversation_recipients": "sha256:439170e450547b9261d1f0499d27ef7ca95dd024cacf847719fee4f4c40e249e",
         "list_conversations": "sha256:563552eb6b0af82a762e138edf26711d2560e62fdb2cee2a757e19106704fbad",

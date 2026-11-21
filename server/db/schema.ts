@@ -1394,6 +1394,9 @@ export const offline_payments = sqliteTable("offline_payments", {
 	reference: text(),
 	note: text(),
 	purpose: text().$type<'payment' | 'deposit' | 'deposit_withheld'>().default("payment").notNull(),
+	// For a stay paid monthly, the first night (YYYY-MM-DD) of the month this
+	// receipt pays; null for a receipt toward the whole booking.
+	period_start: text(),
 	idempotency_key: text().notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text().notNull(),

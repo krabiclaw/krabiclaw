@@ -98,6 +98,11 @@
   "payment.change": "変更",
   "payment.surcharge_applies": "このカードには手数料がかかります。料金の詳細に表示され、合計に含まれています。",
   "payment.agreement": "ボタンを選択すると、{terms}に同意し、表示された合計金額を支払うことに同意します。",
+  "payment.due_today": "本日のお支払い",
+  "payment.later_payments": "今後のお支払い",
+  "payment.final_payment": "最終回",
+  "payment.stay_total": "滞在の合計",
+  "payment.monthly_agreement": "ボタンを選択すると、{terms}に同意し、本日の金額を支払い、最終回まで今後の各金額がその日付にこのカードに請求されることに同意します。",
   "payment.booking_terms": "予約条件",
   "payment.full_policy": "ポリシー全文",
   "payment.confirm": "確認してお支払い",
@@ -739,11 +744,5 @@
   "payment.non_refundable": "このご予約は返金できません。",
   "site.experience_cancel.retry_refund": "返金を再試行",
   "site.experience_cancel.toast_refund_failed": "返金を再試行できませんでした。もう一度お試しください。",
-  "booking_policy.cancel_closed": "オンラインでのキャンセルは開始時刻の{window}前に締め切られました。キャンセルするには事業者にご連絡ください。",
-  "agreement.sign_step": "{document}に署名する",
-  "agreement.full_name": "氏名をフルネームで入力してください",
-  "agreement.your_signature": "あなたの署名",
-  "agreement.consent": "電子的に署名することに同意し、これが{document}への私の署名であることを確認します。",
-  "agreement.read": "読む",
-  "agreement.sign_failed": "予約は完了しましたが、署名は保存されませんでした。予約から{document}に署名してください。"
+  "booking_policy.cancel_closed": "オンラインでのキャンセルは開始時刻の{window}前に締め切られました。キャンセルするには事業者にご連絡ください。"
 }

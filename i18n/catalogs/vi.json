@@ -98,6 +98,11 @@
   "payment.change": "Thay đổi",
   "payment.surcharge_applies": "Thẻ này có phụ phí. Phụ phí được hiển thị trong chi tiết giá và đã bao gồm trong tổng.",
   "payment.agreement": "Khi chọn nút này, tôi đồng ý với {terms} và đồng ý thanh toán tổng số tiền hiển thị.",
+  "payment.due_today": "Thanh toán hôm nay",
+  "payment.later_payments": "Các khoản thanh toán sau",
+  "payment.final_payment": "lần thanh toán cuối",
+  "payment.stay_total": "Tổng tiền lưu trú",
+  "payment.monthly_agreement": "Khi chọn nút này, tôi đồng ý với {terms}, thanh toán số tiền đến hạn hôm nay và đồng ý để thẻ này bị trừ từng khoản sau vào ngày của nó cho đến lần thanh toán cuối.",
   "payment.booking_terms": "điều khoản đặt chỗ",
   "payment.full_policy": "Toàn bộ chính sách",
   "payment.confirm": "Xác nhận và thanh toán",
@@ -739,11 +744,5 @@
   "payment.non_refundable": "Đặt chỗ này không được hoàn tiền.",
   "site.experience_cancel.retry_refund": "Thử hoàn tiền lại",
   "site.experience_cancel.toast_refund_failed": "Không thể thử hoàn tiền lại. Vui lòng thử lại.",
-  "booking_policy.cancel_closed": "Đã hết hạn hủy trực tuyến từ {window} trước giờ bắt đầu. Vui lòng liên hệ doanh nghiệp để hủy.",
-  "agreement.sign_step": "Ký {document}",
-  "agreement.full_name": "Nhập họ và tên đầy đủ",
-  "agreement.your_signature": "Chữ ký của bạn",
-  "agreement.consent": "Tôi đồng ý ký điện tử và đây là chữ ký của tôi trên {document}.",
-  "agreement.read": "Đọc",
-  "agreement.sign_failed": "Đặt chỗ của bạn đã được thực hiện nhưng chữ ký chưa được lưu. Hãy ký {document} từ đặt chỗ của bạn."
+  "booking_policy.cancel_closed": "Đã hết hạn hủy trực tuyến từ {window} trước giờ bắt đầu. Vui lòng liên hệ doanh nghiệp để hủy."
 }

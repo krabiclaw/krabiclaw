@@ -1,12 +1,4 @@
 export default {
-  "agreement": {
-    "sign_step": "Sign the {document}",
-    "full_name": "Type your full name",
-    "your_signature": "Your signature",
-    "consent": "I agree to sign electronically, and that this is my signature on the {document}.",
-    "read": "Read",
-    "sign_failed": "Your booking was made, but your signature was not saved. Sign the {document} from your booking."
-  },
   "email": {
     "reason": {
       "reservation": "You received this email because you made a reservation with {organization}.",
@@ -71,6 +63,11 @@ export default {
     "change": "Change",
     "surcharge_applies": "A surcharge applies to this card. It is shown in the price details and included in the total.",
     "agreement": "By selecting the button, I agree to the {terms} and to pay the total shown.",
+    "due_today": "Due today",
+    "later_payments": "Later payments",
+    "final_payment": "final payment",
+    "stay_total": "Stay total",
+    "monthly_agreement": "By selecting the button, I agree to the {terms}, to pay the amount due today, and to this card being charged each later amount on its date until the final payment.",
     "booking_terms": "booking terms",
     "full_policy": "Full policy",
     "free_cancellation_until": "Free cancellation until {time}. After that, this payment isn't refunded automatically.",
