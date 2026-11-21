@@ -434,6 +434,8 @@ export function mediaPlacementsQuery(input: {
          ${input.includeOrganizationFallback ? "OR (mp.owner_type = 'organization' AND mp.owner_id = mp.organization_id AND mp.slot = 'social_share')" : ''})
        ${input.slot ? 'AND mp.slot = ?' : ''}
        AND (mp.status = 'active' ${input.includePendingSocialCard ? "OR (mp.slot = 'social_card' AND mp.status = 'pending')" : ''}) AND ma.status = 'active'
+       -- A private document (a booking's PDF, a listing's template) is read only through its owner's route, never as media.
+       AND ma.public_url IS NOT NULL
      ORDER BY mp.owner_id, mp.slot, mp.sort_order
   `,
     params: [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), ...(typeof input.ownerType === 'string' ? [input.ownerType] : []), ...(owners.params ?? []), ...(input.slot ? [input.slot] : [])],

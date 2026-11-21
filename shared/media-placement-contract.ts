@@ -3,7 +3,8 @@ export const MEDIA_PLACEMENT_SLOTS = {
   organization: ['logo', 'logo_dark', 'favicon', 'social_share', 'social_card', 'compliance_document', 'announcement'],
   business_location: ['hero', 'gallery', 'social_card'],
   // `agreement` is the PDF every guest signs when they book this listing: a rental agreement, waiver, engagement letter or event contract.
-  product: ['image', 'gallery', 'social_card', 'agreement'],
+  // `agreement_template` is the business's own text for one, filled from each booking before it is sent; private, never public media.
+  product: ['image', 'gallery', 'social_card', 'agreement', 'agreement_template'],
   // A menu section's own picture: the intro over its dishes on the site and its tile in Catalog.
   collection: ['image'],
   content_document: ['cover', 'gallery', 'social_card'],

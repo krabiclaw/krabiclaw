@@ -879,6 +879,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   update_media_asset: { ...D, openWorldHint: true },
   update_post: { ...D, openWorldHint: true },
   update_product: { ...D, openWorldHint: true },
+  get_product_agreement_template: R,
+  set_product_agreement_template: { ...D, idempotentHint: true },
   update_organization_settings: { ...D, openWorldHint: true },
   update_site_page: { ...D, openWorldHint: true },
   delete_site_page: { ...D, openWorldHint: true },

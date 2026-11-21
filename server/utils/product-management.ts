@@ -191,7 +191,8 @@ function parseJsonObject(value: unknown, field: string): Record<string, string> 
 const PRODUCT_COLUMNS = `
   p.id, p.organization_id, p.name, p.slug, p.description, p.active, p.order_url, p.unit_label,
   p.marketing_features, p.metadata, p.tax_code, p.source,
-  p.kind, p.details_json, p.created_at, p.updated_at, p.created_by, p.updated_by
+  p.kind, p.details_json, p.created_at, p.updated_at, p.created_by, p.updated_by,
+  EXISTS (SELECT 1 FROM media_placements tp WHERE tp.organization_id = p.organization_id AND tp.owner_type = 'product' AND tp.owner_id = p.id AND tp.slot = 'agreement_template' AND tp.status = 'active') AS has_agreement_template
 `
 
 function mapProductRow(row: Row): Product {
@@ -219,6 +220,7 @@ function mapProductRow(row: Row): Product {
     image: null,
     gallery: [],
     agreement: null,
+    agreement_template: row.has_agreement_template === 1,
     media: [],
     social_image: null,
     source: String(row.source) as ProductSource,

@@ -329,17 +329,20 @@ export async function uploadPrivateDocument(input: {
   userId: string
   buffer: Uint8Array<ArrayBuffer>
   filename: string
+  /** A booking's PDF, or a listing's agreement template text. */
+  contentType?: 'application/pdf' | 'text/markdown'
   /** The rest of the operation, committed with the asset row or not at all. */
   queries: (assetId: string) => import('~/server/db').BatchQuery[]
 }): Promise<{ assetId: string }> {
   const assetId = crypto.randomUUID()
   const r2Key = buildR2Key(input.organizationId, assetId, input.filename, 'private')
-  await uploadToR2(input.env, r2Key, input.buffer, 'application/pdf')
+  const contentType = input.contentType ?? 'application/pdf'
+  await uploadToR2(input.env, r2Key, input.buffer, contentType)
   const { buildMediaAssetInsertQuery } = await import('~/server/utils/media-asset-manager')
   try {
     await executeBatch(input.db, [buildMediaAssetInsertQuery({
       id: assetId, organization_id: input.organizationId, kind: 'file', provider: 'cloudflare_r2', source: 'uploaded',
-      r2_key: r2Key, public_url: null, thumbnail_url: null, mime_type: 'application/pdf', file_name: input.filename,
+      r2_key: r2Key, public_url: null, thumbnail_url: null, mime_type: contentType, file_name: input.filename,
       file_size: input.buffer.byteLength, status: 'active', created_by_user_id: input.userId,
     }), ...input.queries(assetId)], { operation: 'Store private document' })
   } catch (error) {

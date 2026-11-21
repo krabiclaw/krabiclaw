@@ -98,7 +98,9 @@ function listingQuery(target: AgreementTarget): BatchQuery {
 
 function bookingQuery(target: AgreementTarget): BatchQuery {
   return {
-    query: `SELECT c.id AS conversation_id, b.id AS booking_id, b.organization_id, b.product_id, p.kind, b.status, b.ends_at, b.user_id, COALESCE(json_extract(c.payload_json, '$.guest.name'), u.name) AS guest_name
+    query: `SELECT c.id AS conversation_id, b.id AS booking_id, b.organization_id, b.product_id, p.kind, b.status, b.ends_at, b.user_id, COALESCE(json_extract(c.payload_json, '$.guest.name'), u.name) AS guest_name,
+        EXISTS (SELECT 1 FROM media_placements tp JOIN media_assets ta ON ta.id = tp.asset_id AND ta.organization_id = tp.organization_id AND ta.status = 'active'
+                 WHERE tp.organization_id = b.organization_id AND tp.owner_type = 'product' AND tp.owner_id = b.product_id AND tp.slot = 'agreement_template' AND tp.status = 'active') AS has_template
       FROM bookings b JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
       JOIN conversations c ON c.booking_id = b.id AND c.organization_id = b.organization_id AND c.kind = 'booking'
       LEFT JOIN user u ON u.id = b.user_id
@@ -133,7 +135,7 @@ type SignerRow = { user_id: string; name: string | null; anonymous: number; book
 /** The batch results of `agreementQueries`, in their order. */
 export function agreementFromResults(results: { results: unknown[] }[]) {
   const [bookingRows, records, listing, deposit, signers] = results
-  const row = bookingRows?.results[0] as { conversation_id: string; booking_id: string; organization_id: string; product_id: string; kind: ProductKind; status: string; ends_at: string; user_id: string | null; guest_name: string | null } | undefined
+  const row = bookingRows?.results[0] as { conversation_id: string; booking_id: string; organization_id: string; product_id: string; kind: ProductKind; status: string; ends_at: string; user_id: string | null; guest_name: string | null; has_template: number } | undefined
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found', data: { code: 'BOOKING_NOT_FOUND', field: 'booking_id' } })
   const booking: AgreementBooking = {
     conversationId: row.conversation_id, organizationId: row.organization_id, bookingId: row.booking_id,
@@ -145,6 +147,7 @@ export function agreementFromResults(results: { results: unknown[] }[]) {
     listing: (listing!.results[0] as ListingDocument | undefined) ?? null,
     signerRows: signers ? signers.results as SignerRow[] : null,
     deposit: presentDeposit(deposit!.results[0]),
+    hasTemplate: row.has_template === 1,
   }
 }
 
@@ -247,7 +250,7 @@ export function bookingAgreementFromRows(rows: { results: unknown[] }[], viewer:
   return {
     agreement: presentBookingAgreement(read, viewer),
     deposit: read.deposit,
-    ...(viewer.canManage && read.signerRows && actor ? { agreement_signers: availableSigners(read.signerRows, actor) } : {}),
+    ...(viewer.canManage && read.signerRows && actor ? { agreement_signers: availableSigners(read.signerRows, actor), agreement_template: read.hasTemplate } : {}),
   }
 }
 
@@ -446,7 +449,7 @@ type NotoFontKey = keyof typeof NOTO_FONT_FILES
 
 const WIN_ANSI_REGEX = /^[\u0020-\u007E\u00A0-\u00FF\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]*$/
 
-function isWinAnsi(text: string): boolean {
+export function isWinAnsi(text: string): boolean {
   return WIN_ANSI_REGEX.test(text)
 }
 
@@ -470,7 +473,7 @@ async function loadFontAssetBytes(env: CloudflareEnv, fileName: string, loaded: 
  * Japanese and Hangul Korean; Han text is Simplified Chinese unless the SC
  * font lacks one of its characters, when it is Traditional.
  */
-async function notoFontFor(env: CloudflareEnv, text: string, loaded: Map<string, Uint8Array>): Promise<{ key: NotoFontKey; bytes: Uint8Array }> {
+export async function notoFontFor(env: CloudflareEnv, text: string, loaded: Map<string, Uint8Array>): Promise<{ key: NotoFontKey; bytes: Uint8Array }> {
   const chars = [...text]
   const key: NotoFontKey = chars.some(c => /\p{Script=Thai}/u.test(c)) ? 'thai'
     : chars.some(c => /\p{Script=Hangul}/u.test(c)) ? 'kr'

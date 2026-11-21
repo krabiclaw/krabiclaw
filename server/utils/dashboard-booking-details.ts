@@ -161,6 +161,8 @@ export interface DashboardBookingDetails {
   agreement?: import('~/shared/agreements').BookingAgreement | null
   /** Who the business may ask to sign, for a viewer who manages the booking. */
   agreement_signers?: { key: string; name: string; role: 'guest' | 'host' }[]
+  /** The listing has the business's own agreement template to fill from this booking. */
+  agreement_template?: boolean
   /** The booking's refundable deposit; absent where this read carries none. */
   deposit?: import('~/shared/deposits').BookingDeposit | null
 }

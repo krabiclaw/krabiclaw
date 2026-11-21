@@ -470,6 +470,8 @@ export interface BookingEditor {
     when: { label: string; value: string; detail: string | null }[]
     current: import('~/shared/agreements').BookingAgreement | null
     signers: { key: string; name: string; role: 'guest' | 'host' }[]
+    /** The listing has the business's own template to fill from this booking. */
+    template: boolean
   } | null>
   /** The booking's refundable deposit for the business's Deposit leaf; null where the booking has no currency or the viewer is the guest. */
   deposit: ComputedRef<{ bookingId: string; current: import('~/shared/deposits').BookingDeposit; today: string } | null>
@@ -629,7 +631,11 @@ const conversationId = computed(() => booking.value?.conversation_id ?? detail.v
 const agreementRead = computed(() => {
   const record = booking.value ?? detail.value
   if (!record || !('agreement' in record) || record.agreement === undefined) return null
-  return { agreement: record.agreement, signers: 'agreement_signers' in record ? record.agreement_signers ?? null : null }
+  return {
+    agreement: record.agreement,
+    signers: 'agreement_signers' in record ? record.agreement_signers ?? null : null,
+    template: 'agreement_template' in record && record.agreement_template === true,
+  }
 })
 const signingAgreement = ref<BookingAgreementRecord | null>(null)
 /** The deposit the booking's read carries: null for a booking with no price, absent where the read carries none. */
@@ -1280,7 +1286,7 @@ provide(bookingEditorKey, {
     const read = agreementRead.value
     const view = panel.value
     if (!read?.signers || !conversationId.value || !agreementLabelText.value || !view) return null
-    return { conversationId: conversationId.value, label: agreementLabelText.value, title: view.title ?? agreementLabelText.value, when: view.when, current: read.agreement, signers: read.signers }
+    return { conversationId: conversationId.value, label: agreementLabelText.value, title: view.title ?? agreementLabelText.value, when: view.when, current: read.agreement, signers: read.signers, template: read.template }
   }),
   deposit: computed(() => {
     const current = depositRead.value

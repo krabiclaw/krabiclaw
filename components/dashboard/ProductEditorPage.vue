@@ -1316,7 +1316,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         placeholder: !product.value.stay!.cancellation_policy,
         to: sectionPath('cancellation'),
       },
-      { id: 'agreement', label: agreementLabel('stay'), summary: product.value.agreement?.file_name ?? 'None', placeholder: !product.value.agreement, to: sectionPath('agreement') },
+      { id: 'agreement', label: agreementLabel('stay'), summary: product.value.agreement_template ? 'Your template' : product.value.agreement?.file_name ?? 'None', placeholder: !product.value.agreement && !product.value.agreement_template, to: sectionPath('agreement') },
       { id: 'availability', label: 'Availability', summary: `${product.value.stay!.min_nights} ${product.value.stay!.min_nights === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
       { id: 'guests', label: 'Number of guests', summary: `${product.value.stay!.max_guests} ${product.value.stay!.max_guests === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
       { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },

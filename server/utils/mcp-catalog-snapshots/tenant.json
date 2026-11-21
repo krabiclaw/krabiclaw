@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:1c8d1f769e691ee5acb936e27cb3460eeaefbe0f7f578efef0654812a2ae6967",
-  "documentationFingerprint": "sha256:7087f147d259ee40a23b43ba20a3cc5359bff8e019f3ef9179e0fd0492d00269",
+  "fingerprint": "sha256:6ac65b2d6f543897015867f99ccefad5255243b54f2c45fe08a5217342e0735c",
+  "documentationFingerprint": "sha256:2a7a67b45a724377e42105baed7390c218e029b1a27749f1f6756cfd2d1bb016",
   "tools": [
     {
       "name": "add_organization_language",
@@ -8019,7 +8019,8 @@
                     "enum": [
                       "image",
                       "gallery",
-                      "agreement"
+                      "agreement",
+                      "agreement_template"
                     ],
                     "type": "string"
                   }
@@ -54412,6 +54413,65 @@
       "uiResourceUri": null
     },
     {
+      "name": "get_product_agreement_template",
+      "title": "Get product agreement template",
+      "description": "Read a listing’s own agreement template: the business’s lease, engagement letter, waiver or event contract text with {{field}} placeholders filled from each booking when sent. Null when it has none.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "product_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Get product agreement template"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "products",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "get_product_booking",
       "title": "Get product booking",
       "description": "Read one booking — an experience, consultation, table or stay at a home — when the user wants its guest details, answers to the offering's questions, status or current session. Use the booking version when making a change.",
@@ -88332,7 +88392,8 @@
                     "enum": [
                       "image",
                       "gallery",
-                      "agreement"
+                      "agreement",
+                      "agreement_template"
                     ],
                     "type": "string"
                   }
@@ -89767,7 +89828,8 @@
                     "enum": [
                       "image",
                       "gallery",
-                      "agreement"
+                      "agreement",
+                      "agreement_template"
                     ],
                     "type": "string"
                   }
@@ -97640,7 +97702,8 @@
                     "enum": [
                       "image",
                       "gallery",
-                      "agreement"
+                      "agreement",
+                      "agreement_template"
                     ],
                     "type": "string"
                   }
@@ -97974,7 +98037,8 @@
                         "enum": [
                           "image",
                           "gallery",
-                          "agreement"
+                          "agreement",
+                          "agreement_template"
                         ],
                         "type": "string"
                       }
@@ -98775,6 +98839,24 @@
       "description": "Send a PDF for a booking’s guests to sign — a lease, engagement letter, waiver or event contract — with each signer’s signature and date placed on its pages. Each guest is emailed a link and signs with their typed name; the business signs last. Signers are the keys get_product_booking lists in agreement_signers, or email:<address> for someone invited by email. Fields are fractions of a page from its top-left corner.",
       "inputSchema": {
         "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "file",
+              "fields"
+            ]
+          },
+          {
+            "properties": {
+              "from_template": {
+                "const": true
+              }
+            },
+            "required": [
+              "from_template"
+            ]
+          }
+        ],
         "properties": {
           "booking_id": {
             "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from conversation_id, which identifies the inbox conversation.",
@@ -98855,6 +98937,10 @@
             ],
             "type": "object"
           },
+          "from_template": {
+            "description": "Fill the listing’s own agreement template from this booking instead of attaching a file; signature and date lines are placed for each signer. Fails naming any booking fact the template needs and the booking lacks.",
+            "type": "boolean"
+          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -98893,9 +98979,7 @@
         },
         "required": [
           "booking_id",
-          "file",
-          "signers",
-          "fields"
+          "signers"
         ],
         "type": "object"
       },
@@ -99653,7 +99737,8 @@
                   "slot": {
                     "enum": [
                       "image",
-                      "agreement"
+                      "agreement",
+                      "agreement_template"
                     ],
                     "type": "string"
                   }
@@ -100119,7 +100204,8 @@
                     "enum": [
                       "image",
                       "gallery",
-                      "agreement"
+                      "agreement",
+                      "agreement_template"
                     ],
                     "type": "string"
                   }
@@ -100707,6 +100793,73 @@
         }
       ],
       "domain": "providers",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "set_product_agreement_template",
+      "title": "Set product agreement template",
+      "description": "Save a listing’s own agreement template, or null to remove it. Blawby supplies no legal wording: this is the business’s text. Placeholders are {{business_name}}, {{client_name}}, {{client_email}}, {{host_name}}, {{offering}}, {{address}}, {{start_date}}, {{end_date}}, {{price}}, {{deposit}}, {{cancellation_policy}}, {{today}}; a line starting \"# \" is a heading. send_booking_agreement with from_template fills it from a booking and places each signer’s lines.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "product_id": {
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 20000,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "product_id",
+          "text"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Set product agreement template"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "products",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -127248,14 +127401,14 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:9672fcb85c4ff355f5c2b00f1d22fe0a961e65e4bc4bdecf93bb882084faad70",
+        "attach_media": "sha256:f046b62dae00908f2346a6e1a89eb674c6476716829673f15593c20c128bd1f5",
         "create_product": "sha256:8193c55ebac41ea1c0bd72472ac43585af9a384aaa0c704339c94172fd80364f",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:3649a6bc69afde8d124ed5c8452177c30a70dad2c9301cc7d3f10c9522536376",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
-        "save_media_attachment": "sha256:7cbb4294cadce5efc38e1c6556e8db4ce41c49b7cf4c450179c1971251b1cbb7"
+        "save_media_attachment": "sha256:01fd8d271c4692c887b04d77ae9d58c547b4973183b71591e9b1e48078ad228a"
       }
     },
     {
@@ -127294,14 +127447,14 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and list_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Check if hero media, brand logo, favicon, and bookable offerings (such as places to stay or menu items via product_grid) are present, and ask the user for any missing brand assets. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:9672fcb85c4ff355f5c2b00f1d22fe0a961e65e4bc4bdecf93bb882084faad70",
+        "attach_media": "sha256:f046b62dae00908f2346a6e1a89eb674c6476716829673f15593c20c128bd1f5",
         "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "remove_media": "sha256:db9885504444403b6463efaf9bff273da2a5bc3b885b725ea5f060a99157be65",
-        "reorder_media": "sha256:fceb9898afc5f987629fff60066f75375e086b45283441f26676b039e02f5193",
-        "set_media": "sha256:b4b12affd9e8180146a39d5d30b6f044c5eaa91e43e136f883b41f5d41b64b8c",
+        "remove_media": "sha256:19518531ae2928171943528ba7cb1e57ce9c7c46eb8d5076b1070dc989b5ce77",
+        "reorder_media": "sha256:f50b93cc3e0a1235b9a70d601d2b51a671a7e91df895f2e2ee066ee8a568a3a8",
+        "set_media": "sha256:3d36f1a257f4ca8e1d85c4d0c8623ee2203656d1d7f52c45260c60f9fb6cb4e8",
         "update_site_page": "sha256:467bad83026861320c7ed582236f5c4b5f2cec39cbf5e7f74a8e976d34c9a7c1"
       }
     },
@@ -127314,14 +127467,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:9672fcb85c4ff355f5c2b00f1d22fe0a961e65e4bc4bdecf93bb882084faad70",
+        "attach_media": "sha256:f046b62dae00908f2346a6e1a89eb674c6476716829673f15593c20c128bd1f5",
         "get_location": "sha256:eeb473e44df629a24ceb82a2db6873a6b1f108dd852c2fa923f605a637439f34",
         "get_post": "sha256:fd95e9d97a5f0624dda58886752832eee80a1fef08c9c7a64d8c2af4ff3481d1",
         "get_product": "sha256:114fce9013309b4bd92ea1bd3012b7fc9b6293a09be3cef9c7402c86df8fe954",
         "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "save_media_attachment": "sha256:7cbb4294cadce5efc38e1c6556e8db4ce41c49b7cf4c450179c1971251b1cbb7",
-        "set_media": "sha256:b4b12affd9e8180146a39d5d30b6f044c5eaa91e43e136f883b41f5d41b64b8c"
+        "save_media_attachment": "sha256:01fd8d271c4692c887b04d77ae9d58c547b4973183b71591e9b1e48078ad228a",
+        "set_media": "sha256:3d36f1a257f4ca8e1d85c4d0c8623ee2203656d1d7f52c45260c60f9fb6cb4e8"
       }
     },
     {
@@ -127378,13 +127531,13 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, list_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language: high-impact hero image or video, logo and favicon, brand colors, offerings showcase on the homepage, and host story with portrait on the about page. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:9672fcb85c4ff355f5c2b00f1d22fe0a961e65e4bc4bdecf93bb882084faad70",
+        "attach_media": "sha256:f046b62dae00908f2346a6e1a89eb674c6476716829673f15593c20c128bd1f5",
         "get_site_page": "sha256:482ebe0f69cd34d7e8178e56141c0ff05d1400f10dc03aa8e0a362a5445d4427",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_products": "sha256:bd6b30cee8a405d0bcdf6313fa20396a2e287bb3285b977fdc1c27baed9c48f0",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "set_media": "sha256:b4b12affd9e8180146a39d5d30b6f044c5eaa91e43e136f883b41f5d41b64b8c",
+        "set_media": "sha256:3d36f1a257f4ca8e1d85c4d0c8623ee2203656d1d7f52c45260c60f9fb6cb4e8",
         "update_product": "sha256:afed95fa490fdae7aed3b9d4e6f5db435e1ab4c8d3909b260fbe380a82f9d461",
         "update_site_page": "sha256:467bad83026861320c7ed582236f5c4b5f2cec39cbf5e7f74a8e976d34c9a7c1"
       }

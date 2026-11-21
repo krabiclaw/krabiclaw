@@ -27,9 +27,16 @@
 
         <!-- Nothing sent yet: Zillow's checklist. Each card shows a saved fact and opens what changes it. -->
         <div v-else class="space-y-4">
-          <button type="button" :class="cardClass" data-testid="card-document" @click="documentPicker?.click()">
+          <button v-if="context.template" type="button" :class="cardClass" data-testid="card-template" :disabled="opening" @click="useTemplate">
             <span class="min-w-0 flex-1">
               <span class="block text-sm font-semibold text-highlighted">{{ context.label }}</span>
+              <span class="mt-1 block text-sm text-muted">From your template, filled in from this booking</span>
+            </span>
+            <span class="text-sm font-semibold text-highlighted underline underline-offset-4">{{ opening ? 'Filling…' : 'Review' }}</span>
+          </button>
+          <button type="button" :class="cardClass" data-testid="card-document" @click="documentPicker?.click()">
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-semibold text-highlighted">{{ context.template ? 'Or upload a PDF' : context.label }}</span>
               <span class="mt-1 block truncate text-sm text-muted">{{ draft.file?.name ?? `Choose the PDF to sign` }}</span>
             </span>
             <span class="text-sm font-semibold text-highlighted underline underline-offset-4">{{ draft.file ? 'Replace' : 'Choose' }}</span>
@@ -306,6 +313,35 @@ async function openWorkspace() {
   } finally {
     opening.value = false
   }
+}
+
+/** The listing's template filled from this booking, opened with each signer's lines already placed. */
+async function useTemplate() {
+  if (!context.value || opening.value) return
+  if (!chosenSigners.value.some(signer => signer.role === 'guest')) {
+    error.value = 'Choose at least one guest to sign.'
+    return
+  }
+  opening.value = true
+  error.value = ''
+  try {
+    const answer = await applicationFetch(`/api/messages/${encodeURIComponent(context.value.conversationId)}/agreement/generate`, {
+      method: 'POST', body: { signers: chosenSigners.value },
+      validate: (value): value is { file_name: string; pdf_base64: string; fields: AgreementField[] } => isRecord(value)
+        && typeof value.file_name === 'string' && typeof value.pdf_base64 === 'string' && Array.isArray(value.fields),
+    })
+    const bytes = Uint8Array.from(atob(answer.pdf_base64), char => char.charCodeAt(0))
+    draft.file = new File([bytes], answer.file_name, { type: 'application/pdf' })
+    draft.fields = answer.fields
+    for (const field of draft.fields) fieldKeys.set(field, `${field.signer_key}:${field.kind}:${placed++}`)
+    pdf = null
+  } catch (failure) {
+    error.value = getErrorMessage(failure, 'The template could not be filled from this booking')
+    return
+  } finally {
+    opening.value = false
+  }
+  await openWorkspace()
 }
 
 function closeWorkspace() {

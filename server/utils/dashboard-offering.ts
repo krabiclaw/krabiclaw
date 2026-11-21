@@ -90,7 +90,7 @@ export function prepareDashboardOffering(organizationId: string | { sql: string 
       ...(!dish && (!service || booking) ? [
         ...(booking ? [leaf('assignment', copy.assigneeLabel, assigned ?? 'Unassigned', { web: 'booking/assignment', readonly: !manages })] : []),
         leaf('booking', bookingLabel, booking ? `${booking.duration_minutes} minutes` : 'No booking calendar'),
-        ...(booking ? [leaf('agreement', agreementLabel(product.kind), product.agreement?.file_name ?? 'None')] : []),
+        ...(booking ? [leaf('agreement', agreementLabel(product.kind), product.agreement_template ? 'Your template' : product.agreement?.file_name ?? 'None')] : []),
       ] : []),
       ...(service && !booking && manages ? [{ ...leaf('booking', 'Set up consultations', 'No booking calendar'), optional_detail: true }] : []),
       ...(service && !booking && !product.locations.length && wide ? [{ ...leaf('locations', placeLabel), optional_detail: true }] : []),

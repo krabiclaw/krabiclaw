@@ -20,6 +20,7 @@ import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events
 import { NOT_HANDLED, requiredString, optionalString, resolveUserUploadedMediaFile, toolFileReference, type McpExecutorContext } from './execution'
 import { readBookingAgreement, sendAgreement } from '~/server/domain/agreements'
 import { deleteDepositEntry, recordDepositEntry, setBookingDeposit } from '~/server/domain/deposits'
+import { generateAgreementFromTemplate } from '~/server/domain/agreement-templates'
 import type { ConversationRow } from '~/server/domain/conversations'
 import { BOOKING_STATUSES, isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { formAnswerInputJsonSchema, formAnswerSnapshotsJsonSchema, formAnswerSnapshotsSchema } from '~/shared/form-questions'
@@ -108,14 +109,16 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'send_booking_agreement', domain: 'bookings', minimumRole: 'member',
     description: 'Send a PDF for a booking’s guests to sign — a lease, engagement letter, waiver or event contract — with each signer’s signature and date placed on its pages. Each guest is emailed a link and signs with their typed name; the business signs last. Signers are the keys get_product_booking lists in agreement_signers, or email:<address> for someone invited by email. Fields are fractions of a page from its top-left corner.',
     inputSchema: {
+      anyOf: [{ required: ['file', 'fields'] }, { required: ['from_template'], properties: { from_template: { const: true } } }],
       booking_id: bookingId, file: chatgptFileInput,
+      from_template: { type: 'boolean', description: 'Fill the listing’s own agreement template from this booking instead of attaching a file; signature and date lines are placed for each signer. Fails naming any booking fact the template needs and the booking lacks.' },
       signers: { type: 'array', minItems: 1, items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } },
       fields: { type: 'array', minItems: 1, items: { type: 'object', properties: {
         signer_key: text, kind: { type: 'string', enum: ['signature', 'date'] }, page: { type: 'integer', minimum: 1 },
         x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
       }, required: ['signer_key', 'kind', 'page', 'x', 'y', 'width', 'height'] } },
     },
-    required: ['booking_id', 'file', 'signers', 'fields'], fileParams: ['file'],
+    required: ['booking_id', 'signers'], fileParams: ['file'],
     outputSchema: { type: 'object', properties: { sent: { const: true }, agreement: { type: ['object', 'null'] } }, required: ['sent', 'agreement'] },
   }),
   organizationTool({ name: 'set_booking_deposit', domain: 'bookings', minimumRole: 'admin',
@@ -262,13 +265,19 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: 'update' })
     const conversation = await queryFirst<ConversationRow>(db, "SELECT * FROM conversations WHERE booking_id = ? AND organization_id = ? AND kind = 'booking'", [id, organizationId])
     if (!conversation) throw new HTTPError({ statusCode: 404, message: 'This booking has no guest conversation to send the document in' })
-    const resolved = await resolveUserUploadedMediaFile(toolFileReference(args.file, 'file'))
-    if (resolved.contentType !== 'application/pdf') throw new HTTPError({ statusCode: 415, message: 'Attach a PDF' })
     const actor = await agreementActor()
-    await sendAgreement(env, conversation, actor, {
-      file: new File([resolved.buffer], resolved.filename, { type: 'application/pdf' }),
-      signers: Array.isArray(args.signers) ? args.signers : [], fields: Array.isArray(args.fields) ? args.fields : [],
-    })
+    const signers = Array.isArray(args.signers) ? args.signers : []
+    if (args.from_template === true) {
+      const filled = await generateAgreementFromTemplate(env, conversation, actor, signers)
+      await sendAgreement(env, conversation, actor, { file: new File([new Uint8Array(filled.bytes)], filled.file_name, { type: 'application/pdf' }), signers, fields: filled.fields })
+    } else {
+      const resolved = await resolveUserUploadedMediaFile(toolFileReference(args.file, 'file'))
+      if (resolved.contentType !== 'application/pdf') throw new HTTPError({ statusCode: 415, message: 'Attach a PDF' })
+      await sendAgreement(env, conversation, actor, {
+        file: new File([resolved.buffer], resolved.filename, { type: 'application/pdf' }),
+        signers, fields: Array.isArray(args.fields) ? args.fields : [],
+      })
+    }
     return { sent: true, agreement: (await readBookingAgreement(db, conversation, { userId: organization.userId, verifiedEmail: null, canManage: true }, actor)).agreement }
   }
   const statusActions: Record<string, 'confirm' | 'reject' | 'cancel'> = {
