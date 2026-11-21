@@ -2,7 +2,9 @@ export const MEDIA_PLACEMENT_SLOTS = {
   // `logo_dark` is the optional logo for dark grounds; a site without one shows `logo`.
   organization: ['logo', 'logo_dark', 'favicon', 'social_share', 'social_card', 'compliance_document', 'announcement'],
   business_location: ['hero', 'gallery', 'social_card'],
-  product: ['image', 'gallery', 'social_card'],
+  // `agreement` is the PDF every guest signs when they book this listing: a rental agreement, waiver, engagement letter or event contract.
+  // `agreement_template` is the business's own text for one, filled from each booking before it is sent; private, never public media.
+  product: ['image', 'gallery', 'social_card', 'agreement', 'agreement_template'],
   // A menu section's own picture: the intro over its dishes on the site and its tile in Catalog.
   collection: ['image'],
   content_document: ['cover', 'gallery', 'social_card'],
@@ -17,8 +19,9 @@ export const MEDIA_PLACEMENT_SLOTS = {
   ],
   review: ['portrait', 'gallery', 'social_card'],
   review_request: ['gallery'],
-  // The photos a message in a conversation carries, in the order they were sent.
-  message: ['attachments'],
+  // The photos a message in a conversation carries, in the order they were sent;
+  // `agreement` is the PDF a booking's agreement message stored or sent for signing.
+  message: ['attachments', 'agreement'],
   stay_photo_room: ['photo'],
   stay_home_accessibility: [],
   stay_room_accessibility: [],

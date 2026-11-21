@@ -315,3 +315,43 @@ export async function replaceR2ImageFile(input: {
     throw new Error(`Media asset ${input.assetId} now uses ${key}; its previous file ${asset.r2_key} could not be deleted`, { cause: error })
   }
 }
+
+/**
+ * A PDF only its owner's route serves: stored under the private prefix the
+ * public media host refuses, with no public URL. The same asset row as any
+ * other upload, written in the caller's batch so the file and what it is for
+ * commit together; a failed batch removes the stored file.
+ */
+export async function uploadPrivateDocument(input: {
+  db: DbClient
+  env: Parameters<typeof uploadToR2>[0]
+  organizationId: string
+  userId: string
+  buffer: Uint8Array<ArrayBuffer>
+  filename: string
+  /** A booking's PDF, or a listing's agreement template text. */
+  contentType?: 'application/pdf' | 'text/markdown'
+  /** The rest of the operation, committed with the asset row or not at all. */
+  queries: (assetId: string) => import('~/server/db').BatchQuery[]
+}): Promise<{ assetId: string }> {
+  const assetId = crypto.randomUUID()
+  const r2Key = buildR2Key(input.organizationId, assetId, input.filename, 'private')
+  const contentType = input.contentType ?? 'application/pdf'
+  await uploadToR2(input.env, r2Key, input.buffer, contentType)
+  const { buildMediaAssetInsertQuery } = await import('~/server/utils/media-asset-manager')
+  try {
+    await executeBatch(input.db, [buildMediaAssetInsertQuery({
+      id: assetId, organization_id: input.organizationId, kind: 'file', provider: 'cloudflare_r2', source: 'uploaded',
+      r2_key: r2Key, public_url: null, thumbnail_url: null, mime_type: contentType, file_name: input.filename,
+      file_size: input.buffer.byteLength, status: 'active', created_by_user_id: input.userId,
+    }), ...input.queries(assetId)], { operation: 'Store private document' })
+  } catch (error) {
+    try {
+      await deleteFromR2(input.env, r2Key)
+    } catch (cleanupError) {
+      throw new AggregateError([uploadFailure(error), uploadFailure(cleanupError)], `Private document ${assetId} could not be saved or removed`, { cause: cleanupError })
+    }
+    throw error
+  }
+  return { assetId }
+}

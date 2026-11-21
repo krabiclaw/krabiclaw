@@ -9,6 +9,7 @@ import { PRODUCT_KIND_LABELS, productDetailFields } from '~/shared/product-detai
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, selectPrice } from '~/shared/prices'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { agreementLabel } from '~/shared/agreements'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { HTTPError } from 'nitro'
 import { roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
@@ -89,6 +90,7 @@ export function prepareDashboardOffering(organizationId: string | { sql: string 
       ...(!dish && (!service || booking) ? [
         ...(booking ? [leaf('assignment', copy.assigneeLabel, assigned ?? 'Unassigned', { web: 'booking/assignment', readonly: !manages })] : []),
         leaf('booking', bookingLabel, booking ? `${booking.duration_minutes} minutes` : 'No booking calendar'),
+        ...(booking ? [leaf('agreement', agreementLabel(product.kind), product.agreement_template ? 'Your template' : product.agreement?.file_name ?? 'None')] : []),
       ] : []),
       ...(service && !booking && manages ? [{ ...leaf('booking', 'Set up consultations', 'No booking calendar'), optional_detail: true }] : []),
       ...(service && !booking && !product.locations.length && wide ? [{ ...leaf('locations', placeLabel), optional_detail: true }] : []),

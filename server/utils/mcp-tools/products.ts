@@ -1,3 +1,5 @@
+import { readAgreementTemplate, saveAgreementTemplate } from '~/server/domain/agreement-templates'
+import { AGREEMENT_TEMPLATE_FIELDS, MAX_AGREEMENT_TEMPLATE_LENGTH } from '~/shared/agreement-templates'
 import { STAY_CALENDAR_RULES_SCHEMA, STAY_HOME_ACCESSIBILITY_SCHEMA, STAY_LISTING_SCHEMA, STAY_LISTING_WRITE_SCHEMA, STAY_PHOTO_ROOM_SCHEMA } from './stays'
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
@@ -381,6 +383,16 @@ export const PRODUCTS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'list_location_products', description: 'List product identities offered at one selected location. Results are paginated; published_only narrows to published offerings. Use list_products for the whole site.', domain: 'products', minimumRole: 'admin', inputSchema: { location_id: { type: 'string' }, kind: { type: 'string', enum: [...PRODUCT_KINDS] }, featured: { type: 'boolean' }, published_only: { type: 'boolean' }, ...paginationInputSchema }, required: ['location_id'], outputSchema: productListResultObject }),
   organizationTool({ name: 'get_product', description: "Read one site product before reviewing or editing its variants, prices, media, publication, locations, collections, named product facts or booking defaults. Prices belong to variants; booking defaults apply to new sessions.", domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: productResult }),
   organizationTool({ name: 'create_product', description: 'Add food or drink, an experience or class, a practice area or consultation, a restaurant location\'s tables (kind table, one per location, booked like any offering), or a place to stay. An experience can start as a private draft without booking setup. To make it public, configure its booking flow or supply an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.' , domain: 'products', minimumRole: 'admin', inputSchema: { ...productWrite, booking: bookingSetup, stay: staySetup, page: { type: 'object', description: 'A source page created with this product and bound to it, in the same write. Omit for a product without a page of its own.', properties: { ...TENANT_PAGE_METADATA_SCHEMA, path: { type: 'string', description: "The page's public path. A practice area or consultation may omit it to get the first free /services/<slug>." }, blocks: TENANT_PAGE_BLOCKS_SCHEMA }, required: ['title', 'blocks'], additionalProperties: false }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Repeat the same key with the same request to get the product it created instead of a second one.' } }, required: ['name', 'kind', 'idempotency_key'], outputSchema: productResult }),
+  organizationTool({ name: 'get_product_agreement_template', domain: 'products', minimumRole: 'member',
+    description: 'Read a listing’s own agreement template: the business’s lease, engagement letter, waiver or event contract text with {{field}} placeholders filled from each booking when sent. Null when it has none.',
+    inputSchema: { product_id: { type: 'string' } }, required: ['product_id'],
+    outputSchema: { type: 'object', properties: { text: { type: ['string', 'null'] } }, required: ['text'] },
+  }),
+  organizationTool({ name: 'set_product_agreement_template', domain: 'products', minimumRole: 'member',
+    description: `Save a listing’s own agreement template, or null to remove it. Blawby supplies no legal wording: this is the business’s text. Placeholders are {{${AGREEMENT_TEMPLATE_FIELDS.join('}}, {{')}}}; a line starting "# " is a heading. send_booking_agreement with from_template fills it from a booking and places each signer’s lines.`,
+    inputSchema: { product_id: { type: 'string' }, text: { type: ['string', 'null'], maxLength: MAX_AGREEMENT_TEMPLATE_LENGTH } }, required: ['product_id', 'text'],
+    outputSchema: { type: 'object', properties: { text: { type: ['string', 'null'] } }, required: ['text'] },
+  }),
   organizationTool({ name: 'update_product', description: 'Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying. Increasing the number of live homes requires the dashboard.', domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' }, ...productPatch, booking: bookingSetup, stay: stayPatch, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Required with booking setup. Repeat the same key with the same request for an identical retry.' } }, required: ['product_id'], outputSchema: productMutationResult }),
   organizationTool({ name: 'delete_product', description: 'Delete a product and its public page. Booking history prevents deletion; pause bookings or withhold publication to retain it.', domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: { type: 'object', properties: { deleted: { type: 'boolean' } }, required: ['deleted'] } }),
   organizationTool({ name: 'set_product_publication', description: "Publish or withhold a product on the selected site and return its saved publication flag and available public or editor URLs. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations. Increasing the number of live homes requires the dashboard.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, published: { type: 'boolean' } }, required: ['product_id', 'published'], outputSchema: productPublicationResult }),
@@ -493,8 +505,8 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
 
   const principal = memberAccessPrincipal(organization.membership, { env: organization.env })
   const managesCatalog = await roleAllows({ ...principal, permissions: { products: ['update'] } })
-  if (['get_product', 'update_product', 'set_product_booking_config', 'replace_product_weekly_schedule'].includes(toolName)) {
-    await assertProductAccess(organization.db, { ...principal, productId: requiredString(args, 'product_id'), patch: toolName === 'get_product' ? undefined : args })
+  if (['get_product', 'update_product', 'set_product_booking_config', 'replace_product_weekly_schedule', 'get_product_agreement_template'].includes(toolName)) {
+    await assertProductAccess(organization.db, { ...principal, productId: requiredString(args, 'product_id'), patch: toolName === 'get_product' || toolName === 'get_product_agreement_template' ? undefined : args })
   }
 
   switch (toolName) {
@@ -577,6 +589,15 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
         idempotencyKey,
       })
       return await productResponse(ctx, product)
+    }
+    case 'get_product_agreement_template':
+    case 'set_product_agreement_template': {
+      const product = await requireOrganizationProduct(organization.db, { ...scope, productId: requiredString(args, 'product_id') })
+      if (toolName === 'set_product_agreement_template') {
+        await assertProductAccess(organization.db, { ...principal, productId: product.id, patch: { agreement_template: args.text ?? null } })
+        await saveAgreementTemplate(organization.env, organization.db, { organizationId: organization.organizationId, userId: organization.userId, productId: product.id, kind: product.kind, text: args.text ?? null })
+      }
+      return { text: await readAgreementTemplate(organization.env, organization.db, organization.organizationId, product.id) }
     }
     case 'update_product': {
       const productId = requiredString(args, 'product_id')

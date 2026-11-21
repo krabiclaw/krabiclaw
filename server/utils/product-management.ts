@@ -191,7 +191,8 @@ function parseJsonObject(value: unknown, field: string): Record<string, string> 
 const PRODUCT_COLUMNS = `
   p.id, p.organization_id, p.name, p.slug, p.description, p.active, p.order_url, p.unit_label,
   p.marketing_features, p.metadata, p.tax_code, p.source,
-  p.kind, p.details_json, p.created_at, p.updated_at, p.created_by, p.updated_by
+  p.kind, p.details_json, p.created_at, p.updated_at, p.created_by, p.updated_by,
+  EXISTS (SELECT 1 FROM media_placements tp WHERE tp.organization_id = p.organization_id AND tp.owner_type = 'product' AND tp.owner_id = p.id AND tp.slot = 'agreement_template' AND tp.status = 'active') AS has_agreement_template
 `
 
 function mapProductRow(row: Row): Product {
@@ -218,6 +219,8 @@ function mapProductRow(row: Row): Product {
     page: null,
     image: null,
     gallery: [],
+    agreement: null,
+    agreement_template: row.has_agreement_template === 1,
     media: [],
     social_image: null,
     source: String(row.source) as ProductSource,
@@ -416,6 +419,12 @@ function hydrateProductRows(
  * so the caller must say which site's imagery it wants. There is no "the
  * product's image" independent of a site, and no default site is assumed.
  */
+/** The listing's agreement: its one document placement, named by its file. */
+function agreementOf(media: ReadonlyArray<ResolvedMediaAsset & { slot?: string; file_name?: string | null }>): Product['agreement'] {
+  const document = media.find(item => item.slot === 'agreement')
+  return document ? { ...document, file_name: document.file_name ?? null } : null
+}
+
 export async function hydrateProductMedia(db: DbClient, organizationId: string, products: Product[], loaded?: Awaited<ReturnType<typeof loadPublicSocialMedia>>): Promise<Product[]> {
   if (!products.length) return products
   const placements = loaded ?? await loadPublicSocialMedia(db, organizationId, 'product', products.map(product => product.id))
@@ -425,7 +434,8 @@ export async function hydrateProductMedia(db: DbClient, organizationId: string, 
       ...product,
       image: socialMedia.media.find(item => item.slot === 'image') ?? null,
       gallery: socialMedia.media.filter(item => item.slot === 'gallery'),
-      media: socialMedia.media,
+      agreement: agreementOf(socialMedia.media),
+      media: socialMedia.media.filter(item => item.slot !== 'agreement'),
       social_image: socialMedia.social_image,
     }
   })

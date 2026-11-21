@@ -1,3 +1,5 @@
+import { isStayInstallments, stayCheckoutAmount } from '~/shared/stay-installments'
+import { recordInstallmentPayment, scheduleStayInstallments } from './installments'
 import { stripeMetadataId } from './stripe-metadata'
 import { changedTaskIds, publishChangedJobs, publishEvent, type DomainEvent } from '~/server/events'
 import type Stripe from 'stripe'
@@ -277,6 +279,7 @@ export async function notifyRecordedPayment(env: CloudflareEnv, event: Extract<D
     if (booking.unit === 'nights') {
       await planSourceMessages(db, event.organization_id, booking.id)
       await notifyStayBooked(env, db, event.organization_id, booking.id)
+      await scheduleStayInstallments(env, payment, booking.id)
     } else {
       await notifyProductBookingCreated(env, db, event.organization_id, booking.conversation_id)
     }
@@ -318,7 +321,7 @@ async function saveCheckoutBooking(db: DbClient, env: CloudflareEnv, payment: Pa
      params: [hold.conversation_id, payment.organization_id, bookingId] }, now)]
  }else{
   const purchase=snapshot.stay
-  if(!isStayPurchase(purchase)||purchase.product_id!==hold.product_id||purchase.total_minor!==payment.amount)throw new Error('Stay payment has no valid stay purchase')
+  if(!isStayPurchase(purchase)||purchase.product_id!==hold.product_id||!isStayInstallments(snapshot.installments)||stayCheckoutAmount(purchase,snapshot.installments)!==payment.amount)throw new Error('Stay payment has no valid stay purchase')
   const buyerUserId=payment.buyer_user_id??hold.buyer_user_id
   if(!buyerUserId)throw new Error('Stay payment has no guest account')
   if (approval) {
@@ -387,7 +390,7 @@ export function confirmationHoldUntil(startedAt: string): string {
 
 export function paymentEventKey(event:Pick<Stripe.Event,'id'|'account'|'livemode'>):string{return `payments:${event.account??'unscoped'}:${Number(event.livemode)}:${event.id}`}
 export async function processPaymentEvent(db:DbClient,stripe:Stripe,event:Stripe.Event,env:CloudflareEnv) {
-  if(!['payment_intent.','refund.','charge.dispute.','payout.'].some(prefix=>event.type.startsWith(prefix)))return
+  if(!['payment_intent.','refund.','charge.dispute.','payout.','invoice.paid'].some(prefix=>event.type.startsWith(prefix)))return
   const object=event.data.object as {id?:string;metadata?:Record<string,string>|null}
   const payload=JSON.stringify({id:event.id,type:event.type,account:event.account,livemode:event.livemode,data:{object:{id:object.id,metadata:{blawby_payment_id:object.metadata?.blawby_payment_id,krabiclaw_payment_id:object.metadata?.krabiclaw_payment_id}}}})
   await processStripeWebhookEvent(db,{id:paymentEventKey(event),type:event.type,payload,processor:'tenant_payments'},async()=>{
@@ -400,6 +403,11 @@ export async function processPaymentEvent(db:DbClient,stripe:Stripe,event:Stripe
     if(event.type.startsWith('payout.')) {
       if(event.type!=='payout.paid'&&event.type!=='payout.failed')return
       await reconcilePayoutEvent(db,stripe,env,{organizationId:connected.organization_id,stripeAccountId:event.account,livemode:event.livemode},event)
+      return
+    }
+    // A long stay's later month, collected by Stripe from the guest's saved card.
+    if (event.type === 'invoice.paid') {
+      await recordInstallmentPayment(db,stripe,env,connected.organization_id,(event.data.object as Stripe.Invoice).id!,event.account)
       return
     }
     if (event.type.startsWith('payment_intent.')) {

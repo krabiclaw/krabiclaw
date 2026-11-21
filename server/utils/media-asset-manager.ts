@@ -434,6 +434,8 @@ export function mediaPlacementsQuery(input: {
          ${input.includeOrganizationFallback ? "OR (mp.owner_type = 'organization' AND mp.owner_id = mp.organization_id AND mp.slot = 'social_share')" : ''})
        ${input.slot ? 'AND mp.slot = ?' : ''}
        AND (mp.status = 'active' ${input.includePendingSocialCard ? "OR (mp.slot = 'social_card' AND mp.status = 'pending')" : ''}) AND ma.status = 'active'
+       -- A private document (a booking's PDF, a listing's template) is read only through its owner's route, never as media.
+       AND ma.public_url IS NOT NULL
      ORDER BY mp.owner_id, mp.slot, mp.sort_order
   `,
     params: [...(typeof input.organizationId === 'string' ? [input.organizationId] : []), ...(typeof input.ownerType === 'string' ? [input.ownerType] : []), ...(owners.params ?? []), ...(input.slot ? [input.slot] : [])],
@@ -622,6 +624,8 @@ export function listMediaAssetsQuery(
   if (opts.ownerType !== 'message') {
     conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type = 'message')`)
   }
+  // A booking's private document belongs to that booking, never the media library.
+  conditions.push(`(ma.r2_key IS NULL OR ma.r2_key NOT LIKE 'private/%')`)
   if (opts.kind) { conditions.push(`ma.kind = ?`); params.push(opts.kind) }
   if (opts.search) { conditions.push(`ma.file_name LIKE ? ESCAPE '\\'`); params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`) }
   if (opts.ownerType && opts.ownerId) {

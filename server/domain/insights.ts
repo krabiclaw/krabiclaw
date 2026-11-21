@@ -275,7 +275,7 @@ async function bookingsWithIncome(context: PageContext) {
       offline AS (
         SELECT p.booking_id, SUM(p.amount_minor) AS amount, SUM(-MIN(p.amount_minor, 0)) AS refunded
           FROM offline_payments p JOIN scoped b ON b.id = p.booking_id
-         WHERE p.organization_id = ? GROUP BY p.booking_id
+         WHERE p.organization_id = ? AND p.purpose <> 'deposit' GROUP BY p.booking_id
       )
       SELECT b.*, online.amount AS online_amount, online.refunded AS online_refunded,
              offline.amount AS offline_amount, offline.refunded AS offline_refunded

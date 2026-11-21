@@ -15,6 +15,13 @@
       "when": 1795085903689,
       "tag": "0001_maintenance_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795251605765,
+      "tag": "0002_booking_deposits",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,7 @@ import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevisio
 import { validateFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, STAY_DIRECT_DISCOUNTS, stayChannelCalendarRules, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { agreementQueries, bookingAgreementFromRows } from '~/server/domain/agreements'
 import { assignedOperationsRoles, roleMatchesSql, rolesAllowing } from '~/utils/organization-access'
 import { assertResponsibleMember, assertRoleAllows, assignedMemberSql, BATCH_VIEWER, bookingOperationsScope, roleAllows, withViewer, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { bookedRecordsInRange, type BookedRecordInRange } from '~/server/domain/product-bookings'
@@ -22,6 +23,8 @@ import { liveHomeSql } from '~/server/utils/billing'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { visitRefundPaymentQuery, visitRefundQueries } from '~/server/domain/payments/visit-refund'
+import { cancelStayInstallments } from '~/server/domain/payments/installments'
+import type { StayInstallment } from '~/shared/stay-installments'
 import { bookedPolicyFor, LONG_TERM_STAY_NIGHTS, stayCancellationRefund, type StayBookedPolicy, type StayCancellationInput } from '~/shared/stay-cancellation'
 import { executeRefund, requirePayment, type Payment } from '~/server/domain/payments'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
@@ -44,7 +47,6 @@ import { bookingPolicy, parseBookingPolicy, type BookingPolicy } from '~/server/
 import { assertBookingBatchWrite, bookingBatchWriteRefused, requireBookingConfig } from '~/server/utils/availability'
 import { GUEST_NOTE_EVENT, openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
-import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import { publishAccessInvalidation, publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, scheduleBusinessWake, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
@@ -160,6 +162,8 @@ export function stayTurnover(stay: Stay): StayTurnover {
 export interface StayPayment {
   id: string
   booking_id: string
+  /** For a stay paid monthly, the first night of the month it pays; null for the stay as a whole. */
+  period_start: string | null
   amount_minor: number
   currency: string
   method: StayPaymentMethod
@@ -171,7 +175,17 @@ export interface StayPayment {
 }
 
 /** The Stripe payment a guest made when booking the stay on the site. The payments row is its record; nothing is copied here. */
+export interface StayLedgerPeriod {
+  period_start: string
+  period_end: string
+  amount_minor: number
+  paid_minor: number
+  status: 'paid' | 'partial' | 'due' | 'overdue' | 'upcoming'
+}
+
 export interface StayOnlinePayment {
+  /** The month a monthly stay's payment paid; null for a stay paid at once. */
+  period_start: string | null
   payment_id: string
   currency: string
   amount_minor: number
@@ -190,7 +204,10 @@ export interface StayDetail extends Stay {
   /** The linked Better Auth account's current portrait; unlinked guests have none. */
   guest_image_url: string | null
   payments: StayPayment[]
-  online_payment: StayOnlinePayment | null
+  /** Each Stripe payment for the stay: its checkout, then each month of a stay paid monthly. */
+  online_payments: StayOnlinePayment[]
+  /** A stay paid monthly: each month, what it is due, what was paid toward it, and where it stands. Null for a stay paid at once. */
+  installments: StayLedgerPeriod[] | null
   paid_minor: number
   payment_status: 'unpaid' | 'partial' | 'paid' | 'overpaid' | null
 }
@@ -1321,39 +1338,62 @@ export function stayDetailQuery(access: StayAccess, stayId: string): BatchQuery 
   return stayDetailSelection({ query: '?', params: [access.organizationId] }, stayId, access.manage, visibleHomes(access))
 }
 
-export function stayDetailSelection(organization: BatchQuery, stayId: string, manage: boolean, scope: ReturnType<typeof visibleHomes> = { sql: '1 = 1', params: [] }): BatchQuery {
+/** `stay` is the stay's ID, or a SQL term for it a batch resolves (the guest's owned stay). */
+export function stayDetailSelection(organization: BatchQuery, stay: string | BatchQuery, manage: boolean, scope: ReturnType<typeof visibleHomes> = { sql: '1 = 1', params: [] }): BatchQuery {
   const paymentColumns = manage ? `,
     (SELECT json_group_array(json_object('id', id, 'booking_id', booking_id, 'amount_minor', amount_minor, 'currency', currency,
-      'method', method, 'paid_on', paid_on, 'reference', reference, 'note', note, 'created_at', created_at, 'created_by', created_by))
-      FROM (SELECT * FROM offline_payments WHERE organization_id = s.organization_id AND booking_id = s.id ORDER BY paid_on, created_at)
+      'method', method, 'paid_on', paid_on, 'reference', reference, 'note', note, 'period_start', period_start, 'created_at', created_at, 'created_by', created_by))
+      FROM (SELECT * FROM offline_payments WHERE organization_id = s.organization_id AND booking_id = s.id AND purpose = 'payment' ORDER BY paid_on, created_at)
     ) AS offline_payments_json,
-    (SELECT json_group_array(json_object('payment_id', id, 'currency', currency, 'amount_minor', amount, 'captured_minor', captured_amount,
+    (SELECT COALESCE(SUM(amount_minor), 0) FROM offline_payments WHERE organization_id = s.organization_id AND booking_id = s.id AND purpose = 'deposit_withheld') AS deposit_withheld_minor,
+    (SELECT json_extract(price_snapshot_json, '$.installments') FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id ORDER BY created_at, id LIMIT 1) AS installments_json,
+    (SELECT json_group_array(json_object('payment_id', id, 'period_start', json_extract(price_snapshot_json, '$.installment.period_start'), 'currency', currency, 'amount_minor', amount, 'captured_minor', captured_amount,
       'refunded_minor', refunded_amount, 'receipt_url', receipt_url, 'created_at', created_at))
-      FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id
+      FROM (SELECT * FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id ORDER BY created_at, id)
     ) AS online_payments_json` : ''
   return {
     query: `SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url ${paymentColumns}
       FROM ${STAY_FROM}
-     WHERE s.organization_id = ${organization.query} AND s.id = ? AND s.product_session_id IS NULL AND ${scope.sql}`,
-    params: [...organization.params ?? [], stayId, ...scope.params],
+     WHERE s.organization_id = ${organization.query} AND s.id = ${typeof stay === 'string' ? '?' : stay.query} AND s.product_session_id IS NULL AND ${scope.sql}`,
+    params: [...organization.params ?? [], ...(typeof stay === 'string' ? [stay] : stay.params ?? []), ...scope.params],
   }
 }
 
 export function stayDetailFrom<A extends StayAccess>(access: A, row: unknown): StayDetailView<A> {
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
-  const { offline_payments_json: offline, online_payments_json: online, guest_image_url, ...record } = row as Record<string, unknown>
-    & Pick<StayDetail, 'guest_image_url'> & { offline_payments_json?: string; online_payments_json?: string }
+  const { offline_payments_json: offline, online_payments_json: online, deposit_withheld_minor: withheld, installments_json: plan, guest_image_url, ...record } = row as Record<string, unknown>
+    & Pick<StayDetail, 'guest_image_url'> & { offline_payments_json?: string; online_payments_json?: string; deposit_withheld_minor?: number; installments_json?: string | null }
   const stay = mapStay(record)
   if (!access.manage) return stayTurnover(stay) as StayDetailView<A>
   if (offline === undefined || online === undefined) throw new Error('The stay detail query did not return its payment data')
   const payments = JSON.parse(offline) as StayPayment[]
   const onlinePayments = JSON.parse(online) as StayOnlinePayment[]
-  if (onlinePayments.length > 1) fail(500, 'STAY_PAYMENT_AMBIGUOUS', 'This stay has more than one online payment', 'online_payment')
-  const online_payment = onlinePayments[0] ?? null
-  const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (online_payment ? online_payment.captured_minor - online_payment.refunded_minor : 0)
+  // A deposit kept for damage is the business's money; the deposit itself is not.
+  const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (withheld ?? 0) + onlinePayments.reduce((sum, payment) => sum + payment.captured_minor - payment.refunded_minor, 0)
   const status = isChannelManagedStay(stay) ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
-  return { ...stay, guest_image_url, payments, online_payment, paid_minor: paid, payment_status: status } as StayDetailView<A>
+  return { ...stay, guest_image_url, payments, online_payments: onlinePayments, installments: stayLedger(stay, plan ?? null, onlinePayments, payments), paid_minor: paid, payment_status: status } as StayDetailView<A>
+}
+
+/**
+ * Each month of a stay paid monthly against what was paid toward it: its
+ * checkout payment pays the first, each Stripe invoice its own, and a receipt
+ * recorded outside Stripe the month it names. A month is overdue once its
+ * first day has passed in the home's clock without being paid.
+ */
+function stayLedger(stay: Stay, plan: string | null, online: StayOnlinePayment[], offline: StayPayment[]): StayLedgerPeriod[] | null {
+  if (!plan) return null
+  const periods = JSON.parse(plan) as StayInstallment[]
+  const today = localDateAt(new Date(), stay.timezone)
+  // A payment naming no month is the checkout's, which paid the first.
+  const monthOf = (payment: StayOnlinePayment) => payment.period_start ?? periods[0]!.period_start
+  return periods.map(period => {
+    const paid = online.filter(payment => monthOf(payment) === period.period_start)
+      .reduce((sum, payment) => sum + payment.captured_minor - payment.refunded_minor, 0)
+      + offline.filter(payment => payment.period_start === period.period_start).reduce((sum, payment) => sum + payment.amount_minor, 0)
+    const status = paid >= period.amount_minor ? 'paid' : paid > 0 ? 'partial' : period.period_start < today ? 'overdue' : period.period_start === today ? 'due' : 'upcoming'
+    return { ...period, paid_minor: paid, status }
+  })
 }
 
 export async function getStay<A extends StayAccess>(db: DbClient, access: A, stayId: string): Promise<StayDetailView<A>> {
@@ -1959,6 +1999,8 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
   const window = stayWindow(fields, home)
   // A payment the guest already made is written with the stay, so a stay never exists without it.
   const payment = input.payment === undefined || input.payment === null ? null : stayPaymentFields(input.payment, 'payment.', false)
+  // A stay the host enters is paid as a whole; only a stay paid monthly online has months.
+  if (payment?.period_start) fail(422, 'INVALID_STAY_FIELD', 'payment.period_start applies only to a stay paid monthly', 'payment.period_start')
   // The guest's answers to the home's questions, as the host took them; a retry with other answers is another stay.
   const answered = JSON.stringify(formAnswersFingerprint(input.answers))
   const replay = async () => {
@@ -1973,7 +2015,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
       fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with different saved details. Reload the stay before another change; a create retry does not edit an existing stay.', 'idempotency_key')
     }
     const initialPayment = await queryFirst<StayPaymentFields>(db,
-      'SELECT amount_minor, method, paid_on, reference, note FROM offline_payments WHERE organization_id = ? AND booking_id = ? AND idempotency_key = ?', [access.organizationId, stored.id, `${key}:payment`]) ?? null
+      'SELECT amount_minor, method, paid_on, reference, note, period_start FROM offline_payments WHERE organization_id = ? AND booking_id = ? AND idempotency_key = ?', [access.organizationId, stored.id, `${key}:payment`]) ?? null
     if ((payment === null) !== (initialPayment === null) || (payment && initialPayment && Object.entries(payment).some(([field, value]) => initialPayment[field as keyof StayPaymentFields] !== value))) {
       fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with a different saved initial payment', 'idempotency_key')
     }
@@ -2293,7 +2335,7 @@ function turnoverTaskIdsQuery(organizationId: string, keys: string[]): BatchQuer
  * the caller that holds it (server/api/dashboard/payments/refund.post.ts).
  * Without one the cancellation is refused with where to approve it.
  */
-export async function cancelStay(db: DbClient, env: StayMutationEnv, inputAccess: StayAccess, stayId: string, input: { version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean; actorRole: string }): Promise<StayDetail> {
+export async function cancelStay(db: DbClient, env: StayMutationEnv & CloudflareEnv, inputAccess: StayAccess, stayId: string, input: { version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean; actorRole: string }): Promise<StayDetail> {
   const access = await stayOperationAccess(db, inputAccess, { bookingId: stayId })
   const [currentResult, paymentResult, homeResult] = await executeBatch(db, [
     stayDetailQuery(access, stayId),
@@ -2304,8 +2346,13 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, inputAccess
   if (isChannelManagedStay(current)) channelOwned(current, 'belongs to')
   if (input.version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
   const reason = optionalText(input.reason, 'reason', 500)
-  // A current-version replay publishes the saved cancellation without another mutation or refund intent.
-  if (current.status === 'cancelled') return publishBookingNights(env, access.organizationId, current, [])
+  // A current-version replay publishes the saved cancellation without another mutation or refund intent,
+  // and finishes stopping its monthly payments if that failed the first time.
+  if (current.status === 'cancelled') {
+    const replayed = await publishBookingNights(env, access.organizationId, current, [])
+    await cancelMonthlyPayments(db, env, access.organizationId, stayId)
+    return replayed
+  }
   const home = homeResult?.results[0] as TurnoverHome | undefined
   if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
   const next = current.version + 1
@@ -2313,7 +2360,7 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, inputAccess
   const refund = await visitRefundQueries(db, {
     action: 'cancel', organizationId: access.organizationId, actorUserId: access.actorId, bookingId: stayId,
     authorizationId: input.authorization_id, financialWritesAllowed: input.financial_writes_allowed, note: reason ?? undefined, now,
-    payment: (paymentResult?.results[0] as Payment | undefined) ?? null, actorRole: () => Promise.resolve(input.actorRole),
+    payments: (paymentResult?.results ?? []) as Payment[], actorRole: () => Promise.resolve(input.actorRole),
     committed: { query: "EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND id=? AND status='cancelled' AND version=?)", params: [access.organizationId, stayId, next] },
   })
   const cancellation = stayCancellationQueries(access.organizationId, current, now, {
@@ -2327,7 +2374,15 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, inputAccess
     stayDetailQuery(access, stayId),
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-  return publishBookingNights(env, access.organizationId, stayDetailFrom(access, results.at(-1)?.results[0]), changedTaskIds(results))
+  const cancelled = await publishBookingNights(env, access.organizationId, stayDetailFrom(access, results.at(-1)?.results[0]), changedTaskIds(results))
+  await cancelMonthlyPayments(db, env, access.organizationId, stayId)
+  return cancelled
+}
+
+/** A cancelled stay paid monthly charges no more months; its checkout payment holds the plan. */
+async function cancelMonthlyPayments(db: DbClient, env: CloudflareEnv, organizationId: string, stayId: string) {
+  const checkout = await queryFirst<Payment>(db, "SELECT * FROM payments WHERE organization_id = ? AND subject_type = 'booking' AND subject_id = ? ORDER BY created_at, id LIMIT 1", [organizationId, stayId])
+  if (checkout) await cancelStayInstallments(env, checkout, stayId)
 }
 
 /** Stripe proved this checkout's debit failed. Release the stay without a guest or member acting on it. */
@@ -2359,12 +2414,27 @@ export async function cancelFailedCheckoutStay(db: DbClient, env: StayMutationEn
 /** What cancelling a stay returns to its guest now, by the policy they booked under, out of what they paid. */
 export interface StayCancellationQuote { policy: StayBookedPolicy; paid_minor: number; refund_minor: number; currency: string }
 
-/** The guest's own direct stay, with the payment its cancellation may refund. */
+/** The guest's own direct stay, with every payment its cancellation may refund: the checkout first, then each month paid. */
 async function ownedPaidStay(db: DbClient, organizationId: string, stayId: string, buyerUserId: string) {
   const stay = await ownedDirectStay(db, organizationId, stayId, buyerUserId)
-  const payment = await queryFirst<Payment>(db, "SELECT * FROM payments WHERE organization_id = ? AND subject_type = 'booking' AND subject_id = ? AND captured_amount > 0", [organizationId, stayId])
-  if (!payment) fail(409, 'STAY_NOT_PAID_ONLINE', 'This stay was not paid on the site. Contact the host to cancel it.', 'booking_id')
-  return { stay, payment }
+  const payments = await queryAll<Payment>(db, "SELECT * FROM payments WHERE organization_id = ? AND subject_type = 'booking' AND subject_id = ? AND captured_amount > 0 ORDER BY created_at, id", [organizationId, stayId])
+  if (!payments[0]) fail(409, 'STAY_NOT_PAID_ONLINE', 'This stay was not paid on the site. Contact the host to cancel it.', 'booking_id')
+  return { stay, payments }
+}
+
+/** The guest's refund taken from the newest payments first, each a refund of that payment; null returns all it still holds. */
+function guestStayRefundShares(payments: Payment[], refundMinor: number): { payment: Payment; amount: number | null }[] {
+  const shares: { payment: Payment; amount: number | null }[] = []
+  let left = refundMinor
+  for (const payment of [...payments].reverse()) {
+    const held = payment.captured_amount - payment.refunded_amount
+    if (left <= 0 || held <= 0) continue
+    const take = Math.min(held, left)
+    shares.push({ payment, amount: take === held ? null : take })
+    left -= take
+  }
+  if (left > 0) throw new Error('A stay refund is more than its payments hold')
+  return shares
 }
 
 async function ownedDirectStay(db: DbClient, organizationId: string, stayId: string, buyerUserId: string): Promise<Stay> {
@@ -2375,17 +2445,24 @@ async function ownedDirectStay(db: DbClient, organizationId: string, stayId: str
   return mapStay(row)
 }
 
-async function guestStayCancellationQuote(db: DbClient, stay: Stay, payment: Payment, now: string): Promise<StayCancellationQuote> {
+async function guestStayCancellationQuote(db: DbClient, stay: Stay, payments: Payment[], now: string): Promise<StayCancellationQuote> {
   if (!stay.cancellation_policy) throw new Error(`Stay ${stay.id} was paid on the site without a cancellation policy`)
+  // The checkout payment froze the stay's nights; later monthly payments carry only their period.
+  const payment = payments[0]!
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
   const purchase = isRecord(snapshot) ? snapshot.stay : undefined
   if (!isRecord(purchase) || !Array.isArray(purchase.nightly)) throw new Error(`Stay ${stay.id} payment has no nightly prices`)
   const home = await queryFirst<{ check_in_time: string | null }>(db, 'SELECT check_in_time FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [payment.organization_id, stay.product_id])
   if (!home) throw new Error(`Stay ${stay.id} has no home`)
   if (home.check_in_time === null) fail(409, 'STAY_CANCELLATION_TIME_REQUIRED', 'The home has no check-in time for calculating the cancellation refund. Contact the host to cancel.', 'check_in_time')
-  const held = payment.captured_amount - payment.refunded_amount
+  const held = payments.reduce((sum, entry) => sum + entry.captured_amount - entry.refunded_amount, 0)
+  const paid = payments.reduce((sum, entry) => sum + entry.captured_amount, 0)
   const owed = stayCancellationRefund({ policy: stay.cancellation_policy, nightly: purchase.nightly as StayCancellationInput['nightly'], booked_at: stay.created_at, now, timezone: stay.timezone, check_in_time: home.check_in_time })
-  return { policy: stay.cancellation_policy, paid_minor: payment.captured_amount, refund_minor: Math.min(owed, held), currency: payment.currency }
+  // The policy keeps the stay's total less what it returns; whatever was paid beyond that comes back.
+  // A stay paid in full gets the policy's refund; one paid monthly, what it paid beyond what the policy keeps.
+  const total = typeof purchase.total_minor === 'number' ? purchase.total_minor : null
+  if (total === null) throw new Error(`Stay ${stay.id} payment has no total`)
+  return { policy: stay.cancellation_policy, paid_minor: paid, refund_minor: Math.max(0, held - (total - owed)), currency: payment.currency }
 }
 
 export interface StayReservationHome {
@@ -2485,7 +2562,7 @@ export async function readStayReservationHome(db: DbClient, input: Parameters<ty
 export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
-  stay: StayDetail
+  stay: StayDetail & { agreement: import('~/shared/agreements').BookingAgreement | null; deposit: import('~/shared/deposits').BookingDeposit | null }
   home: Omit<StayReservationHome, 'internal_name'>
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
@@ -2493,17 +2570,29 @@ export interface GuestStay {
 }
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
-export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
+export async function readGuestStay(db: DbClient, viewer: { userId: string; verifiedEmail: string | null }, activityId: string): Promise<GuestStay> {
   const now = new Date()
-  const owned = await queryFirst<{ id: string; conversation_id: string; organization_id: string; product_id: string; paid_online: number; payment_processing: number }>(db, `
-    SELECT s.id, r.id AS conversation_id, s.organization_id, s.product_id,
+  const buyerUserId = viewer.userId
+  // The stay, its agreement and its ownership are one snapshot, read in one round trip.
+  // The conversation's current guest is the account, as ownedBuyerRequest holds it, in the same statement.
+  const ownedStay = `SELECT s.id, s.organization_id FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
+     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND r.user_id = s.user_id AND ${CURRENT_GUEST_SQL('r')} AND s.owner = 'app' AND s.product_session_id IS NULL`
+  const ownedId = { query: `(SELECT id FROM (${ownedStay}))`, params: [activityId, buyerUserId] }
+  const ownedOrganization = { query: `(SELECT organization_id FROM (${ownedStay}))`, params: [activityId, buyerUserId] }
+  const [ownedRows, detailRows, ...agreementRows] = await executeBatch(db, [{
+    query: `SELECT s.id, r.id AS conversation_id, s.organization_id, s.product_id,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id AND captured_amount > 0) AS paid_online,
            CASE WHEN s.status='pending' AND ${stayRequestRespondBySql('s')} IS NOT NULL THEN NOT (${noStayRequestPaymentInFlightSql('r.id')}) ELSE 0 END AS payment_processing
       FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
-     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`, [now.toISOString(), activityId, buyerUserId])
+     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND r.user_id = s.user_id AND ${CURRENT_GUEST_SQL('r')} AND s.owner = 'app' AND s.product_session_id IS NULL`,
+    params: [now.toISOString(), activityId, buyerUserId],
+  }, stayDetailSelection(ownedOrganization, ownedId, true), ...agreementQueries({
+    booking: { sql: ownedId.query, params: ownedId.params },
+    organization: { sql: ownedOrganization.query, params: ownedOrganization.params },
+  }, true)], { operation: 'Read the guest stay' })
+  const owned = ownedRows!.results[0] as { id: string; conversation_id: string; organization_id: string; product_id: string; paid_online: number; payment_processing: number } | undefined
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
-  await ownedBuyerRequest(db, buyerUserId, owned.conversation_id)
-  const stay = await getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id)
+  const stay = stayDetailFrom({ organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, detailRows!.results[0])
   if (stay.user_id !== buyerUserId || isChannelManagedStay(stay)) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'booking_id')
   const confirmed = stay.status === 'confirmed'
   const showArrival = confirmed && (isBookingDay(stay.ends_at)
@@ -2513,8 +2602,9 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
   })
   const paidStay = stay.status !== 'cancelled' && owned.paid_online === 1 && home.check_in_time !== null
     ? await ownedPaidStay(db, owned.organization_id, owned.id, buyerUserId) : null
-  const cancellation = paidStay ? await guestStayCancellationQuote(db, paidStay.stay, paidStay.payment, now.toISOString()) : null
-  return { organization_id: owned.organization_id, stay, home, cancellation, payment_processing: owned.payment_processing === 1 }
+  const cancellation = paidStay ? await guestStayCancellationQuote(db, paidStay.stay, paidStay.payments, now.toISOString()) : null
+  const { agreement, deposit } = bookingAgreementFromRows(agreementRows, { ...viewer, canManage: false }, null)
+  return { organization_id: owned.organization_id, stay: { ...stay, agreement, deposit }, home, cancellation, payment_processing: owned.payment_processing === 1 }
 }
 
 /**
@@ -2533,37 +2623,39 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
     if (!withdrawn) fail(409, 'STAY_REQUEST_NOT_CANCELLABLE', 'This stay changed or its payment is processing.', 'booking_id')
     return { stay: withdrawn, refund_minor: 0 }
   }
-  const { stay: initial, payment } = await ownedPaidStay(db, organizationId, stayId, buyerUserId)
+  const { stay: initial, payments } = await ownedPaidStay(db, organizationId, stayId, buyerUserId)
+  const paymentIds = JSON.stringify(payments.map(entry => entry.id))
   let stay = initial
   let taskIds: string[] = []
   const key = `guest-cancelled-stay:${stayId}`
   if (stay.status !== 'cancelled') {
     if (version !== undefined && stay.version !== version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'version')
-    const quote = await guestStayCancellationQuote(db, stay, payment, now)
+    const quote = await guestStayCancellationQuote(db, stay, payments, now)
     const next = stay.version + 1
-    // Stripe's full-remaining refund when the policy returns everything still held.
-    const amount = quote.refund_minor === payment.captured_amount - payment.refunded_amount ? null : quote.refund_minor
+    const shares = guestStayRefundShares(payments, quote.refund_minor)
     const cancellation = stayCancellationQueries(organizationId, stay, now, {
       reason: 'guest_cancelled', actorId: buyerUserId, metadata: { by: 'guest', refund_minor: quote.refund_minor },
       homes: await readTurnoverHomes(db, { organizationId, before: stay, after: stay }),
       guard: { query: `version = ? AND user_id = ? AND owner = 'app' AND channel = 'direct' AND status <> 'cancelled' AND product_session_id IS NULL
           AND EXISTS (SELECT 1 FROM conversations r WHERE r.id=? AND r.booking_id=bookings.id AND r.organization_id=bookings.organization_id AND r.user_id=? AND ${CURRENT_GUEST_SQL('r')})
-          AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE payment_id = ? AND status IN ('queued','creating','pending','requires_action'))`,
-        params: [stay.version, buyerUserId, stay.conversation_id, buyerUserId, payment.id] },
+          AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE payment_id IN (SELECT value FROM json_each(?)) AND status IN ('queued','creating','pending','requires_action'))
+          AND (SELECT COALESCE(SUM(captured_amount - refunded_amount), 0) || ':' || COUNT(*) FROM payments WHERE organization_id = bookings.organization_id AND subject_type = 'booking' AND subject_id = bookings.id AND captured_amount > 0) = ?`,
+        // The refund was sized from these payments: a month captured or a refund completed since refuses the cancellation.
+        params: [stay.version, buyerUserId, stay.conversation_id, buyerUserId, paymentIds, `${payments.reduce((sum, entry) => sum + entry.captured_amount - entry.refunded_amount, 0)}:${payments.length}`] },
     })
     const results = await executeBatch(db, [
       ...cancellation.queries,
-      ...(quote.refund_minor > 0 ? [{
+      ...shares.map(share => ({
         query: `INSERT INTO payment_refunds (id, payment_id, idempotency_key, amount, reason, status, created_by, created_at, updated_at)
                 SELECT ?, ?, ?, ?, 'requested_by_customer', 'queued', ?, ?, ? WHERE EXISTS (SELECT 1 FROM bookings WHERE organization_id = ? AND id = ? AND status = 'cancelled' AND version = ?)
                 ON CONFLICT(idempotency_key) DO NOTHING`,
-        params: [crypto.randomUUID(), payment.id, key, amount, buyerUserId, now, now, organizationId, stayId, next],
-      }] : []),
+        params: [crypto.randomUUID(), share.payment.id, `${key}:${share.payment.id}`, share.amount, buyerUserId, now, now, organizationId, stayId, next],
+      })),
     ], { operation: 'Guest cancels stay' })
     taskIds = changedTaskIds(results)
     if (!versionChanged(results)) {
       const latest = await ownedPaidStay(db, organizationId, stayId, buyerUserId)
-      if (latest.stay.status !== 'cancelled' || latest.payment.id !== payment.id) fail(409, 'STAY_NOT_CANCELLABLE', 'This stay changed or a refund is already on its way. Reload it and try again.', 'booking_id')
+      if (latest.stay.status !== 'cancelled' || latest.payments[0]!.id !== payments[0]!.id) fail(409, 'STAY_NOT_CANCELLABLE', 'This stay changed or a refund is already on its way. Reload it and try again.', 'booking_id')
       stay = latest.stay
     }
   }
@@ -2571,14 +2663,16 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
     fail(409, 'STAY_ALREADY_CANCELLED', 'This stay was already cancelled', 'booking_id')
   }
   const saved = stay.status === 'cancelled' ? stay : await storedStay(db, organizationId, stayId)
-  const refund = await queryFirst<{ amount: number | null }>(db, 'SELECT amount FROM payment_refunds WHERE payment_id = ? AND idempotency_key = ?', [payment.id, key])
+  await cancelMonthlyPayments(db, env, organizationId, stayId)
+  const refunds = await queryAll<{ payment_id: string; idempotency_key: string; amount: number | null }>(db,
+    `SELECT f.payment_id, f.idempotency_key, f.amount FROM payment_refunds f WHERE f.payment_id IN (SELECT value FROM json_each(?)) AND f.idempotency_key = ? || ':' || f.payment_id`, [paymentIds, key])
   let refundMinor = 0
-  if (refund) {
-    const refunded = await requirePayment(db, organizationId, payment.id)
-    const completed = await executeRefund(db, paymentsStripe(env, Boolean(refunded.livemode)), refunded, refund.amount, key, 'requested_by_customer', buyerUserId, env)
-    const receipt = await queryFirst<{ amount: number; status: string; stripe_refund_id: string }>(db, 'SELECT amount, status, stripe_refund_id FROM payment_refunds WHERE payment_id = ? AND idempotency_key = ?', [payment.id, key])
+  for (const refund of refunds) {
+    const refunded = await requirePayment(db, organizationId, refund.payment_id)
+    const completed = await executeRefund(db, paymentsStripe(env, Boolean(refunded.livemode)), refunded, refund.amount, refund.idempotency_key, 'requested_by_customer', buyerUserId, env)
+    const receipt = await queryFirst<{ amount: number; status: string; stripe_refund_id: string }>(db, 'SELECT amount, status, stripe_refund_id FROM payment_refunds WHERE payment_id = ? AND idempotency_key = ?', [refund.payment_id, refund.idempotency_key])
     if (!receipt || !Number.isSafeInteger(receipt.amount) || receipt.amount < 0 || receipt.status !== completed.status || receipt.stripe_refund_id !== completed.stripe_refund_id) throw new Error('The cancelled stay refund could not be verified')
-    refundMinor = receipt.amount
+    refundMinor += receipt.amount
   }
   await publishStayChange(env, organizationId, saved, [[saved.check_in_date, saved.check_out_date]], true, taskIds, false, refundMinor)
   return { stay: saved, refund_minor: refundMinor }
@@ -2591,6 +2685,7 @@ interface StayPaymentFields {
   paid_on: string
   reference: string | null
   note: string | null
+  period_start: string | null
 }
 
 /**
@@ -2607,6 +2702,7 @@ function stayPaymentFields(input: unknown, prefix: string, allowRefund: boolean)
   return {
     amount_minor: amountMinor, method: body.method as StayPaymentMethod, paid_on: date(body.paid_on, `${prefix}paid_on`),
     reference: optionalText(body.reference, `${prefix}reference`, 200), note: optionalText(body.note, `${prefix}note`, 1000),
+    period_start: body.period_start === undefined || body.period_start === null ? null : date(body.period_start, `${prefix}period_start`),
   }
 }
 
@@ -2614,9 +2710,9 @@ function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: str
   const id = crypto.randomUUID()
   return [
     {
-      query: `INSERT INTO offline_payments (id, organization_id, booking_id, amount_minor, currency, method, paid_on, reference, note, idempotency_key, created_at, created_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [id, access.organizationId, stay.id, payment.amount_minor, stay.currency, payment.method, payment.paid_on, payment.reference, payment.note, key, now, access.actorId],
+      query: `INSERT INTO offline_payments (id, organization_id, booking_id, amount_minor, currency, method, paid_on, reference, note, period_start, idempotency_key, created_at, created_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [id, access.organizationId, stay.id, payment.amount_minor, stay.currency, payment.method, payment.paid_on, payment.reference, payment.note, payment.period_start, key, now, access.actorId],
     },
     organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_recorded', entityType: 'stay', entityId: stay.id, metadata: { payment_id: id, amount_minor: payment.amount_minor } }),
   ]
@@ -2628,13 +2724,17 @@ export async function recordStayPayment(db: DbClient, env: GuestInboxPublication
   if (isChannelManagedStay(stay)) channelOwned(stay, 'is paid through')
   if (stay.request_status) fail(409, 'STAY_REQUEST_PENDING', 'The guest pays for this stay online after approval.', 'booking_id')
   const payment = stayPaymentFields(input, '', true)
+  // A receipt for one month names a month of this stay's own plan.
+  if (payment.period_start !== null && !stay.installments?.some(period => period.period_start === payment.period_start)) {
+    fail(422, 'INVALID_STAY_FIELD', 'period_start is not a month of this stay', 'period_start')
+  }
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
   // Read the exact recorded row by its durable key, never by its position in
   // payment history. A retry also finishes a failed dashboard publication.
   const replay = async () => {
     const existing = await queryFirst<StayPaymentFields & { id: string; booking_id: string }>(db,
-      'SELECT id, booking_id, amount_minor, method, paid_on, reference, note FROM offline_payments WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
+      'SELECT id, booking_id, amount_minor, method, paid_on, reference, note, period_start FROM offline_payments WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
     if (!existing) return null
     if (existing.booking_id !== stayId || Object.entries(payment).some(([field, value]) => existing[field as keyof StayPaymentFields] !== value)) fail(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency_key was already used for a different payment', 'idempotency_key')
     await publishStayInvalidation(env, { type: 'stay.changed', organization_id: access.organizationId, location_id: stay.location_id, product_id: stay.product_id, booking_id: stayId }, { version: stay.version })

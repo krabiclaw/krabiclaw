@@ -30,7 +30,8 @@ export interface CatalogField {
   playback_url?: string | null
   hint?: string
   timezone?: string
-  media_kind?: 'image' | 'video' | 'any'
+  /** What the picker offers: pictures, videos, either, or a PDF document. */
+  media_kind?: 'image' | 'video' | 'any' | 'document'
 }
 
 export interface CatalogScreen {

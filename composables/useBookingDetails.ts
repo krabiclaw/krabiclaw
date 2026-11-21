@@ -46,6 +46,7 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
 
   /** A writer's re-read; a failed one fails the write that asked for it. */
   async function refresh() {
+    if ('drop' in request && typeof request.drop === 'function') request.drop()
     await reread()
     if (error.value) throw error.value
   }

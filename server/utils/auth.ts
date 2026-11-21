@@ -225,6 +225,7 @@ export interface CloudflareEnv {
   EMAIL_REPLY_SECRET?: string
   MEDIA_BUCKET?: R2Bucket
   ORGANIZATION_CACHE?: KVNamespace
+  ASSETS?: Fetcher
   GUEST_INBOX_HUBS?: DurableObjectNamespace
   /** Cloudflare's queue of what writes announce (server/events.ts). */
   EVENTS?: import('~/server/events').EventsEnv['EVENTS']

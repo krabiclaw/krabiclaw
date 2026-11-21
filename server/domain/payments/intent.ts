@@ -1,3 +1,4 @@
+import type { StayInstallment } from '~/shared/stay-installments'
 import { stripeMetadataId } from './stripe-metadata'
 import { publishEvent } from '~/server/events'
 import { freeCancellationUntil } from '~/shared/availability-settings'
@@ -151,7 +152,11 @@ function snapshotOf(payment: Payment) {
   if (snapshot.stay !== undefined && !stay) throw new Error('Stay payment has no valid stay purchase')
   return {
     title: snapshot.title, quantity: snapshot.quantity as number, unit_amount: snapshot.price!.unit_amount as number, product_id: typeof snapshot.product_id === 'string' ? snapshot.product_id : null,
-    stay: stay ? { check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, nights: stay.nightly.length, nightly: stay.nightly.map(night => night.price_minor), adults: stay.adults, children: stay.children, infants: stay.infants, cancellation_policy: stay.cancellation_policy, product_id: stay.product_id } : null,
+    stay: stay ? { check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, nights: stay.nightly.length, nightly: stay.nightly.map(night => night.price_minor), adults: stay.adults, children: stay.children, infants: stay.infants, cancellation_policy: stay.cancellation_policy, product_id: stay.product_id,
+      // A long stay paid monthly: today's first month, then each later one on its date.
+      installments: (snapshot.installments ?? null) as StayInstallment[] | null,
+      // Stripe Tax adds tax on top of each later month's invoice, as it did today's.
+      later_payments_add_tax: snapshot.automatic_tax === true && snapshot.price!.tax_behavior === 'exclusive' } : null,
     stayGuest: stay?.guest ?? null, approval: approvedStayBooking(snapshot),
     automatic_tax: snapshot.automatic_tax, tax_code: snapshot.tax_code as string | null, tax_behavior: snapshot.price!.tax_behavior as Price['tax_behavior'],
   }

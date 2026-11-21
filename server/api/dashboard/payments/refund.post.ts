@@ -3,13 +3,35 @@ import {defineHandler,HTTPError} from 'nitro'
 import {getDashboardContext} from '~/server/utils/dashboard-context'
 import {jsonResponse,readRequiredBody} from '~/server/utils/api-response'
 import {requestRefundAuthorization,approveRefundAuthorization,refundPayment,executeRefund,requirePayment} from '~/server/domain/payments'
-import {queryFirst} from '~/server/db'
+import {queryAll,queryFirst,type DbClient} from '~/server/db'
 import {executeBookingStatus} from '~/server/domain/guest-threads/operations'
 import {paymentsStripe} from '~/server/utils/stripe-connect'
 import {visitRefundKey,type VisitRefundAction} from '~/server/domain/payments/visit-refund'
+import type Stripe from 'stripe'
+import type {CloudflareEnv} from '~/server/utils/auth'
+
+/** The refunds a booking's approved cancellation or decline queued, one per payment that held money. */
+function bookingRefunds(db:DbClient,organizationId:string,bookingId:string,action:VisitRefundAction){
+ return queryAll<{payment_id:string;idempotency_key:string}>(db,`SELECT f.payment_id,f.idempotency_key FROM payment_refunds f JOIN payments p ON p.id=f.payment_id
+   WHERE p.organization_id=? AND p.subject_type='booking' AND p.subject_id=? AND f.idempotency_key=?||':'||p.id ORDER BY p.created_at,p.id`,[organizationId,bookingId,visitRefundKey(action,bookingId)])
+}
+
+/** Every queued refund sent to Stripe; the first failure is reported after the rest were tried. */
+async function executeBookingRefunds(db:DbClient,stripe:Stripe,env:CloudflareEnv,organizationId:string,rows:{payment_id:string;idempotency_key:string}[],userId:string,note:string|null){
+ const settled=await Promise.allSettled(rows.map(async row=>executeRefund(db,stripe,await requirePayment(db,organizationId,row.payment_id),null,row.idempotency_key,'requested_by_customer',userId,env,note??undefined)))
+ const failed=settled.find(result=>result.status==='rejected')
+ if(failed)throw failed.reason
+ return settled.map(result=>(result as PromiseFulfilledResult<Awaited<ReturnType<typeof executeRefund>>>).value)
+}
 import {stayAccessFor} from '~/server/domain/stays'
 import {memberAccessPrincipal} from '~/server/utils/member-access'
 import {notifyStayCancelled} from '~/server/utils/notifications'
+/** The first refund's fields, as a single payment's refund answers, and every refund the booking's action sent. */
+function bookingRefundAnswer(refunds:Awaited<ReturnType<typeof executeRefund>>[]){
+ if(!refunds[0])throw new Error('A booking refund sent nothing')
+ return {...refunds[0],refunds}
+}
+
 export default defineHandler(async event=>{
  requireFinancialBrowserOrAppRequest(event)
  const {env,db,organization,userId}=await getDashboardContext(event,{})
@@ -28,8 +50,7 @@ export default defineHandler(async event=>{
  // A stay has channel publication and sends its cancellation receipt with the refunded amount.
  if(paid&&booked&&authorization.action==='cancel_booking'&&booked.nights===1){
   const payment=paid,stay=booked
-  const key=visitRefundKey('cancel',payment.subject_id!)
-  const earlierRefund=await queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
+  const earlierRefund=(await bookingRefunds(db,organization.id,payment.subject_id!,'cancel')).length>0
   const access=await stayAccessFor(memberAccessPrincipal(organization,{env,event}))
   const failures:unknown[]=[]
   try {
@@ -43,16 +64,21 @@ export default defineHandler(async event=>{
    if(!(error instanceof HTTPError&&error.data?.committed===true)&&!(stay.status==='cancelled'&&earlierRefund))throw error
    failures.push(error)
   }
-  const [refunded]=await Promise.allSettled([queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key]).then(refund=>{
-   if(!refund)throw new HTTPError({statusCode:409,statusMessage:'The stay was cancelled without its refund. Send a refund from the stay.'})
-   return executeRefund(db,stripe,payment,null,key,'requested_by_customer',userId,env,authorization.note)
-  })])
+  const rows=await bookingRefunds(db,organization.id,payment.subject_id!,'cancel')
+  const [refunded]=await Promise.allSettled([(async()=>{
+   if(!rows.length)throw new HTTPError({statusCode:409,statusMessage:'The stay was cancelled without its refund. Send a refund from the stay.'})
+   return executeBookingRefunds(db,stripe,env,organization.id,rows,userId,authorization.note)
+  })()])
   if(refunded.status==='rejected')failures.push(refunded.reason)
   try {
-   const refund=await queryFirst<{amount:number|null;status:string;stripe_refund_id:string|null}>(db,'SELECT amount,status,stripe_refund_id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
-   if(!refund?.stripe_refund_id||refund.amount===null||!Number.isSafeInteger(refund.amount)||refund.amount<0)throw new Error('The stay refund has no confirmed native amount; retry this approval to finish its notice')
-   if(refunded.status==='fulfilled'&&(refund.status!==refunded.value.status||refund.stripe_refund_id!==refunded.value.stripe_refund_id))throw new Error('The cancelled stay refund could not be verified')
-   await notifyStayCancelled(env,db,organization.id,payment.subject_id!,'host',refund.amount)
+   // The guest is told the whole amount returned, across every month they paid.
+   let total=0
+   for(const row of rows){
+    const refund=await queryFirst<{amount:number|null;status:string;stripe_refund_id:string|null}>(db,'SELECT amount,status,stripe_refund_id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[row.payment_id,row.idempotency_key])
+    if(!refund?.stripe_refund_id||refund.amount===null||!Number.isSafeInteger(refund.amount)||refund.amount<0)throw new Error('The stay refund has no confirmed native amount; retry this approval to finish its notice')
+    total+=refund.amount
+   }
+   await notifyStayCancelled(env,db,organization.id,payment.subject_id!,'host',total)
   } catch(error) {
    failures.push(error)
   }
@@ -61,8 +87,7 @@ export default defineHandler(async event=>{
    const reason=failures.map(error=>error instanceof Error?error.message:String(error)).join(' ')
    throw new HTTPError({statusCode:503,message:`The stay was cancelled, but its completion failed. ${reason}`,data:{code:'POST_WRITE_COMPLETION_FAILED',field:'completion',committed:true,booking_id:payment.subject_id,payment_id:payment.id,reason,failures:failures.map(error=>error instanceof HTTPError&&error.data?error.data:{reason:error instanceof Error?error.message:String(error)})},cause:new AggregateError(failures,reason)})
   }
-  const submitted=refunded.value
-  return jsonResponse(submitted)
+  return jsonResponse(bookingRefundAnswer(refunded.value))
  }
  if(paid&&booked){
   const action:VisitRefundAction=authorization.action==='reject_booking'?'reject':'cancel'
@@ -71,10 +96,10 @@ export default defineHandler(async event=>{
   const status=await executeBookingStatus(db,{threadId:booking.conversation_id,organizationId:organization.id,bookingId:payment.subject_id!,version:booking.version,action,actorUserId:userId,actorRole:principal.role,idempotencyKey:`paid-${action}:${body.authorization_id}`,financialAuthorizationId:body.authorization_id,...(authorization.note?{body:authorization.note}:{}),env})
   if(status.kind!=='booking') throw new Error('Timed booking refund changed its inventory unit')
   const {outcome}=status
-  const key=visitRefundKey(action,payment.subject_id!)
-  const refund=await queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
-  if(!refund) throw new HTTPError({statusCode:409,statusMessage:outcome.ok?'Refund intent missing':`Booking ${action==='reject'?'rejection':'cancellation'} could not be committed`})
-  const submitted=await executeRefund(db,stripe,payment,null,key,'requested_by_customer',userId,env,authorization.note)
+  const rows=await bookingRefunds(db,organization.id,payment.subject_id!,action)
+  if(!rows.length) throw new HTTPError({statusCode:409,statusMessage:outcome.ok?'Refund intent missing':`Booking ${action==='reject'?'rejection':'cancellation'} could not be committed`})
+  const refunds=await executeBookingRefunds(db,stripe,env,organization.id,rows,userId,authorization.note)
+  const submitted=bookingRefundAnswer(refunds)
   if(!outcome.ok)throw new HTTPError({statusCode:outcome.status,statusMessage:`Refund submitted, but the booking ${action==='reject'?'rejection':'cancellation'} notification did not complete. Retry this approval to finish it.`,data:{refund:submitted,operation:outcome}})
   return jsonResponse(submitted)
  }

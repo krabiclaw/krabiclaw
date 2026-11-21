@@ -1,9 +1,9 @@
 import { listingGrantSql } from '~/server/domain/listing-access'
-import { paginationInputSchema, pageInfoObject, organizationTool, type McpToolDefinition } from './shared'
+import { chatgptFileInput, paginationInputSchema, pageInfoObject, organizationTool, type McpToolDefinition } from './shared'
 import { PRODUCT_KINDS } from '~/shared/product-details'
 import { HTTPError } from 'nitro'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
-import { assertResourceAccess, assertProductAccess, assertAssignedBookingAccess, assignedMemberSql, roleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
+import { assertResourceAccess, assertProductAccess, assertAssignedBookingAccess, assertRoleAllows, assignedMemberSql, roleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
 import { queryAll, queryFirst } from '~/server/db'
 import { createSession, findBookableSession, listScheduleSessions, updateSession } from '~/server/utils/availability'
 import { mcpPageInfo, mcpPageWindow, paginateMcpCollection } from '~/server/utils/mcp-pagination'
@@ -17,7 +17,11 @@ import { executeBookingStatus } from '~/server/domain/guest-threads/operations'
 import { changeBooking } from '~/server/domain/guest-threads/booking-changes'
 import { setBookingNote } from '~/server/domain/bookings'
 import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
-import { NOT_HANDLED, requiredString, optionalString, type McpExecutorContext } from './execution'
+import { NOT_HANDLED, requiredString, optionalString, resolveUserUploadedMediaFile, toolFileReference, type McpExecutorContext } from './execution'
+import { MAX_AGREEMENT_BYTES, readBookingAgreement, sendAgreement } from '~/server/domain/agreements'
+import { deleteDepositEntry, recordDepositEntry, setBookingDeposit } from '~/server/domain/deposits'
+import { generateAgreementFromTemplate } from '~/server/domain/agreement-templates'
+import type { ConversationRow } from '~/server/domain/conversations'
 import { BOOKING_STATUSES, isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { formAnswerInputJsonSchema, formAnswerSnapshotsJsonSchema, formAnswerSnapshotsSchema } from '~/shared/form-questions'
 
@@ -45,6 +49,9 @@ function mcpBookingRecord(record: ThreadOperationalRecord) {
 function mcpBookingProvenance(provenance: ThreadPayload['provenance'] | null) {
   return provenance ? { source: provenance.source, external_reference: provenance.external_reference, guest_acknowledgement: provenance.guest_acknowledgement } : null
 }
+
+const depositOutput = { type: ['object', 'null'], description: 'The booking’s refundable deposit: what the business asks for (required_minor), holds now (held_minor), returned and kept, and each recorded entry. Null when it asks for none.' }
+const depositEntryKinds = ['received', 'returned', 'withheld']
 
 export const BOOKINGS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'create_product_session', domain: 'bookings', minimumRole: 'member', description: 'Add a dated time at a location for an existing bookable offering using its actual start and end. Online offerings take no dated sessions: they are booked in their provider\'s working hours. A restaurant\'s tables take none either: they are seated through their location\'s opening hours.',
@@ -81,8 +88,8 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     }, required: ['product_slug', 'guest_name', 'guest_email', 'idempotency_key'],
   }),
   organizationTool({ name: 'get_product_booking', outputSchema: { type: 'object', anyOf: [
-    { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, conversation_id: text, version, updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record }, required: ['booking_id', 'unit', 'conversation_id', 'version', 'updated_at', 'guest', 'answers', 'provenance', 'record'] },
-    { type: 'object', description: 'A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.', properties: { booking_id: text, unit: { const: 'nights' }, record: { anyOf: [stayDetail, stayTurnover] } }, required: ['booking_id', 'unit', 'record'], additionalProperties: false },
+    { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, conversation_id: text, version, updated_at: text, guest, answers: formAnswerSnapshotsJsonSchema(), provenance: booking.properties.provenance, record , agreement: { type: ['object', 'null'], description: 'The booking’s agreement: its document, who signed and when, and what is still waiting.' }, deposit: depositOutput, agreement_signers: { type: 'array', description: 'Who the business may ask to sign, as keys for send_booking_agreement.', items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } } }, required: ['booking_id', 'unit', 'conversation_id', 'version', 'updated_at', 'guest', 'answers', 'provenance', 'record'] },
+    { type: 'object', description: 'A stay: its guest, nights, payments and version, or, for a member who looks after the home, its turnover.', properties: { booking_id: text, unit: { const: 'nights' }, record: { anyOf: [stayDetail, stayTurnover] }, agreement: { type: ['object', 'null'], description: 'The booking’s agreement: its document, who signed and when, and what is still waiting.' }, deposit: depositOutput, agreement_signers: { type: 'array', description: 'Who the business may ask to sign, as keys for send_booking_agreement.', items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } } }, required: ['booking_id', 'unit', 'record'], additionalProperties: false },
   ] }, domain: 'bookings', minimumRole: 'member', description: 'Read one booking — an experience, consultation, table or stay at a home — when the user wants its guest details, answers to the offering\'s questions, status or current session. Use the booking version when making a change.', inputSchema: { booking_id: bookingId }, required: ['booking_id'],
   }),
   ...([
@@ -98,6 +105,43 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     inputSchema: { booking_id: bookingId, product_session_id: text, product_id: text, party_size: { type: 'integer', minimum: 1, maximum: 99 }, version,
       apply: { type: 'boolean' }, idempotency_key: key, anyOf: [{ required: ['product_session_id'] }, { required: ['product_id', 'apply'], properties: { apply: { const: true } } }] },
     required: ['booking_id', 'version', 'idempotency_key'],
+  }),
+  organizationTool({ name: 'send_booking_agreement', domain: 'bookings', minimumRole: 'member',
+    description: 'Send a PDF for a booking’s guests to sign — a lease, engagement letter, waiver or event contract — with each signer’s signature and date placed on its pages. Each guest is emailed a link and signs with their typed name; the business signs last. Signers are the keys get_product_booking lists in agreement_signers, or email:<address> for someone invited by email. Fields are fractions of a page from its top-left corner.',
+    inputSchema: {
+      anyOf: [{ required: ['file', 'fields'] }, { required: ['from_template'], properties: { from_template: { const: true } } }],
+      booking_id: bookingId, file: chatgptFileInput,
+      from_template: { type: 'boolean', description: 'Fill the listing’s own agreement template from this booking instead of attaching a file; signature and date lines are placed for each signer. Fails naming any booking fact the template needs and the booking lacks.' },
+      signers: { type: 'array', minItems: 1, items: { type: 'object', properties: { key: text, name: text, role: { type: 'string', enum: ['guest', 'host'] } }, required: ['key', 'name', 'role'] } },
+      fields: { type: 'array', minItems: 1, items: { type: 'object', properties: {
+        signer_key: text, kind: { type: 'string', enum: ['signature', 'date'] }, page: { type: 'integer', minimum: 1 },
+        x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+      }, required: ['signer_key', 'kind', 'page', 'x', 'y', 'width', 'height'] } },
+    },
+    required: ['booking_id', 'signers'], fileParams: ['file'],
+    outputSchema: { type: 'object', properties: { sent: { const: true }, agreement: { type: ['object', 'null'] } }, required: ['sent', 'agreement'] },
+  }),
+  organizationTool({ name: 'set_booking_deposit', domain: 'bookings', minimumRole: 'admin',
+    description: 'Set the refundable deposit a booking asks for — a security deposit, or for a law firm a retainer held in trust — in the booking’s currency, or null for none. It is not part of the booking total and never counts as revenue. Recorded entries stay.',
+    inputSchema: { booking_id: bookingId, deposit_minor: { type: ['integer', 'null'], minimum: 1, description: 'Amount in the smallest currency unit, or null.' } },
+    required: ['booking_id', 'deposit_minor'], outputSchema: { type: 'object', properties: { deposit: depositOutput }, required: ['deposit'] },
+  }),
+  organizationTool({ name: 'record_booking_deposit', domain: 'bookings', minimumRole: 'admin',
+    description: 'Record deposit money received, returned to the guest or client, or withheld (kept for damage or unpaid charges, with the reason in note). Blawby moves no money; this records what happened outside it. Only what is held can be returned or withheld; withheld becomes paid revenue.',
+    inputSchema: {
+      // Money that moved names how; money kept names why.
+      allOf: [{ if: { properties: { kind: { const: 'withheld' } } }, then: { required: ['note'] }, else: { required: ['method'] } }],
+      booking_id: bookingId, kind: { type: 'string', enum: depositEntryKinds }, amount_minor: { type: 'integer', minimum: 1 },
+      method: { type: 'string', enum: ['cash', 'bank_transfer', 'card_external', 'other'], description: 'How the money moved; ignored for withheld.' },
+      paid_on: { type: 'string', description: 'YYYY-MM-DD' }, reference: text, note: { ...text, description: 'Required for withheld: what it was kept for.' }, idempotency_key: key,
+    },
+    required: ['booking_id', 'kind', 'amount_minor', 'paid_on', 'idempotency_key'],
+    outputSchema: { type: 'object', properties: { deposit: depositOutput, entry: { type: 'object' } }, required: ['deposit', 'entry'] },
+  }),
+  organizationTool({ name: 'delete_booking_deposit_entry', domain: 'bookings', minimumRole: 'admin',
+    description: 'Remove a deposit entry recorded by mistake. A receipt already partly returned or withheld stays until those entries are removed.',
+    inputSchema: { booking_id: bookingId, entry_id: { ...text, description: 'ID from get_product_booking → deposit.entries[].id.' } },
+    required: ['booking_id', 'entry_id'], outputSchema: { type: 'object', properties: { deposit: depositOutput }, required: ['deposit'] },
   }),
   organizationTool({ name: 'update_product_booking', outputSchema: { type: 'object', anyOf: [nightBookingReceipt,
     { type: 'object', properties: { booking_id: text, unit: { const: 'slot' }, version, private_notes: nullableText }, required: ['booking_id', 'unit', 'version', 'private_notes'] }] }, domain: 'bookings', minimumRole: 'member',
@@ -204,6 +248,44 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     if (result.kind === 'stay') return { success: true, ...nightBookingMutation(result.stay) }
     return renderStructuredResponse({ success: result.status < 400, ...result.body, http_status: result.status }, undefined, undefined, result.status >= 400)
   }
+  // The member's own name signs for the business; the agreement reads as the member reads it.
+  const agreementActor = async () => {
+    const actorRow = await queryFirst<{ name: string }>(db, 'SELECT name FROM user WHERE id = ?', [organization.userId])
+    if (!actorRow) throw new HTTPError({ statusCode: 401, message: 'The signed-in account was not found' })
+    return { userId: organization.userId, name: actorRow.name }
+  }
+  if (toolName === 'set_booking_deposit' || toolName === 'record_booking_deposit' || toolName === 'delete_booking_deposit_entry') {
+    await assertRoleAllows({ ...principal, permissions: { payments: ['refund'] } })
+    const id = requiredString(args, 'booking_id')
+    const actor = { organizationId, actorId: organization.userId }
+    if (toolName === 'set_booking_deposit') return { deposit: await setBookingDeposit(db, actor, id, args.deposit_minor ?? null) }
+    if (toolName === 'record_booking_deposit') return await recordDepositEntry(db, actor, id, args)
+    return { deposit: await deleteDepositEntry(db, actor, id, requiredString(args, 'entry_id')) }
+  }
+  if (toolName === 'send_booking_agreement') {
+    const id = requiredString(args, 'booking_id')
+    await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: 'update' })
+    const conversation = await queryFirst<ConversationRow>(db, "SELECT * FROM conversations WHERE booking_id = ? AND organization_id = ? AND kind = 'booking'", [id, organizationId])
+    if (!conversation) throw new HTTPError({ statusCode: 404, message: 'This booking has no guest conversation to send the document in' })
+    const actor = await agreementActor()
+    const signers = Array.isArray(args.signers) ? args.signers : []
+    let sent: { messageId: string }
+    if (args.from_template === true) {
+      const filled = await generateAgreementFromTemplate(env, conversation, actor, signers)
+      sent = await sendAgreement(env, conversation, actor, { file: new File([new Uint8Array(filled.bytes)], filled.file_name, { type: 'application/pdf' }), signers, fields: filled.fields })
+    } else {
+      const resolved = await resolveUserUploadedMediaFile(toolFileReference(args.file, 'file'), MAX_AGREEMENT_BYTES)
+      if (resolved.contentType !== 'application/pdf') throw new HTTPError({ statusCode: 415, message: 'Attach a PDF' })
+      sent = await sendAgreement(env, conversation, actor, {
+        file: new File([resolved.buffer], resolved.filename, { type: 'application/pdf' }),
+        signers, fields: Array.isArray(args.fields) ? args.fields : [],
+      })
+    }
+    // The agreement read back is the one this call sent; a later send in between is reported, not shown as this one.
+    const { agreement } = await readBookingAgreement(db, conversation, { userId: organization.userId, verifiedEmail: null, canManage: true }, actor)
+    if (!agreement?.url.endsWith(`/agreements/${encodeURIComponent(sent.messageId)}`)) throw new HTTPError({ statusCode: 409, message: 'Another document was sent for this booking before this one could be read back', data: { code: 'AGREEMENT_CHANGED', field: 'booking_id' } })
+    return { sent: true, agreement }
+  }
   const statusActions: Record<string, 'confirm' | 'reject' | 'cancel'> = {
     confirm_product_booking: 'confirm', reject_product_booking: 'reject', cancel_product_booking: 'cancel',
   }
@@ -225,7 +307,18 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     await publishConversationEvent(env, db, { conversationId: row.conversation_id, type: 'MESSAGE_UPDATE' })
     return { ...booking, unit: 'slot' }
   }
-  if (access && toolName === 'get_product_booking') return { booking_id: id, unit: 'nights', record: await getStay(db, access, id) }
+  // A booking's agreement is the business's and its guests'; a member who only turns over the home does not read it.
+  const agreementFields = async () => {
+    if (access && !access.manage) return {}
+    const canManage = await assertAssignedBookingAccess(db, { ...principal, bookingId: id, action: 'update' }).then(() => true, (error: unknown) => {
+      if (error instanceof HTTPError && error.statusCode === 404) return false
+      throw error
+    })
+    const read = await readBookingAgreement(db, { id: row.conversation_id, organization_id: organizationId, booking_id: id, kind: 'booking' },
+      { userId: organization.userId, verifiedEmail: null, canManage }, await agreementActor())
+    return { agreement: read.agreement, deposit: read.deposit, ...(read.available_signers ? { agreement_signers: read.available_signers } : {}) }
+  }
+  if (access && toolName === 'get_product_booking') return { booking_id: id, unit: 'nights', record: await getStay(db, access, id), ...await agreementFields() }
   const thread = await getGuestRequest(db, row.conversation_id, organizationId, 'booking')
   if (!thread || thread.kind !== 'booking') {
     throw new HTTPError({
@@ -246,7 +339,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const provenance = thread.payload.provenance
     return { booking_id: id, unit: row.unit, conversation_id: thread.id, version: row.version, updated_at: row.updated_at, guest: thread.payload.guest, answers: formAnswerSnapshotsSchema.parse(JSON.parse(row.answers)),
       provenance: mcpBookingProvenance(provenance),
-      record: mcpBookingRecord(operationalRecord) }
+      record: mcpBookingRecord(operationalRecord), ...await agreementFields() }
   }
   const key = requiredString(args, 'idempotency_key')
   if (toolName === 'request_product_booking_change') {

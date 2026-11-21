@@ -6,18 +6,23 @@ import { freeCancellationUntil } from '~/shared/availability-settings'
 /** Declining or cancelling a paid booking of any kind returns the whole payment, as Airbnb's host cancellation does. */
 export type VisitRefundAction='reject'|'cancel'
 export const visitRefundKey=(action:VisitRefundAction,bookingId:string)=>`${action==='reject'?'rejected':'cancelled'}:${bookingId}`
+/** One refund per payment the booking holds money on: a stay paid monthly has one per month paid. */
+export const visitRefundRowKey=(action:VisitRefundAction,bookingId:string,paymentId:string)=>`${visitRefundKey(action,bookingId)}:${paymentId}`
 const guestVisitRefundPrefix = 'guest-cancelled-booking:'
 export const guestVisitRefundKey=(bookingId:string)=>`${guestVisitRefundPrefix}${bookingId}`
 const authorizationActionFor=(action:VisitRefundAction)=>action==='reject'?'reject_booking':'cancel_booking'
 
+/** Every payment of the booking still holding money, its checkout payment first. */
 export function visitRefundPaymentQuery(organizationId: string, bookingId: string): BatchQuery {
- return {query:"SELECT * FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount",params:[organizationId,bookingId]}
+ return {query:"SELECT * FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount ORDER BY created_at, id",params:[organizationId,bookingId]}
 }
 
 /** Extends the canonical visit operation's batch, never a second booking writer. */
 /** `committed` is the caller's own write in the same batch: the refund is queued only where it took effect. */
-export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAction;organizationId:string;actorUserId:string;bookingId:string;authorizationId?:string;financialWritesAllowed?:boolean;note?:string;committed:BatchQuery;now:string;payment:Payment|null;actorRole:()=>Promise<string|null>}):Promise<{queries:BatchQuery[];guard:BatchQuery|null}> {
- const {payment}=input
+export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAction;organizationId:string;actorUserId:string;bookingId:string;authorizationId?:string;financialWritesAllowed?:boolean;note?:string;committed:BatchQuery;now:string;payments:Payment[];actorRole:()=>Promise<string|null>}):Promise<{queries:BatchQuery[];guard:BatchQuery|null}> {
+ const {payments}=input
+ // The operator approves refunding the whole booking once, on its checkout payment.
+ const payment=payments[0]
  if(!payment)return {queries:[],guard:null}
  if(input.financialWritesAllowed===false){
   const destination=await queryFirst<{slug:string}>(db,'SELECT o.slug FROM organization o JOIN bookings b ON b.organization_id=o.id WHERE o.id=? AND b.id=?',[input.organizationId,input.bookingId])
@@ -37,14 +42,18 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
   const prepared=await requestRefundAuthorization(db,principal,payment.id,null,authorizationAction,input.note)
   throw new HTTPError({statusCode:409,statusMessage:`Paid ${input.action==='reject'?'rejection':'cancellation'} requires explicit approval of the full refund`,data:{code:'financial_approval_required',financial_approval_url:`/dashboard/${encodeURIComponent(org.slug)}/earnings/refunds/approve?id=${prepared.authorization_id}`}})
  }
- const pending=await queryFirst(db,"SELECT id FROM payment_refunds WHERE payment_id=? AND status IN ('queued','creating','pending','requires_action')",[payment.id])
+ const ids=payments.map(entry=>entry.id)
+ const pending=await queryFirst(db,`SELECT id FROM payment_refunds WHERE payment_id IN (SELECT value FROM json_each(?)) AND status IN ('queued','creating','pending','requires_action')`,[JSON.stringify(ids)])
  if(pending)throw new HTTPError({statusCode:409,statusMessage:'A refund is already in progress; reconcile it before changing this booking'})
- const id=crypto.randomUUID(),key=visitRefundKey(input.action,input.bookingId)
- // The approval and the booking write are one batch: the payment still holds money and the approval is the one given for it.
- const guard={query:`EXISTS(SELECT 1 FROM payments p JOIN payment_authorizations a ON a.payment_id=p.id WHERE p.id=? AND p.organization_id=? AND p.captured_amount>p.refunded_amount AND a.id=? AND a.user_id=? AND a.action=? AND a.amount IS NULL AND a.approved_at IS NOT NULL AND a.consumed_at IS NULL AND a.expires_at>?)`,params:[payment.id,input.organizationId,input.authorizationId!,input.actorUserId,authorizationAction,input.now]}
+ const keys=payments.map(entry=>visitRefundRowKey(input.action,input.bookingId,entry.id))
+ // The approval and the booking write are one batch: the booking still holds money and the approval is the one given for it.
+ const guard={query:`EXISTS(SELECT 1 FROM payment_authorizations a WHERE a.payment_id=? AND a.organization_id=? AND a.id=? AND a.user_id=? AND a.action=? AND a.amount IS NULL AND a.approved_at IS NOT NULL AND a.consumed_at IS NULL AND a.expires_at>?)
+   AND (SELECT json_group_array(p.id||':'||(p.captured_amount-p.refunded_amount)) FROM (SELECT * FROM payments WHERE organization_id=? AND subject_type='booking' AND subject_id=? AND captured_amount>refunded_amount ORDER BY created_at, id) p)=?`,
+  // The payments read are still exactly the ones holding money, by the same amounts: a month captured or a refund completed since refuses the change.
+  params:[payment.id,input.organizationId,input.authorizationId!,input.actorUserId,authorizationAction,input.now,input.organizationId,input.bookingId,JSON.stringify(payments.map(entry=>`${entry.id}:${entry.captured_amount-entry.refunded_amount}`))]}
  return {guard,queries:[
-  {query:`INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,created_by,created_at,updated_at) SELECT ?,?,?,NULL,'requested_by_customer',(SELECT note FROM payment_authorizations WHERE id=?),'queued',?,?,? WHERE ${input.committed.query} ON CONFLICT(idempotency_key) DO NOTHING`,params:[id,payment.id,key,input.authorizationId!,input.actorUserId,input.now,input.now,...(input.committed.params ?? [])]},
-  {query:'UPDATE payment_authorizations SET consumed_at=? WHERE id=? AND EXISTS(SELECT 1 FROM payment_refunds WHERE idempotency_key=?)',params:[input.now,input.authorizationId!,key]},
+  ...payments.map((entry,index)=>({query:`INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,created_by,created_at,updated_at) SELECT ?,?,?,NULL,'requested_by_customer',(SELECT note FROM payment_authorizations WHERE id=?),'queued',?,?,? WHERE ${input.committed.query} ON CONFLICT(idempotency_key) DO NOTHING`,params:[crypto.randomUUID(),entry.id,keys[index],input.authorizationId!,input.actorUserId,input.now,input.now,...(input.committed.params ?? [])]})),
+  {query:'UPDATE payment_authorizations SET consumed_at=? WHERE id=? AND EXISTS(SELECT 1 FROM payment_refunds WHERE idempotency_key=?)',params:[input.now,input.authorizationId!,keys[0]]},
  ]}
 }
 

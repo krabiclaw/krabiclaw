@@ -4,6 +4,7 @@ import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { executeBatch, queryFirst, type BatchQuery } from '~/server/db'
+import { agreementQueries, bookingAgreementFromRows } from '~/server/domain/agreements'
 import { dashboardMemberQuery, dashboardOrgQueryParam, getDashboardMemberContext, getDashboardSession } from '~/server/utils/dashboard-context'
 import { cloudflareEnv, readRequiredBody } from '~/server/utils/api-response'
 import { assignedMemberSql, BATCH_VIEWER, joinedMemberPrincipal, memberAccessPrincipal, membershipBySlugQuery, roleAllows, withViewer } from '~/server/utils/member-access'
@@ -122,7 +123,12 @@ export function prepareDashboardBookingRead(membership: BatchQuery, bookingId: s
     query: `WITH reservation AS (${managed}) ${query.query}`,
     params: [...booking.params ?? [], ...query.params ?? []],
   }))
-  return { queries: [access, ...timed.queries, ...stayQueries], timed, home, stayOffset: 2 + timed.queries.length }
+  // The booking's agreement rides in the same round trip, for any booking the viewer may read.
+  const readable = `SELECT * FROM (${booking.query}) target WHERE manages = 1 OR assigned = 1 OR granted = 1`
+  const agreement = agreementQueries({ booking: { sql: '?', params: [bookingId] }, organization: { sql: '(SELECT organization_id FROM readable)', params: [] } }, true)
+    .map(query => withViewer(membership, { query: `WITH readable AS (${readable}) ${query.query}`, params: [...booking.params ?? [], ...query.params ?? []] }))
+  const queries = [access, ...timed.queries, ...stayQueries, ...agreement]
+  return { queries, timed, home, stayOffset: 2 + timed.queries.length, agreementOffset: 1 + queries.length - agreement.length }
 }
 
 export function readDashboardBookingDocument(event: H3Event, record: { orgSlug: string; bookingId: string }, preloaded?: D1Result[]) {
@@ -136,11 +142,13 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
   if (!bookingId) throw new HTTPError({ statusCode: 400, message: 'Booking ID is required' })
   const plan = prepareDashboardBookingRead(membership, bookingId)
   const rows = preloaded ?? await executeBatch(db, [membership, ...plan.queries], { operation: 'Read the staff reservation' })
-  const { access, organization, booking } = await dashboardBookingContext(event, 'read', undefined, record, rows)
+  const { access, organization, booking, session } = await dashboardBookingContext(event, 'read', undefined, record, rows)
+  const viewer = { userId: session.user.id, verifiedEmail: session.user.emailVerified ? session.user.email : null, canManage: Boolean(access.manage || booking.operates || booking.assigned) }
+  const agreementOf = () => bookingAgreementFromRows(rows.slice(plan.agreementOffset), viewer, { userId: session.user.id, name: session.user.name })
   if (booking.unit === 'slot') {
     const facts = rows.slice(2, plan.stayOffset)
     const canReadPayments = await roleAllows({ ...organization, permissions: { payments: ['read'] } })
-    return { booking: await plan.timed.read(db, env, facts, canReadPayments), manage: access.manage }
+    return { booking: { ...await plan.timed.read(db, env, facts, canReadPayments), ...agreementOf() }, manage: access.manage }
   }
   if (!access.manage) {
     const [stayRows, houseRows, media] = await executeBatch(db, [
@@ -160,7 +168,7 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
     const home = { ...house, image_url: mediaStillUrl(photos.get(booking.product_id)?.[0]) }
     return { booking: nightBooking(stay), manage: false as const, home }
   }
-  const [stayRows, threadRows, mapping, channelRows, accountRows, operations, changes, locale, ...homeRows] = rows.slice(plan.stayOffset)
+  const [stayRows, threadRows, mapping, channelRows, accountRows, operations, changes, locale, ...homeRows] = rows.slice(plan.stayOffset, plan.agreementOffset)
   const stay = stayDetailFrom(access, stayRows!.results[0])
   const home = plan.home.read(homeRows)
   const threadRow = threadRows!.results[0] as Record<string, unknown> | undefined
@@ -180,7 +188,7 @@ export async function dashboardBookingDetails(event: H3Event, record?: { orgSlug
   const pending_changes = stay.channel === 'airbnb' && channelOwned && changes!.results.length
     ? pendingStayChangesFromRows(changes!.results, bookingId, sourceLocaleFromRows(organization.id, locale!.results).locale)
     : []
-  return { booking: { ...nightBooking(stay), available_actions, pending_changes }, manage: true, home: { ...home, image_url: home.photo_urls[0] ?? null }, can_message_guest: canMessageGuest }
+  return { booking: { ...nightBooking(stay), available_actions, pending_changes, ...agreementOf() }, manage: true, home: { ...home, image_url: home.photo_urls[0] ?? null }, can_message_guest: canMessageGuest }
 }
 
 interface BookingListQuery { unit?: unknown; from?: unknown; to?: unknown; product_id?: unknown; include_cancelled?: unknown }

@@ -5,6 +5,7 @@ import { CURRENT_GUEST_SQL, GUEST_NOTE_EVENT, type MessageRow } from '~/server/d
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { agreementQueries, bookingAgreementFromRows } from '~/server/domain/agreements'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { formatBookingPolicySummary, parseBookingPolicy, type FormattedBookingPolicySummary } from '~/server/utils/booking-policy-summary'
@@ -156,6 +157,14 @@ export interface DashboardBookingDetails {
   /** When staff recorded the guest did not come. */
   /** Where the visit's review invitation stands, for the team; null before one is sent. */
   review_invitation: { state: 'sent' | 'submitted' | 'revoked' | 'expired'; at: string } | null
+  /** The booking's agreement as the viewer reads it; absent where this read carries none. */
+  agreement?: import('~/shared/agreements').BookingAgreement | null
+  /** Who the business may ask to sign, for a viewer who manages the booking. */
+  agreement_signers?: { key: string; name: string; role: 'guest' | 'host' }[]
+  /** The listing has the business's own agreement template to fill from this booking. */
+  agreement_template?: boolean
+  /** The booking's refundable deposit; absent where this read carries none. */
+  deposit?: import('~/shared/deposits').BookingDeposit | null
 }
 
 interface BookingAccessContext {
@@ -263,7 +272,7 @@ export async function loadDashboardPurchaseDetails(event: H3Event, paymentId: st
 }
 
 type BookingDetailReader = { env: CloudflareEnv; canReadPayments: boolean; buyerUserId?: undefined }
-  | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined }
+  | { buyerUserId: string; verifiedEmail: string | null; env: CloudflareEnv; canReadPayments?: undefined }
 
 export function prepareStaffBookingDetails(bookingId: string, source: BatchQuery) {
   const scoped = (query: BatchQuery): BatchQuery => ({
@@ -301,15 +310,16 @@ function resourcePhotoUrls(kind: ProductKind, photos: StoredMediaPlacementItem[]
 export async function loadBuyerBookingDetails(
   db: DbClient,
   env: CloudflareEnv,
-  userId: string,
+  viewer: { userId: string; verifiedEmail: string | null },
   type: DashboardRecordType,
   bookingId: string,
   lookup: 'booking' | 'conversation' = 'conversation',
 ): Promise<DashboardBookingDetails> {
+  const userId = viewer.userId
   if (type === 'payment') return composePurchaseDetails(db, env, { buyerUserId: userId }, bookingId)
   const row = await loadBookingRow(db, { buyerUserId: userId }, type, bookingId, lookup)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  return composeBookingDetails(db, row, type, { env, buyerUserId: userId })
+  return composeBookingDetails(db, row, type, { env, buyerUserId: userId, verifiedEmail: viewer.verifiedEmail })
 }
 
 function bookingDetailFacts(source: BatchQuery, staff: boolean, buyerUserId?: string) {
@@ -362,11 +372,14 @@ async function composeBookingDetails(
   if (pinFailure) throw new HTTPError({ statusCode: 500, message: pinFailure.error, data: { code: 'INVALID_STORED_LOCATION', field: pinFailure.field } })
 
   const resourceId = row.product_kind === 'table' ? row.location_id : row.product_id
-  const [places, placeMedia, photos, locale, proposal, review, receipt] = facts
-    ?? await executeBatch(db, bookingDetailFacts({
+  // The guest's own read carries the booking's agreement in the same round trip; the team's read carries it in its own batch.
+  const agreement = !facts && reader.buyerUserId ? agreementQueries({ booking: { sql: '?', params: [row.booking_id] }, organization: { sql: '?', params: [row.organization_id] } }, true) : []
+  const read = facts ?? await executeBatch(db, [...bookingDetailFacts({
       query: 'SELECT ? AS organization_id, ? AS booking_id, ? AS conversation_id, ? AS product_kind, ? AS product_id, ? AS location_id, 1 AS can_read_payments',
       params: [row.organization_id, row.booking_id, row.conversation_id, row.product_kind, row.product_id, row.location_id],
-    }, false, reader.buyerUserId), { operation: 'Read reservation locations, media and display facts' })
+    }, false, reader.buyerUserId), ...agreement], { operation: 'Read reservation locations, media and display facts' })
+  const [places, placeMedia, photos, locale, proposal, review, receipt] = read
+  const agreementRows = agreement.length ? read.slice(-agreement.length) : null
   const visibleLocations = places!.results as { id: string; title: string }[]
   const locationPictures = ownerPicturesFromRows(row.organization_id, 'business_location', visibleLocations.map(location => location.id), placeMedia!.results)
   const resourcePhotos = resourcePhotoUrls(row.product_kind, resourceId ? groupMediaPlacements(photos!.results).get(resourceId) ?? [] : [])
@@ -416,6 +429,7 @@ async function composeBookingDetails(
     guest_can_retry_cancellation: guestCanRetryCancellation,
     guest_cancel_refunds: now <= freeCancellationUntil(row.starts_at, policy.advance_notice_minutes),
     review_invitation: reviewInvitationState(review!.results[0] as ReviewInvitationRow | undefined, now),
+    ...(agreementRows && reader.buyerUserId ? bookingAgreementFromRows(agreementRows, { userId: reader.buyerUserId, verifiedEmail: reader.verifiedEmail, canManage: false }, null) : {}),
   }
 }
 

@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { AGREEMENT_EVENTS } from '~/shared/agreements'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import type { MessagePhotoInput } from './guest-threads/attachments'
@@ -112,12 +113,13 @@ export function messageRole(message: Pick<MessageRow, 'author_kind' | 'author_us
   return message.author_user_id === guestUserId ? 'guest' : 'member'
 }
 
-/** Invited travelers see chat. The booking account also sees its own booking and payment records. */
+/** Invited travelers see chat and the booking's agreement, which they may sign. The booking account also sees its own booking and payment records. */
 export function guestVisibleSql(message: string, bookingOwner: string): string {
   const guestWords = `(${message}.author_kind = 'guest' AND ${message}.channel IN ('web', 'email', 'whatsapp'))`
   return `((${guestWords} AND ${message}.event_name IS NULL)
     OR (${message}.author_kind = 'member' AND ${message}.event_name = '${MEMBER_REPLY_EVENT}')
     OR (${message}.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) AND ${message}.event_name = '${SCHEDULED_MESSAGE_EVENT}')
+    OR (${message}.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL}) AND ${message}.event_name IN (${AGREEMENT_EVENTS.map(event => `'${event}'`).join(', ')}))
     OR (${bookingOwner} AND (${guestWords} OR (${message}.author_kind IN (${PLATFORM_MESSAGE_AUTHOR_KINDS_SQL})
       AND ${message}.event_name IN ('${OPENING_EVENT}', ${GUEST_VISIBLE_EVENTS.map(event => `'${event}'`).join(', ')})))))`
 }

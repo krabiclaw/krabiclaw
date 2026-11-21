@@ -172,6 +172,59 @@
             </p>
           </div>
 
+          <div v-if="showAgreementRow || showDepositRow" id="booking-agreement-section" :class="sectionClass">
+            <h2 class="text-lg font-semibold text-highlighted">{{ showAgreementRow ? agreementLabelText : depositRead?.label }}</h2>
+            <div class="mt-3">
+              <component
+                :is="personalScope ? 'button' : NuxtLink"
+                v-if="showAgreementRow"
+                :to="personalScope ? undefined : { path: `${editorPath}/agreement`, query: route.query }"
+                type="button"
+                :class="rowClass"
+                data-testid="booking-agreement-row"
+                @click="personalScope && (guestAgreementOpen = true)"
+              >
+                <UIcon name="i-lucide-file-text" class="size-4 shrink-0 text-highlighted" />
+                <span class="min-w-0 flex-1">
+                  <span class="block font-medium">{{ agreementLabelText }}</span>
+                  <span v-if="agreementRowSummary" class="block text-xs text-muted" data-testid="booking-agreement-status">{{ agreementRowSummary }}</span>
+                </span>
+                <UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+              </component>
+            </div>
+            <component
+              :is="personalScope ? 'div' : NuxtLink"
+              v-if="showDepositRow && depositRead"
+              :to="personalScope ? undefined : { path: `${editorPath}/deposit`, query: route.query }"
+              :class="rowClass"
+              data-testid="booking-deposit-row"
+            >
+              <UIcon name="i-lucide-shield-check" class="size-4 shrink-0 text-highlighted" />
+              <span class="min-w-0 flex-1">
+                <span class="block font-medium">{{ depositRead.label }}</span>
+                <span class="block text-xs text-muted" data-testid="booking-deposit-status">{{ depositSummary }}</span>
+              </span>
+              <UIcon v-if="!personalScope" name="i-lucide-chevron-right" class="size-4 text-muted" />
+            </component>
+            <DashboardListItemDialog v-if="personalScope && guestAgreementOpen && conversationId && agreementRead" v-model:open="guestAgreementOpen" :title="agreementLabelText ?? ''" :show-actions="false">
+              <BookingAgreement
+                :conversation-id="conversationId"
+                :preloaded="{ agreement: agreementRead.agreement, canManage: false }"
+                @open-signing="(value) => {
+                  guestAgreementOpen = false
+                  signingAgreement = value
+                  signingOpen = true
+                }"
+              />
+            </DashboardListItemDialog>
+            <AgreementSignSheet
+              v-if="signingAgreement && conversationId"
+              v-model:open="signingOpen"
+              :conversation-id="conversationId"
+              :agreement="signingAgreement"
+              @signed="refreshDetails()"
+            />
+          </div>
           <div v-if="panel.location || panel.address || panel.pin || panel.guide?.directions" id="getting-there" :class="sectionClass">
             <h2 class="text-lg font-semibold text-highlighted">Getting there</h2>
             <StaySetupMap v-if="panel.pin" :key="`${panel.pin.latitude},${panel.pin.longitude}`" :pin="panel.pin" :marker-icon="stay ? 'i-lucide-house' : 'i-lucide-map-pin'" :interactive="false" compact class="mt-4" />
@@ -255,9 +308,22 @@
               <!-- Airbnb's payment rows: the label on the left, the amount on the right, both in the body colour. A channel's guest pays the channel, so its total is the booking's. -->
               <p class="mt-5 flex items-baseline justify-between gap-4 text-base font-semibold text-highlighted">
                 <span>{{ channelManaged ? 'Total' : 'Amount paid' }}</span>
-                <span data-testid="stay-amount-paid">{{ money(channelManaged ? detail.total_minor : detail.online_payment ? detail.online_payment.captured_minor - detail.online_payment.refunded_minor : detail.paid_minor) }}</span>
+                <span data-testid="stay-amount-paid">{{ money(channelManaged ? detail.total_minor : detail.paid_minor) }}</span>
               </p>
               <p v-if="channelManaged" class="mt-1 text-sm text-muted">Payments, changes and cancellations are managed on {{ channelName }}.</p>
+              <!-- A stay paid monthly: each month, what it is due and where it stands. -->
+              <ul v-if="detail.installments" class="mt-4 divide-y divide-default border-y border-default" data-testid="stay-monthly-ledger">
+                <li v-for="period in detail.installments" :key="period.period_start" class="flex items-start justify-between gap-4 py-3 text-sm">
+                  <span class="min-w-0">
+                    <span class="block text-highlighted">{{ reservationDay(period.period_start) }} – {{ reservationDay(previousDay(period.period_end)) }}</span>
+                    <span class="block text-xs text-muted">Due {{ reservationDay(period.period_start) }}</span>
+                  </span>
+                  <span class="shrink-0 text-right">
+                    <span class="block text-highlighted">{{ period.status === 'partial' ? `${money(period.paid_minor)} of ${money(period.amount_minor)}` : money(period.amount_minor) }}</span>
+                    <UBadge :color="LEDGER_COLORS[period.status]" variant="subtle" size="sm" :label="LEDGER_LABELS[period.status]" />
+                  </span>
+                </li>
+              </ul>
               <template v-if="!personalScope">
                 <ul v-if="!channelManaged && detail.payments.length" class="mt-4 space-y-3">
                   <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4">
@@ -268,21 +334,26 @@
                     <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
                   </li>
                 </ul>
-                <NuxtLink v-if="manage && !channelManaged && !requestStatus && !detail.online_payment" :to="{ path: `${editorPath}/payment`, query: route.query }" :class="rowClass" class="mt-2" data-testid="stay-record-payment">
-                  <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Record a payment</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
-                </NuxtLink>
-                <template v-if="detail.online_payment">
-                  <NuxtLink :to="paymentPath" :class="rowClass" class="mt-2">
-                    <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                <!-- Each Stripe payment: the checkout, then each month of a stay paid monthly. -->
+                <div v-for="online in detail.online_payments" :key="online.payment_id" class="mt-2" data-testid="stay-online-payment">
+                  <NuxtLink :to="paymentPath(online.payment_id)" :class="rowClass">
+                    <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" />
+                    <span class="min-w-0 flex-1">{{ money(online.captured_minor - online.refunded_minor) }} · Paid online <span class="block text-xs text-muted">{{ formatCreatedAt(online.created_at) }}</span></span>
+                    <UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
                   </NuxtLink>
-                  <NuxtLink v-if="manage && detail.online_payment.captured_minor > detail.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: detail.online_payment.payment_id } }" :class="rowClass">
+                  <NuxtLink v-if="manage && online.captured_minor > online.refunded_minor" :to="{ path: `${paymentPath(online.payment_id)}/refund`, query: { payment: online.payment_id } }" :class="rowClass">
                     <UIcon name="i-lucide-undo-2" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Send a refund</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
                   </NuxtLink>
-                </template>
+                </div>
+                <NuxtLink v-if="manage && !channelManaged && !requestStatus" :to="{ path: `${editorPath}/payment`, query: route.query }" :class="rowClass" class="mt-2" data-testid="stay-record-payment">
+                  <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Record a payment</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                </NuxtLink>
               </template>
-              <a v-else-if="detail.online_payment?.receipt_url" :href="detail.online_payment.receipt_url" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-2">
-                <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Get receipt</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
-              </a>
+              <template v-else>
+                <a v-for="online in detail.online_payments.filter(entry => entry.receipt_url)" :key="online.payment_id" :href="online.receipt_url!" target="_blank" rel="noopener noreferrer" :class="rowClass" class="mt-2">
+                  <UIcon name="i-lucide-receipt-text" class="size-4 shrink-0 text-highlighted" /><span class="min-w-0 flex-1">Receipt · {{ formatCreatedAt(online.created_at) }}</span><UIcon name="i-lucide-chevron-right" class="size-4 text-muted" />
+                </a>
+              </template>
             </template>
             <p v-else-if="booking?.payments?.length === 0" class="mt-4 text-sm text-muted">No payments recorded.</p>
             <PaymentDetails v-for="entry in booking?.payments" :key="entry.payment.id" :payment="entry.payment" :refunds="entry.refunds">
@@ -404,7 +475,24 @@ export interface BookingEditor {
   note: ComputedRef<{ id: string; version: number; text: string } | null>
   savePrivateNote: (input: { id: string; version: number; text: string }) => Promise<void>
   /** A stay's offline payment step: its currency, today at the home, and the write. */
-  stayPayment: { currency: ComputedRef<string | null>; today: () => string; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) => Promise<void> }
+  stayPayment: { currency: ComputedRef<string | null>; today: () => string; months: ComputedRef<import('~/server/domain/stays').StayLedgerPeriod[] | null>; record: (input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; period_start: string; idempotency_key: string }) => Promise<void> }
+  /**
+   * The booking's agreement as the business manages it: the current document,
+   * who it may ask to sign, and what the booking is. Null when the booking's
+   * read carries no agreement for this viewer to manage.
+   */
+  agreement: ComputedRef<{
+    conversationId: string
+    label: string
+    title: string
+    when: { label: string; value: string; detail: string | null }[]
+    current: import('~/shared/agreements').BookingAgreement | null
+    signers: { key: string; name: string; role: 'guest' | 'host' }[]
+    /** The listing has the business's own template to fill from this booking. */
+    template: boolean
+  } | null>
+  /** The booking's refundable deposit for the business's Deposit leaf; null where the booking has no currency or the viewer is the guest. */
+  deposit: ComputedRef<{ bookingId: string; current: import('~/shared/deposits').BookingDeposit; today: string } | null>
   /** A stay's Change reservation step: what it is now, and the write. */
   stayChange: { stay: ComputedRef<{ check_in_date: string; check_out_date: string; adults: number; children: number } | null>; save: (input: { check_in_date: string; check_out_date: string; adults: number; children: number }) => Promise<void> }
 }
@@ -438,6 +526,10 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatPostalAddress } from '~/utils/postal-address'
 import StaySetupMap from './StaySetupMap.client.vue'
+import BookingAgreement from '~/components/booking/BookingAgreement.vue'
+import AgreementSignSheet from '~/components/booking/AgreementSignSheet.vue'
+import { agreementLabel, agreementStatusLine, type BookingAgreement as BookingAgreementRecord } from '~/shared/agreements'
+import { depositStatusLine } from '~/shared/deposits'
 import { ApiClientError } from '~/utils/api-clients'
 
 const props = defineProps<{
@@ -553,6 +645,46 @@ function manageBookingParty() { guestManagement?.open(bookingParty.value) }
 const otherGuestLabel = computed(() => `${partySize.value - 1} other ${partySize.value === 2 ? recordCopy.value?.guestLabel ?? 'guest' : recordCopy.value?.guestsLabelPlural ?? 'guests'}`)
 const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text)
 const conversationId = computed(() => booking.value?.conversation_id ?? detail.value?.conversation_id ?? null)
+/** The agreement the booking's own read carries, and for the business who it may ask to sign; a read that carries none (a turnover) shows none. */
+const agreementRead = computed(() => {
+  const record = booking.value ?? detail.value
+  if (!record || !('agreement' in record) || record.agreement === undefined) return null
+  return {
+    agreement: record.agreement,
+    signers: 'agreement_signers' in record ? record.agreement_signers ?? null : null,
+    template: 'agreement_template' in record && record.agreement_template === true,
+  }
+})
+const signingAgreement = ref<BookingAgreementRecord | null>(null)
+/** The deposit the booking's read carries: null for a booking with no price, absent where the read carries none. */
+const depositRead = computed(() => {
+  const record = booking.value ?? detail.value
+  return record && 'deposit' in record ? record.deposit ?? null : null
+})
+const showAgreementRow = computed(() => Boolean(conversationId.value && agreementRead.value && (agreementRead.value.agreement || !props.personalScope)))
+// A guest sees the deposit once the business asks for one; the business always sees where to set it.
+const showDepositRow = computed(() => Boolean(depositRead.value && (!props.personalScope || depositRead.value.required_minor !== null || depositRead.value.entries.length)))
+const depositSummary = computed(() => {
+  const value = depositRead.value
+  if (!value) return null
+  const currency = value.currency
+  if (!isCurrencyCode(currency)) throw new Error(`Unsupported deposit currency ${currency}`)
+  return depositStatusLine(value, minor => formatMinorAmount(minor, currency))
+})
+const guestAgreementOpen = ref(false)
+const signingOpen = ref(false)
+/** The business's word for the document: the agreement's own, or the booking's kind's before one exists. */
+const agreementLabelText = computed(() => {
+  if (!agreementRead.value) return null
+  if (agreementRead.value.agreement) return agreementRead.value.agreement.label
+  return agreementLabel(stay.value ? 'stay' : booking.value?.product_kind ?? 'stay')
+})
+const agreementRowSummary = computed(() => {
+  const value = agreementRead.value?.agreement
+  if (!value) return props.personalScope ? null : 'Not sent'
+  return agreementStatusLine(value)
+})
+
 const messageTo = computed(() => {
   if (!conversationId.value || (stay.value && !props.personalScope && !managedStay.value?.can_message_guest)) return null
   return `/dashboard/${encodeURIComponent(orgSlug.value)}/messages/${encodeURIComponent(conversationId.value)}`
@@ -646,8 +778,9 @@ watch(realtime.event, (event) => {
     void refreshDetails()
   } else if (event.type === 'stay.changed' && stay.value && (event.booking_id === stay.value.booking_id || (event.booking_id === null && event.product_id === stay.value.product_id))) {
     void refreshDetails()
-  } else if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled && event.conversation_id === conversationId.value && (booking.value || detail.value?.channel === 'airbnb')) {
-    void refreshDetails()
+  } else if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.scheduled && event.conversation_id === conversationId.value) {
+    // A signature or a sent agreement is a message, so the record reads again with its agreement.
+    if (booking.value || detail.value?.channel === 'airbnb' || agreementRead.value) void refreshDetails()
   }
 })
 watch(realtime.reconnectEpoch, epoch => {
@@ -743,11 +876,10 @@ const itinerary = computed<ReservationItineraryDetails | null>(() => {
   const value = detail.value
   const home = recordHome.value
   if (value?.status === 'confirmed' && home && !channelManaged.value) {
-    const online = value.online_payment
     return {
       title: home.name, organizationName: home.organization_name, address: home.location?.address ? formatPostalAddress(home.location.address) : null,
       photoUrl: home.photo_urls[0] ?? null, hostName: home.host?.name ?? null, partySize: value.adults + value.children + value.infants,
-      paid: [{ amount: online ? online.captured_minor - online.refunded_minor : value.paid_minor, currency: value.currency }],
+      paid: [{ amount: value.paid_minor, currency: value.currency }],
       schedule: { unit: 'nights', checkInDate: value.check_in_date, checkOutDate: value.check_out_date, checkInTime: home.check_in_time, checkOutTime: home.check_out_time },
       houseManual: home.arrival_guide?.house_manual, houseRules: home.house_rules,
     }
@@ -948,7 +1080,7 @@ const cancellation = computed(() => accountStay.value?.cancellation ?? null)
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messageTo.value) && detail.value.status === 'confirmed'
   && (detail.value.ends_at.length === 10 ? detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone) : Date.parse(detail.value.ends_at) > Date.now()))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
-const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
+const paymentPath = (paymentId: string) => `/dashboard/${route.params.org_slug}/bookings/payment/${encodeURIComponent(paymentId)}`
 const channelName = computed(() => detail.value ? detail.value.channel === 'direct' ? 'You' : STAY_CHANNEL_LABELS[detail.value.channel] : '')
 /**
  * Who the stay is for. A stay made here always names its guest, so one without
@@ -985,6 +1117,14 @@ function money(minor: number): string {
   return `${minor < 0 ? '−' : ''}${formatMinorAmount(Math.abs(minor), currency)}`
 }
 function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LABELS[method] }
+const LEDGER_LABELS = { paid: 'Paid', partial: 'Partial', due: 'Due', overdue: 'Overdue', upcoming: 'Upcoming' } as const
+const LEDGER_COLORS = { paid: 'success', partial: 'warning', due: 'neutral', overdue: 'error', upcoming: 'neutral' } as const
+/** A period's last night: the day before the next one starts. */
+function previousDay(date: string) {
+  const day = new Date(`${date}T00:00:00Z`)
+  day.setUTCDate(day.getUTCDate() - 1)
+  return day.toISOString().slice(0, 10)
+}
 
 const changeRetry = ref<{ messageId: string; decision: 'accept' | 'decline' } | null>(null)
 // The payment day defaults to today where the home is; one key per payment being entered, kept across retries.
@@ -1043,7 +1183,7 @@ async function answerStayChange(messageId: string, decision: 'accept' | 'decline
 }
 
 /** The payment step's write: money the host received or refunded offline, recorded on the stay. */
-async function recordStayPayment(input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; idempotency_key: string }) {
+async function recordStayPayment(input: { amount: string; method: StayPaymentMethod; paid_on: string; reference: string; period_start: string; idempotency_key: string }) {
   const value = detail.value
   if (!value || isChannelManagedStay(value) || !isCurrencyCode(value.currency)) throw new Error('This stay records no payments here')
   const typed = input.amount.trim()
@@ -1051,7 +1191,7 @@ async function recordStayPayment(input: { amount: string; method: StayPaymentMet
   const minor = majorAmountToMinor(negative ? typed.slice(1) : typed, value.currency as Parameters<typeof majorAmountToMinor>[1])
   await dashboardApi(`${dashboardBookingPath(value.booking_id)}/payments`, {
     method: 'POST', validate: isNightBooking,
-    body: { amount_minor: negative ? -minor : minor, method: input.method, paid_on: input.paid_on, reference: input.reference || undefined, idempotency_key: input.idempotency_key },
+    body: { amount_minor: negative ? -minor : minor, method: input.method, paid_on: input.paid_on, reference: input.reference || undefined, period_start: input.period_start || undefined, idempotency_key: input.idempotency_key },
   })
   await refreshDetails()
 }
@@ -1103,7 +1243,7 @@ async function releaseRemainingNights() {
 async function cancelStay() {
   const value = detail.value
   if (!value || isChannelManagedStay(value)) return
-  const held = value.online_payment ? value.online_payment.captured_minor - value.online_payment.refunded_minor : 0
+  const held = value.online_payments.reduce((sum, online) => sum + online.captured_minor - online.refunded_minor, 0)
   const description = held > 0
     ? `Its nights become available again and ${guest.value.state === 'named' ? guest.value.name : 'the guest'} is refunded ${money(held)} in full. You approve the refund next.`
     : value.request_status ? 'The guest will be notified and the nights will become available again.' : 'Its nights become available again. Record any refund as a payment.'
@@ -1166,7 +1306,20 @@ provide(bookingEditorKey, {
   formatCreatedAt,
   note,
   savePrivateNote,
-  stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, record: recordStayPayment },
+  stayPayment: { currency: computed(() => detail.value?.currency ?? null), today: homeToday, months: computed(() => detail.value?.installments ?? null), record: recordStayPayment },
+  agreement: computed(() => {
+    const read = agreementRead.value
+    const view = panel.value
+    if (!read?.signers || !conversationId.value || !agreementLabelText.value || !view) return null
+    return { conversationId: conversationId.value, label: agreementLabelText.value, title: view.title ?? agreementLabelText.value, when: view.when, current: read.agreement, signers: read.signers, template: read.template }
+  }),
+  deposit: computed(() => {
+    const current = depositRead.value
+    if (props.personalScope || !current) return null
+    const timezone = stay.value?.timezone ?? booking.value?.timezone
+    if (!timezone) throw new Error('A booking with a deposit has no timezone to date its entries in')
+    return { bookingId: props.bookingId, current, today: localDateAt(new Date(), timezone) }
+  }),
   stayChange: { stay: computed(() => detail.value ? { check_in_date: detail.value.check_in_date, check_out_date: detail.value.check_out_date, adults: detail.value.adults, children: detail.value.children } : null), save: changeStay },
 })
 </script>

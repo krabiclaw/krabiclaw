@@ -428,6 +428,7 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 </script>
 
 <script setup lang="ts">
+import { agreementLabel } from '~/shared/agreements'
 import { MAX_STAY_NIGHTS, STAY_DIRECT_DISCOUNTS, parseStayCalendarRules, type StayCalendarRules } from '~/shared/bookings'
 import { cloneFnJSON } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
@@ -1315,6 +1316,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         placeholder: !product.value.stay!.cancellation_policy,
         to: sectionPath('cancellation'),
       },
+      { id: 'agreement', label: agreementLabel('stay'), summary: product.value.agreement_template ? 'Your template' : product.value.agreement?.file_name ?? 'None', placeholder: !product.value.agreement && !product.value.agreement_template, to: sectionPath('agreement') },
       { id: 'availability', label: 'Availability', summary: `${product.value.stay!.min_nights} ${product.value.stay!.min_nights === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
       { id: 'guests', label: 'Number of guests', summary: `${product.value.stay!.max_guests} ${product.value.stay!.max_guests === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
       { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
@@ -1350,7 +1352,7 @@ const activeNavigationItem = computed(() => {
 const LEAF_SECTIONS: readonly string[] = ['photo', 'internal-name', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
 const autoOpenTarget = computed(() => draftStay.value && !arrivalTab.value ? null : navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
-const STAY_ROW_ORDER = ['publication', 'photo', 'internal-name', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'questions', 'featured', 'collections']
+const STAY_ROW_ORDER = ['publication', 'photo', 'internal-name', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'agreement', 'team', 'questions', 'featured', 'collections']
 function rowRank(id: string) {
   const at = STAY_ROW_ORDER.indexOf(id)
   return at === -1 ? STAY_ROW_ORDER.length : at

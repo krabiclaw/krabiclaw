@@ -537,7 +537,7 @@ test('Checkout proof attaches ownership without exposing merchant financial data
   assert.deepEqual((await buyerActivities(db,'verified')).activities.map(({kind,id})=>({kind,id})),[{kind:'payment',id:'claim'}])
   assert.equal(await buyerPaymentActivityPath(db,'verified','claim'),'/dashboard/account/activity/payment/claim')
   assert.deepEqual(await paymentTransactionDestination(db, ORG, 'payments', 'claim'), { to: '/dashboard/payments/bookings/payment/claim' })
-  const owned=await loadBuyerBookingDetails(db, env,'verified','payment','claim')
+  const owned=await loadBuyerBookingDetails(db, env,{userId:'verified',verifiedEmail:null},'payment','claim')
   assert.equal(owned.type,'payment')
   assert.equal(owned.name,'Consultation')
   assert.equal(owned.conversation_id,null)
@@ -552,7 +552,7 @@ test('Checkout proof attaches ownership without exposing merchant financial data
 
   assert.deepEqual((await buyerActivities(db,'verified')).activities.map(activity=>activity.id),['claim'])
   assert.deepEqual(await buyerActivities(db,'other'),{activities:[]})
-  await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','payment','claim'),error=>error instanceof HTTPError&&error.statusCode===404)
+  await assert.rejects(()=>loadBuyerBookingDetails(db, env,{userId:'other',verifiedEmail:null},'payment','claim'),error=>error instanceof HTTPError&&error.statusCode===404)
 
   await db.prepare("UPDATE payments SET return_expires_at='2000-01-01T00:00:00.000Z' WHERE return_token_hash=?").bind(hash).run()
   const expiredClaim=await db.prepare('SELECT return_token_hash,return_expires_at AS expires_at,claimed_at,claimed_user_id FROM payments WHERE return_token_hash=?').bind(hash).first()
@@ -610,14 +610,14 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   await assert.rejects(() => paymentTransactionDestination(db, 'platform', 'platform', 'visit-payment'), { statusCode: 404 })
   // The team's private note on the booking is never the buyer's to read.
   await db.prepare("UPDATE bookings SET private_notes='Team-only note' WHERE id=?").bind(booking.bookingId).run()
-  const detail=await loadBuyerBookingDetails(db, env,'verified','booking',opening.id)
+  const detail=await loadBuyerBookingDetails(db, env,{userId:'verified',verifiedEmail:null},'booking',opening.id)
   assert.deepEqual(detail.payments!.map(item=>item.payment.id),['visit-payment'])
   assert.equal(detail.conversation_id,opening.id)
   assert.equal(detail.private_notes,null)
   assert.doesNotMatch(JSON.stringify(detail),/Team-only note/u)
   assert.equal(detail.assigned_member_name,null)
-  await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',booking.bookingId),error=>error instanceof HTTPError&&error.statusCode===404)
-  await assert.rejects(()=>loadBuyerBookingDetails(db, env,'other','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
+  await assert.rejects(()=>loadBuyerBookingDetails(db, env,{userId:'verified',verifiedEmail:null},'booking',booking.bookingId),error=>error instanceof HTTPError&&error.statusCode===404)
+  await assert.rejects(()=>loadBuyerBookingDetails(db, env,{userId:'other',verifiedEmail:null},'booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
   await db.batch([
     db.prepare("UPDATE bookings SET user_id='other' WHERE id=?").bind(booking.bookingId),
     ...transferBookingGuestSeat({ query: 'c.id = ?', params: [opening.id] }, 'other', NOW).map(write => db.prepare(write.query).bind(...(write.params ?? []))),
@@ -626,8 +626,8 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.equal(await readGuestConversation(db, 'verified', opening.id), null)
   assert.equal((await readGuestConversation(db, 'other', opening.id))?.id, opening.id)
   assert.equal((await buyerActivities(db,'verified')).activities.some(item=>item.kind==='booking'),false)
-  await assert.rejects(()=>loadBuyerBookingDetails(db, env,'verified','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
-  const retainedPayment=await loadBuyerBookingDetails(db, env,'verified','payment','visit-payment')
+  await assert.rejects(()=>loadBuyerBookingDetails(db, env,{userId:'verified',verifiedEmail:null},'booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
+  const retainedPayment=await loadBuyerBookingDetails(db, env,{userId:'verified',verifiedEmail:null},'payment','visit-payment')
   assert.equal(retainedPayment.conversation_id,null)
   assert.equal(retainedPayment.payments![0]!.payment.id,'visit-payment')
   assert.equal(await db.prepare("SELECT buyer_user_id FROM payments WHERE id='visit-payment'").first('buyer_user_id'),'verified')
@@ -883,7 +883,7 @@ test('a stay purchase claim cancels Stripe before releasing only its checkout re
     const open = await openHandoff.json()
     assert.deepEqual(open, {
       payment_id: 'changing', state: 'open', title: 'Cabin', quantity: 1, unit_amount: 20000,
-      stay: { product_id: 'cabin', check_in_date: '2099-10-01', check_out_date: '2099-10-03', nights: 2, nightly: [10000, 10000], adults: 1, children: 0, infants: 0, cancellation_policy: 'flexible' },
+      stay: { product_id: 'cabin', check_in_date: '2099-10-01', check_out_date: '2099-10-03', nights: 2, nightly: [10000, 10000], adults: 1, children: 0, infants: 0, cancellation_policy: 'flexible', installments: null, later_payments_add_tax: false },
       approved_stay_path: null,
       billing_details: { name: 'Guest', email: 'guest@example.com' },
       kind: 'stay', image_url: null, starts_at: null, ends_at: null, timezone: null, party_size: null, product_slug: 'cabin', location_slug: 'cabin-site', free_cancellation_until: null,

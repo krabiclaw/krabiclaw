@@ -5,7 +5,7 @@ import { bookingStatusQuery } from '~/server/domain/bookings'
 import { visitRefundPaymentQuery, visitRefundQueries } from '~/server/domain/payments/visit-refund'
 import type { Payment } from '~/server/domain/payments'
 import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/booking-analytics'
-import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { bookingDay, getGuestRequest, getThreadOperationalRecord, noStayRequestPaymentInFlightSql, requestActions, requestSummary, stayRequestPayBySql, stayRequestRespondBySql, validateGuestRequest, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
@@ -447,7 +447,7 @@ async function executeSourceMutation(
       action: plan.action, organizationId: input.organizationId, actorUserId: input.actorUserId, bookingId: context.record.id,
       authorizationId: input.financialAuthorizationId, financialWritesAllowed: input.financialWritesAllowed, note: input.body, now,
       committed: { query: 'EXISTS(SELECT 1 FROM messages WHERE id=?)', params: [entryId] },
-      payment: await queryFirst<Payment>(db, refundPayment.query, refundPayment.params) ?? null,
+      payments: await queryAll<Payment>(db, refundPayment.query, refundPayment.params),
       actorRole: async () => (await queryFirst<{ role: string }>(db, 'SELECT role FROM member WHERE organizationId=? AND userId=?', [input.organizationId, input.actorUserId]))?.role ?? null,
     }) : { queries: [], guard: null }
   const stay = nightly ? await import('~/server/domain/stays') : null

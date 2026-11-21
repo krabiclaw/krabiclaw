@@ -167,6 +167,11 @@ export interface Product {
   page: ProductPage | null
   image: ResolvedMediaAsset | null
   gallery: ResolvedMediaAsset[]
+  /** The PDF every guest signs when booking it: a rental agreement, waiver, engagement letter or event contract. */
+  agreement: (ResolvedMediaAsset & { file_name: string | null }) | null
+  /** The listing has the business's own agreement template, filled from each booking before it is sent. */
+  agreement_template: boolean
+  /** Its pictures and videos; the agreement is never one of them. */
   media: ResolvedMediaAsset[]
   social_image: SocialImageSource | null
   source: ProductSource

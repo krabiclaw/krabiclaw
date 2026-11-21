@@ -83,7 +83,7 @@ export function isConversationEntry(value: unknown): value is ConversationEntry 
   if (!isRecord(value) || !isText(value.id)) return false
   if (value.type === 'day') return isText(value.label)
   if (!isSequence(value.sequence) || !isText(value.sent_at)) return false
-  if (value.type === 'event') return isText(value.text)
+  if (value.type === 'event') return isText(value.text) && (value.agreement === undefined || value.agreement === true)
   return value.type === 'message' && (value.side === 'guest' || value.side === 'business') && isText(value.author)
     && isNullableText(value.time) && isNullableText(value.body)
     && Array.isArray(value.photos) && value.photos.every(isPhoto)
