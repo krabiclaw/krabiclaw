@@ -6,7 +6,7 @@
       data-testid="agreement-review-sign-workspace"
     >
       <!-- Top Navigation Header -->
-      <header class="flex h-14 shrink-0 items-center justify-between border-b border-default bg-surface px-4 shadow-xs">
+      <header class="flex h-14 shrink-0 items-center justify-between border-b border-default bg-default px-4 shadow-xs">
         <div class="flex items-center gap-3 min-w-0">
           <div class="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
             <UIcon name="i-lucide-file-text" class="size-4" />
@@ -115,7 +115,7 @@
       </div>
 
       <!-- Sticky Bottom Action Bar -->
-      <footer class="flex h-16 shrink-0 items-center justify-between border-t border-default bg-surface px-4 sm:px-6 shadow-xs">
+      <footer class="flex h-16 shrink-0 items-center justify-between border-t border-default bg-default px-4 sm:px-6 shadow-xs">
         <div class="min-w-0 pr-4">
           <p class="truncate text-xs text-muted">
             {{ isAdopted ? 'Signature placed. Click Finish signing to execute this document.' : 'Review each page and click [Sign here] to adopt your signature.' }}
@@ -125,7 +125,7 @@
         <div class="flex items-center gap-3 shrink-0">
           <UButton color="neutral" variant="ghost" size="md" label="Cancel" @click="open = false" />
           <UButton
-            color="primary"
+            color="neutral"
             size="md"
             label="Finish signing"
             icon="i-lucide-check-circle"
@@ -143,7 +143,7 @@
         class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
         data-testid="signature-adoption-dialog"
       >
-        <div class="w-full max-w-lg rounded-2xl border border-default bg-surface p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+        <div class="w-full max-w-lg rounded-2xl border border-default bg-default p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
           <div class="flex items-center justify-between pb-4 border-b border-default">
             <h3 class="text-base font-semibold text-highlighted">Adopt your electronic signature</h3>
             <button type="button" class="text-muted hover:text-highlighted" @click="adoptionModalOpen = false">
@@ -164,13 +164,13 @@
                 :disabled="saving"
                 placeholder="Type your full name"
                 data-testid="agreement-name"
-                class="w-full rounded-xl border border-default bg-surface px-3.5 py-2.5 text-sm text-highlighted placeholder:text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                class="w-full rounded-xl border border-default bg-default px-3.5 py-2.5 text-sm text-highlighted placeholder:text-muted focus:border-default focus:outline-none focus:ring-1 focus:ring-default"
               >
             </div>
 
             <div>
               <p class="text-xs font-semibold text-muted">Your adopted electronic signature</p>
-              <div class="mt-1.5 flex min-h-16 items-center rounded-xl border border-dashed border-default bg-elevated/20 px-4">
+              <div class="mt-1.5 flex min-h-16 items-center rounded-xl border border-dashed border-default bg-elevated px-4">
                 <p
                   class="text-3xl leading-none text-highlighted"
                   style="font-family: 'Snell Roundhand', 'Segoe Script', 'Brush Script MT', cursive"
@@ -181,7 +181,7 @@
               </div>
             </div>
 
-            <label class="flex items-start gap-3 rounded-xl border border-default bg-surface p-3.5 text-sm cursor-pointer hover:bg-elevated/40 transition-colors">
+            <label class="flex items-start gap-3 rounded-xl border border-default bg-elevated/40 p-3.5 text-sm cursor-pointer hover:bg-elevated/60 transition-colors">
               <input
                 v-model="consent"
                 type="checkbox"
@@ -202,7 +202,7 @@
                 type="submit"
                 block
                 size="lg"
-                color="primary"
+                color="neutral"
                 :disabled="!consent || name.trim().length < 2"
                 class="font-semibold"
               >

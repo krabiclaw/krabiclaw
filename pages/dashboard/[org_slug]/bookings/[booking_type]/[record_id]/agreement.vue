@@ -37,14 +37,14 @@
 
           <!-- Document Card -->
           <div class="flex items-center gap-3.5 rounded-xl border border-default bg-elevated/40 p-3.5">
-            <div class="flex size-11 shrink-0 items-center justify-center rounded-lg bg-surface text-highlighted shadow-xs">
+            <div class="flex size-11 shrink-0 items-center justify-center rounded-lg bg-default text-highlighted shadow-xs">
               <UIcon name="i-lucide-file-text" class="size-6" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm font-semibold text-highlighted">{{ agreement.file_name }}</p>
               <p class="text-xs text-muted">{{ agreement.source === 'listing' ? 'From the listing' : agreement.status === 'stored' ? 'Signed copy on file' : 'Prepared for this booking' }}</p>
             </div>
-            <a v-if="downloadUrl" :href="downloadUrl" target="_blank" rel="noopener" class="flex shrink-0 items-center gap-1.5 rounded-lg border border-default bg-surface px-3 py-1.5 text-xs font-medium text-highlighted hover:bg-elevated transition-colors">
+            <a v-if="downloadUrl" :href="downloadUrl" target="_blank" rel="noopener" class="flex shrink-0 items-center gap-1.5 rounded-lg border border-default bg-default px-3 py-1.5 text-xs font-medium text-highlighted hover:bg-elevated transition-colors">
               <UIcon name="i-lucide-download" class="size-3.5 text-muted" />
               <span>{{ agreement.signed_url ? 'Signed PDF' : 'Download' }}</span>
             </a>
@@ -54,7 +54,7 @@
           <div class="space-y-3">
             <h3 class="text-sm font-semibold text-highlighted">Signers</h3>
             <ul v-if="agreement.signers.length" class="space-y-2.5">
-              <li v-for="signer in agreement.signers" :key="signer.key" class="flex items-center gap-3 rounded-xl border border-default bg-surface p-3">
+              <li v-for="signer in agreement.signers" :key="signer.key" class="flex items-center gap-3 rounded-xl border border-default bg-default p-3">
                 <UAvatar :text="signer.name.slice(0, 1).toUpperCase()" :alt="signer.name" size="sm" class="bg-accented font-semibold text-highlighted" />
                 <div class="min-w-0 flex-1 text-sm">
                   <div class="flex items-center gap-2">
@@ -129,7 +129,7 @@
         data-testid="fullscreen-field-workspace"
       >
         <!-- Top Bar -->
-        <header class="flex h-14 shrink-0 items-center justify-between border-b border-default bg-surface px-4 shadow-xs">
+        <header class="flex h-14 shrink-0 items-center justify-between border-b border-default bg-default px-4 shadow-xs">
           <div class="flex items-center gap-3">
             <div class="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <UIcon name="i-lucide-file-text" class="size-4" />
@@ -147,12 +147,12 @@
         <!-- Main Body -->
         <div class="flex min-h-0 flex-1">
           <!-- Left Tool Sidebar (280px) -->
-          <aside class="flex w-72 shrink-0 flex-col border-r border-default bg-surface">
+          <aside class="flex w-72 shrink-0 flex-col border-r border-default bg-default">
             <!-- Sidebar Dual Mode Tabs -->
             <div class="flex border-b border-default p-1.5 bg-elevated/30">
               <button
                 type="button"
-                :class="sidebarTab === 'fields' ? 'bg-surface text-highlighted shadow-xs font-semibold' : 'text-muted hover:text-highlighted'"
+                :class="sidebarTab === 'fields' ? 'bg-default text-highlighted shadow-xs font-semibold' : 'text-muted hover:text-highlighted'"
                 class="flex flex-1 items-center justify-center gap-2 rounded-lg py-1.5 text-xs transition-colors"
                 @click="sidebarTab = 'fields'"
               >
@@ -161,7 +161,7 @@
               </button>
               <button
                 type="button"
-                :class="sidebarTab === 'pages' ? 'bg-surface text-highlighted shadow-xs font-semibold' : 'text-muted hover:text-highlighted'"
+                :class="sidebarTab === 'pages' ? 'bg-default text-highlighted shadow-xs font-semibold' : 'text-muted hover:text-highlighted'"
                 class="flex flex-1 items-center justify-center gap-2 rounded-lg py-1.5 text-xs transition-colors"
                 @click="sidebarTab = 'pages'"
               >
@@ -173,7 +173,7 @@
             <!-- MODE 1: Field Palette (Screenshots 10 & 11) -->
             <div v-if="sidebarTab === 'fields'" class="flex-1 overflow-y-auto p-3 space-y-4">
               <!-- Signer Selector Accordions -->
-              <div v-for="signer in signers" :key="signer.key" class="rounded-xl border border-default bg-surface overflow-hidden shadow-2xs">
+              <div v-for="signer in signers" :key="signer.key" class="rounded-xl border border-default bg-default overflow-hidden shadow-2xs">
                 <button
                   type="button"
                   class="flex w-full items-center justify-between p-3 text-left transition-colors hover:bg-elevated/40"
@@ -195,7 +195,7 @@
                   <div class="grid grid-cols-2 gap-2" role="group" :aria-label="`Place a field for ${pillLabel(signer)}`">
                     <button
                       type="button"
-                      class="flex items-center gap-2 rounded-lg border border-default bg-surface px-2.5 py-2 text-xs font-medium text-highlighted hover:border-primary hover:text-primary transition-colors shadow-2xs"
+                      class="flex items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-2 text-xs font-medium text-highlighted hover:border-primary hover:text-primary transition-colors shadow-2xs"
                       @click="placeDirectField(signer.key, 'signature')"
                     >
                       <UIcon name="i-lucide-pen-tool" class="size-3.5 text-primary" />
@@ -203,7 +203,7 @@
                     </button>
                     <button
                       type="button"
-                      class="flex items-center gap-2 rounded-lg border border-default bg-surface px-2.5 py-2 text-xs font-medium text-highlighted hover:border-primary hover:text-primary transition-colors shadow-2xs"
+                      class="flex items-center gap-2 rounded-lg border border-default bg-default px-2.5 py-2 text-xs font-medium text-highlighted hover:border-primary hover:text-primary transition-colors shadow-2xs"
                       @click="placeDirectField(signer.key, 'date')"
                     >
                       <UIcon name="i-lucide-calendar" class="size-3.5 text-primary" />
@@ -225,8 +225,8 @@
                   <span>Add another signer</span>
                 </button>
                 <form v-else class="space-y-2 rounded-xl border border-default bg-elevated/20 p-3" @submit.prevent="addSigner">
-                  <input v-model="invite.name" type="text" placeholder="Full name" required class="w-full rounded-lg border border-default bg-surface px-2.5 py-1.5 text-xs text-highlighted">
-                  <input v-model="invite.email" type="email" placeholder="Email address" required class="w-full rounded-lg border border-default bg-surface px-2.5 py-1.5 text-xs text-highlighted">
+                  <input v-model="invite.name" type="text" placeholder="Full name" required class="w-full rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs text-highlighted">
+                  <input v-model="invite.email" type="email" placeholder="Email address" required class="w-full rounded-lg border border-default bg-default px-2.5 py-1.5 text-xs text-highlighted">
                   <div class="flex gap-2">
                     <UButton type="submit" size="xs" color="neutral" label="Add" :disabled="!invite.name.trim() || !invite.email.trim()" />
                     <UButton size="xs" color="neutral" variant="ghost" label="Cancel" @click="adding = false" />
@@ -244,7 +244,7 @@
                   :key="pageNum"
                   type="button"
                   class="flex w-full items-center gap-3 rounded-xl border p-2 text-left transition-all"
-                  :class="page === pageNum ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-default bg-surface hover:bg-elevated'"
+                  :class="page === pageNum ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-default bg-default hover:bg-elevated'"
                   @click="page = pageNum"
                 >
                   <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-elevated font-mono text-xs font-semibold text-highlighted">
@@ -309,7 +309,7 @@
             </div>
 
             <!-- Floating Zoom & Page Toolbar -->
-            <div class="absolute bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-default bg-surface/90 px-3 py-1.5 shadow-lg backdrop-blur-md">
+            <div class="absolute bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-default bg-default/90 px-3 py-1.5 shadow-lg backdrop-blur-md">
               <UButton icon="i-lucide-chevron-left" color="neutral" variant="ghost" size="xs" :disabled="page <= 1" @click="page--" />
               <span class="px-2 text-xs font-semibold text-highlighted font-mono">Page {{ page }} of {{ pages }}</span>
               <UButton icon="i-lucide-chevron-right" color="neutral" variant="ghost" size="xs" :disabled="page >= pages" @click="page++" />
@@ -320,7 +320,7 @@
             </div>
 
             <!-- Sticky Bottom Action Bar -->
-            <footer class="flex h-14 shrink-0 items-center justify-between border-t border-default bg-surface px-6 shadow-xs">
+            <footer class="flex h-14 shrink-0 items-center justify-between border-t border-default bg-default px-6 shadow-xs">
               <div class="flex items-center gap-2 text-xs">
                 <UIcon v-if="ready" name="i-lucide-circle-check" class="size-4 text-success" />
                 <span :class="ready ? 'text-highlighted font-medium' : 'text-amber-600 dark:text-amber-400 font-medium'">
@@ -330,7 +330,7 @@
               <div class="flex items-center gap-3">
                 <UButton color="neutral" variant="ghost" size="md" label="Back" @click="viewMode = 'overview'" />
                 <UButton
-                  color="primary"
+                  color="neutral"
                   size="md"
                   label="Request signatures"
                   icon="i-lucide-send"
@@ -359,7 +359,7 @@
           <div class="grid grid-cols-2 gap-3">
             <label
               class="flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors"
-              :class="termsDraft.termType === 'fixed' ? 'border-primary bg-primary/5' : 'border-default bg-surface'"
+              :class="termsDraft.termType === 'fixed' ? 'border-primary bg-primary/5' : 'border-default bg-default'"
             >
               <input v-model="termsDraft.termType" type="radio" value="fixed" class="mt-0.5 accent-primary">
               <div>
@@ -369,7 +369,7 @@
             </label>
             <label
               class="flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors"
-              :class="termsDraft.termType === 'month_to_month' ? 'border-primary bg-primary/5' : 'border-default bg-surface'"
+              :class="termsDraft.termType === 'month_to_month' ? 'border-primary bg-primary/5' : 'border-default bg-default'"
             >
               <input v-model="termsDraft.termType" type="radio" value="month_to_month" class="mt-0.5 accent-primary">
               <div>
@@ -383,11 +383,11 @@
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-1">
             <div>
               <label class="mb-1 block text-xs font-medium text-highlighted">Start / move-in date *</label>
-              <input v-model="termsDraft.startDate" type="date" required class="w-full rounded-xl border border-default bg-surface px-3 py-2 text-xs text-highlighted">
+              <input v-model="termsDraft.startDate" type="date" required class="w-full rounded-xl border border-default bg-default px-3 py-2 text-xs text-highlighted">
             </div>
             <div v-if="termsDraft.termType === 'fixed'">
               <label class="mb-1 block text-xs font-medium text-highlighted">End date *</label>
-              <input v-model="termsDraft.endDate" type="date" required class="w-full rounded-xl border border-default bg-surface px-3 py-2 text-xs text-highlighted">
+              <input v-model="termsDraft.endDate" type="date" required class="w-full rounded-xl border border-default bg-default px-3 py-2 text-xs text-highlighted">
             </div>
           </div>
           <button
@@ -411,7 +411,7 @@
               step="any"
               required
               placeholder="e.g. 1500"
-              class="w-full rounded-xl border border-default bg-surface px-3 py-2 text-xs text-highlighted font-mono"
+              class="w-full rounded-xl border border-default bg-default px-3 py-2 text-xs text-highlighted font-mono"
             >
           </div>
           <p class="text-[11px] text-muted">Due on the 1st of each calendar month (#1907 payment ledger).</p>
@@ -428,7 +428,7 @@
               step="any"
               required
               placeholder="e.g. 1500"
-              class="w-full rounded-xl border border-default bg-surface px-3 py-2 text-xs text-highlighted font-mono"
+              class="w-full rounded-xl border border-default bg-default px-3 py-2 text-xs text-highlighted font-mono"
             >
           </div>
           <p class="text-[11px] text-muted">Refundable deposit held in escrow against damages or unpaid charges (#1908).</p>
@@ -439,7 +439,7 @@
             type="submit"
             block
             size="lg"
-            color="primary"
+            color="neutral"
             label="Generate and mark fields"
             icon="i-lucide-arrow-right"
             :loading="generatingPdf"
